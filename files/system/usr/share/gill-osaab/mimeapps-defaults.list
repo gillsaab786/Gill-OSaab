@@ -1,0 +1,14 @@
+[Default Applications]
+application/x-ms-dos-executable=gosaab-open.desktop
+application/x-msdownload=gosaab-open.desktop
+application/x-msdos-program=gosaab-open.desktop
+application/x-msi=gosaab-open.desktop
+application/vnd.microsoft.portable-executable=gosaab-open.desktop
+application/vnd.android.package-archive=gosaab-open.desktop
+application/x-iso9660-appimage=gosaab-open.desktop
+application/vnd.appimage=gosaab-open.desktop
+application/vnd.debian.binary-package=gosaab-open.desktop
+application/x-deb=gosaab-open.desktop
+application/x-rpm=gosaab-open.desktop
+application/vnd.flatpak.ref=gosaab-open.desktop
+application/vnd.flatpak=gosaab-open.desktop

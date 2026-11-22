@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=https://schema.blue-build.org/recipe-v1.json
+# Gill-OSaab for handhelds (ROG Ally, GPD Win Max 2, Steam Deck).
+# Boots into Steam Game Mode; KDE desktop one tap away.
+# Published to ghcr.io/<owner>/gill-osaab
+name: gill-osaab
+description: Gill-OSaab handheld edition, built on Bazzite Deck.
+
+base-image: ghcr.io/ublue-os/bazzite-deck
+image-version: stable
+
+modules:
+  - from-file: common.yml

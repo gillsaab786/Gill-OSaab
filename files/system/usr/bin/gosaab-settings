@@ -1,0 +1,451 @@
+#!/usr/bin/env python3
+"""Gill-OSaab Settings: one place for the Gill-OSaab switches."""
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, "/usr/libexec/gill-osaab")
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "../libexec/gill-osaab"))
+from gosaab_common import ETC, is_on, read_conf  # noqa: E402
+
+from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QRectF, QSize, Qt, Property, Signal
+from PySide6.QtGui import QColor, QIcon, QPainter
+from PySide6.QtWidgets import (QAbstractButton, QApplication, QButtonGroup, QFrame, QHBoxLayout, QLabel,
+                               QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QPushButton,
+                               QScrollArea, QSpinBox, QStackedWidget, QVBoxLayout, QWidget)
+
+ACCENT = QColor(31, 182, 201)
+VERSION_FILE = Path("/usr/share/gill-osaab/version")
+
+
+# ------------------------------------------------------------------ backend
+class Backend:
+    """Everything that touches the system lives here (tests swap in a fake)."""
+
+    def __init__(self):
+        self.etc = ETC
+
+    def features(self):
+        return read_conf(self.etc / "features.conf")
+
+    def updates(self):
+        return read_conf(self.etc / "updates.conf")
+
+    def set_value(self, filename, key, value):
+        cmd = ["gosaab-config", "set", filename, key, value]
+        if os.geteuid() != 0 and shutil.which("pkexec"):
+            cmd = ["pkexec", "/usr/bin/gosaab-config", "set", filename, key, value]
+        return subprocess.run(cmd, check=False).returncode == 0
+
+    def run(self, cmd, wait=True):
+        if wait:
+            return subprocess.run(cmd, check=False).returncode == 0
+        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True
+
+    def have(self, tool):
+        return shutil.which(tool) is not None
+
+    def service_active(self, unit):
+        if not shutil.which("systemctl"):
+            return False
+        return subprocess.run(["systemctl", "is-active", "--quiet", unit], check=False).returncode == 0
+
+    def module_loaded(self, name):
+        try:
+            return any(line.split()[0] == name for line in Path("/proc/modules").read_text().splitlines())
+        except OSError:
+            return False
+
+    def kde_night_light(self):
+        out = subprocess.run(["kreadconfig6", "--file", "kwinrc", "--group", "NightColor", "--key", "Active"],
+                             capture_output=True, text=True, check=False) if self.have("kreadconfig6") else None
+        return bool(out and out.stdout.strip() == "true")
+
+    def color_scheme(self):
+        if not self.have("kreadconfig6"):
+            return "GillOSaabDark"
+        out = subprocess.run(["kreadconfig6", "--group", "General", "--key", "ColorScheme"],
+                             capture_output=True, text=True, check=False)
+        return out.stdout.strip() or "GillOSaabDark"
+
+
+# ------------------------------------------------------------------ widgets
+class Switch(QAbstractButton):
+    """iOS-style toggle switch with a sliding knob."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setCheckable(True)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFixedSize(52, 30)
+        self._pos = 0.0
+        self._anim = QPropertyAnimation(self, b"knob", self)
+        self._anim.setDuration(160)
+        self._anim.setEasingCurve(QEasingCurve.OutCubic)
+        self.toggled.connect(self._animate)
+
+    def _animate(self, checked):
+        self._anim.stop()
+        self._anim.setStartValue(self._pos)
+        self._anim.setEndValue(1.0 if checked else 0.0)
+        self._anim.start()
+
+    def set_quiet(self, checked):
+        self.blockSignals(True)
+        self.setChecked(checked)
+        self._pos = 1.0 if checked else 0.0
+        self.blockSignals(False)
+        self.update()
+
+    def get_knob(self):
+        return self._pos
+
+    def set_knob(self, value):
+        self._pos = value
+        self.update()
+
+    knob = Property(float, get_knob, set_knob)
+
+    def sizeHint(self):
+        return QSize(52, 30)
+
+    def paintEvent(self, _):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        off = QColor(72, 72, 78)
+        track = QColor(
+            int(off.red() + (ACCENT.red() - off.red()) * self._pos),
+            int(off.green() + (ACCENT.green() - off.green()) * self._pos),
+            int(off.blue() + (ACCENT.blue() - off.blue()) * self._pos),
+        )
+        if not self.isEnabled():
+            track.setAlpha(90)
+        p.setPen(Qt.NoPen)
+        p.setBrush(track)
+        p.drawRoundedRect(QRectF(0, 0, 52, 30), 15, 15)
+        p.setBrush(QColor(255, 255, 255, 255 if self.isEnabled() else 150))
+        x = 3 + self._pos * 22
+        p.drawEllipse(QRectF(x, 3, 24, 24))
+
+
+class Row(QWidget):
+    """A settings row: title, optional subtitle, control on the right."""
+
+    def __init__(self, title, subtitle="", control=None):
+        super().__init__()
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(16, 10, 16, 10)
+        text = QVBoxLayout()
+        text.setSpacing(2)
+        t = QLabel(title)
+        t.setObjectName("rowTitle")
+        text.addWidget(t)
+        if subtitle:
+            s = QLabel(subtitle)
+            s.setObjectName("rowSubtitle")
+            s.setWordWrap(True)
+            text.addWidget(s)
+        lay.addLayout(text, 1)
+        if control is not None:
+            lay.addWidget(control, 0, Qt.AlignVCenter)
+
+
+class Card(QFrame):
+    """Rounded group of rows, like an iOS settings section."""
+
+    def __init__(self, rows):
+        super().__init__()
+        self.setObjectName("card")
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 4, 0, 4)
+        lay.setSpacing(0)
+        for i, row in enumerate(rows):
+            if i:
+                line = QFrame()
+                line.setObjectName("divider")
+                line.setFixedHeight(1)
+                lay.addWidget(line)
+            lay.addWidget(row)
+
+
+class Page(QScrollArea):
+    def __init__(self, title):
+        super().__init__()
+        self.setWidgetResizable(True)
+        self.setFrameShape(QFrame.NoFrame)
+        body = QWidget()
+        body.setObjectName("page")
+        self.lay = QVBoxLayout(body)
+        self.lay.setContentsMargins(28, 24, 28, 24)
+        self.lay.setSpacing(10)
+        h = QLabel(title)
+        h.setObjectName("pageTitle")
+        self.lay.addWidget(h)
+        self.setWidget(body)
+
+    def section(self, label, rows, note=""):
+        if label:
+            lab = QLabel(label.upper())
+            lab.setObjectName("sectionLabel")
+            self.lay.addSpacing(8)
+            self.lay.addWidget(lab)
+        self.lay.addWidget(Card(rows))
+        if note:
+            n = QLabel(note)
+            n.setObjectName("note")
+            n.setWordWrap(True)
+            self.lay.addWidget(n)
+
+    def finish(self):
+        self.lay.addStretch(1)
+
+
+# ------------------------------------------------------------------ window
+class Settings(QMainWindow):
+    changed = Signal(str, str, str)
+
+    def __init__(self, backend=None):
+        super().__init__()
+        self.backend = backend or Backend()
+        self.setWindowTitle("Gill-OSaab Settings")
+        self.setWindowIcon(QIcon.fromTheme("gill-osaab"))
+        self.resize(940, 640)
+        self.switches = {}
+
+        root = QWidget()
+        layout = QHBoxLayout(root)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        self.nav = QListWidget()
+        self.nav.setObjectName("nav")
+        self.nav.setFixedWidth(230)
+        self.stack = QStackedWidget()
+        layout.addWidget(self.nav)
+        layout.addWidget(self.stack, 1)
+        self.setCentralWidget(root)
+
+        for name, icon, builder in [
+            ("Updates", "system-software-update", self.page_updates),
+            ("Apps & Security", "security-high", self.page_security),
+            ("Screen Off", "video-display", self.page_screen),
+            ("Appearance", "preferences-desktop-theme", self.page_appearance),
+            ("Optional Features", "preferences-other", self.page_optional),
+            ("About", "help-about", self.page_about),
+        ]:
+            item = QListWidgetItem(QIcon.fromTheme(icon), name)
+            item.setSizeHint(QSize(200, 40))
+            self.nav.addItem(item)
+            self.stack.addWidget(builder())
+        self.nav.currentRowChanged.connect(self.stack.setCurrentIndex)
+        self.nav.setCurrentRow(0)
+        self.refresh()
+
+    # -------------------------------------------------------- helpers
+    def switch(self, filename, key, default=True, enabled=True):
+        sw = Switch()
+        sw.setEnabled(enabled)
+        sw.toggled.connect(lambda on, f=filename, k=key, s=sw: self.on_toggle(f, k, on, s))
+        self.switches[(filename, key)] = (sw, default)
+        return sw
+
+    def on_toggle(self, filename, key, on, sw):
+        value = "on" if on else "off"
+        if self.backend.set_value(filename, key, value):
+            self.changed.emit(filename, key, value)
+            if filename == "updates.conf":
+                self.update_master_state()
+        else:
+            sw.set_quiet(not on)
+            QMessageBox.warning(self, "Not changed", "The setting couldn't be saved (permission was not given).")
+
+    def refresh(self):
+        confs = {"features.conf": self.backend.features(), "updates.conf": self.backend.updates()}
+        for (filename, key), (sw, default) in self.switches.items():
+            if sw.isEnabled():
+                sw.set_quiet(is_on(confs[filename], key, default))
+        self.update_master_state()
+
+    def update_master_state(self):
+        master = self.switches.get(("updates.conf", "all"))
+        if not master:
+            return
+        on = master[0].isChecked()
+        for key in ("os", "apps", "containers"):
+            self.switches[("updates.conf", key)][0].setEnabled(on)
+
+    # -------------------------------------------------------- pages
+    def page_updates(self):
+        p = Page("Updates")
+        p.section("", [Row("All updates", "Master switch. Off stops every update below.",
+                           self.switch("updates.conf", "all"))])
+        p.section("What updates", [
+            Row("OS updates", "Gill-OSaab system image", self.switch("updates.conf", "os")),
+            Row("Apps and emulators", "Flatpak apps", self.switch("updates.conf", "apps")),
+            Row("Linux containers", "Apps installed from .deb and .rpm", self.switch("updates.conf", "containers")),
+        ], note="Steam updates itself and isn't controlled here.")
+        now = QPushButton("Check for updates now")
+        now.setObjectName("primary")
+        now.clicked.connect(lambda: self.backend.run(["pkexec", "/usr/bin/gosaab-updates", "now"], wait=False))
+        p.lay.addWidget(now, 0, Qt.AlignLeft)
+        p.finish()
+        return p
+
+    def page_security(self):
+        p = Page("Apps & Security")
+        p.section("Windows apps", [
+            Row("Sandbox Windows apps",
+                "Each app gets its own private folder and can't see your files. Turn off only for apps "
+                "that must open your documents.", self.switch("features.conf", "sandbox_windows_apps")),
+        ])
+        p.finish()
+        return p
+
+    def page_screen(self):
+        p = Page("Screen Off")
+        self.idle = QSpinBox()
+        self.idle.setRange(5, 600)
+        self.idle.setSuffix(" s")
+        self.idle.setValue(int(self.backend.features().get("screen_off_idle_seconds", "15") or 15))
+        self.idle.editingFinished.connect(
+            lambda: self.backend.set_value("features.conf", "screen_off_idle_seconds", str(self.idle.value())))
+        p.section("", [
+            Row("Overnight / Work", "When the task finishes, show “Done” for 10 seconds, then sleep.",
+                self.switch("features.conf", "screen_off_overnight", default=False)),
+            Row("Wake after idle", "Seconds with no download or copy before the screen turns back on.", self.idle),
+        ])
+        btn = QPushButton("Turn screen off now")
+        btn.setObjectName("primary")
+        btn.clicked.connect(lambda: self.backend.run(["gosaab-screen-off"], wait=False))
+        p.lay.addWidget(btn, 0, Qt.AlignLeft)
+        p.finish()
+        return p
+
+    def page_appearance(self):
+        p = Page("Appearance")
+        mode = QWidget()
+        ml = QHBoxLayout(mode)
+        ml.setContentsMargins(0, 0, 0, 0)
+        ml.setSpacing(0)
+        self.mode_group = QButtonGroup(self)
+        for i, (label, scheme) in enumerate([("Dark", "GillOSaabDark"), ("Light", "GillOSaabLight")]):
+            b = QPushButton(label)
+            b.setCheckable(True)
+            b.setObjectName("segLeft" if i == 0 else "segRight")
+            b.setChecked(self.backend.color_scheme() == scheme)
+            b.clicked.connect(lambda _=False, s=scheme: self.apply_scheme(s))
+            self.mode_group.addButton(b)
+            ml.addWidget(b)
+        self.night = Switch()
+        self.night.set_quiet(self.backend.kde_night_light())
+        self.night.toggled.connect(self.apply_night_light)
+        auto = Switch()
+        auto.setEnabled(False)
+        p.section("", [
+            Row("Mode", "Dark is the default.", mode),
+            Row("Night light", "Warmer screen in the evening.", self.night),
+            Row("Auto dark mode at sunset", "Coming in a later update.", auto),
+        ])
+        reset = QPushButton("Apply Gill-OSaab look (top bar + dock)")
+        reset.clicked.connect(self.apply_look)
+        p.lay.addWidget(reset, 0, Qt.AlignLeft)
+        p.finish()
+        return p
+
+    def page_optional(self):
+        p = Page("Optional Features")
+        rows = []
+        for key, title in [("phone_link", "Phone link"), ("shared_game_library", "Shared game library"),
+                           ("vpn", "VPN"), ("cloud_drives", "Cloud drives"), ("vrr", "VRR (FreeSync)"),
+                           ("suspend_then_hibernate", "Suspend, then hibernate"), ("undervolt", "Undervolting"),
+                           ("smart_updates", "Smart updates"),
+                           ("pause_downloads_while_gaming", "Pause downloads while gaming")]:
+            rows.append(Row(title, "Coming in a later update. Off by default.",
+                            self.switch("features.conf", key, default=False, enabled=False)))
+        p.section("Off by default", rows)
+        p.finish()
+        return p
+
+    def page_about(self):
+        p = Page("About")
+        version = VERSION_FILE.read_text().strip() if VERSION_FILE.exists() else "dev"
+        p.section("", [Row("Gill-OSaab", f"Version {version}  ·  Developer: GILL-Saab")])
+        b = self.backend
+        checks = [
+            ("Windows apps (Wine)", b.have("wine")), ("App sandbox (bubblewrap)", b.have("bwrap")),
+            ("Android apps (Waydroid)", b.have("waydroid")), ("Linux packages (distrobox)", b.have("distrobox")),
+            ("Gaming CPU scheduler", b.service_active("scx_loader.service")),
+            ("NTSYNC", b.module_loaded("ntsync")),
+            ("Gill-OSaab updater", b.service_active("gosaab-update.timer")),
+        ]
+        rows = []
+        for name, ok in checks:
+            dot = QLabel("●  Ready" if ok else "●  Not found")
+            dot.setObjectName("ok" if ok else "bad")
+            rows.append(Row(name, "", dot))
+        p.section("Status", rows)
+        p.finish()
+        return p
+
+    # -------------------------------------------------------- actions
+    def apply_scheme(self, scheme):
+        icons = "Papirus-Dark" if scheme.endswith("Dark") else "Papirus-Light"
+        self.backend.run(["plasma-apply-colorscheme", scheme])
+        self.backend.run(["/usr/libexec/plasma-changeicons", icons])
+
+    def apply_night_light(self, on):
+        self.backend.run(["kwriteconfig6", "--file", "kwinrc", "--group", "NightColor", "--key", "Active",
+                          "true" if on else "false"])
+        self.backend.run(["dbus-send", "--session", "--dest=org.kde.KWin", "/KWin", "org.kde.KWin.reconfigure"])
+
+    def apply_look(self):
+        answer = QMessageBox.question(self, "Apply Gill-OSaab look",
+                                      "This resets your panels to the Gill-OSaab top bar and dock. Continue?")
+        if answer == QMessageBox.Yes:
+            self.backend.run(["plasma-apply-lookandfeel", "--apply", "org.gillosaab.desktop", "--resetLayout"])
+
+
+STYLE = """
+QMainWindow, #page { background: #1c1c1f; }
+QWidget { color: #ececf1; font-family: Inter, 'Noto Sans', sans-serif; font-size: 10.5pt; }
+#nav { background: #161618; border: none; padding: 14px 10px; outline: 0; }
+#nav::item { border-radius: 9px; padding: 6px 10px; margin: 2px 0; color: #d6d6dc; }
+#nav::item:selected { background: #1fb6c9; color: #ffffff; }
+#nav::item:hover:!selected { background: #26262a; }
+#pageTitle { font-size: 21pt; font-weight: 700; margin-bottom: 4px; }
+#sectionLabel { color: #8e8e98; font-size: 8.5pt; font-weight: 600; letter-spacing: 1px; margin-left: 4px; }
+#card { background: #26262a; border-radius: 12px; }
+#divider { background: #34343a; margin-left: 16px; }
+#rowTitle { font-weight: 500; }
+#rowSubtitle, #note { color: #9a9aa4; font-size: 9pt; }
+#note { margin-left: 4px; }
+#ok { color: #34d378; } #bad { color: #ff635c; }
+QPushButton { background: #2f2f34; border: none; border-radius: 9px; padding: 8px 16px; }
+QPushButton:hover { background: #3a3a40; }
+QPushButton#primary { background: #1fb6c9; color: #ffffff; font-weight: 600; }
+QPushButton#primary:hover { background: #27c7db; }
+QPushButton#segLeft, QPushButton#segRight { background: #34343a; padding: 6px 18px; border-radius: 0; }
+QPushButton#segLeft { border-top-left-radius: 8px; border-bottom-left-radius: 8px; }
+QPushButton#segRight { border-top-right-radius: 8px; border-bottom-right-radius: 8px; }
+QPushButton#segLeft:checked, QPushButton#segRight:checked { background: #1fb6c9; color: #ffffff; }
+QSpinBox { background: #34343a; border: none; border-radius: 8px; padding: 4px 8px; min-width: 70px; }
+QScrollArea { background: transparent; }
+QScrollBar:vertical { width: 8px; background: transparent; }
+QScrollBar::handle:vertical { background: #44444a; border-radius: 4px; }
+"""
+
+
+def main():
+    app = QApplication(sys.argv)
+    app.setApplicationName("Gill-OSaab Settings")
+    app.setDesktopFileName("gosaab-settings")
+    app.setStyleSheet(STYLE)
+    w = Settings()
+    w.show()
+    return app.exec()
+
+
+if __name__ == "__main__":
+    sys.exit(main())

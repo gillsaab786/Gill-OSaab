@@ -1,0 +1,373 @@
+#!/usr/bin/env python3
+"""Gill-OSaab universal app opener.
+
+Double-click (or run `gosaab-open FILE`) on any of these and it installs/runs:
+  .exe .msi            Windows  -> Wine, one sandboxed prefix per app
+  .apk                 Android  -> Waydroid
+  .AppImage            Linux    -> ~/Applications + menu entry
+  .deb                 Linux    -> Ubuntu container (distrobox), exported to menu
+  .rpm                 Linux    -> Fedora container (distrobox), exported to menu
+  .flatpakref .flatpak Linux    -> Flatpak (user)
+
+  --dry-run   print what would happen, change nothing
+"""
+import os
+import re
+import shutil
+import stat
+import subprocess
+import sys
+import zipfile
+from pathlib import Path
+
+sys.path.insert(0, "/usr/libexec/gill-osaab")
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "../libexec/gill-osaab"))
+from gosaab_common import ETC, is_on, log, notify, read_conf  # noqa: E402
+
+DATA = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share"))
+PREFIXES = DATA / "gill-osaab" / "wine"
+APPDIR = Path.home() / "Applications"
+UBUNTU_BOX = ("gosaab-ubuntu", "docker.io/library/ubuntu:24.04")
+FEDORA_BOX = ("gosaab-fedora", "registry.fedoraproject.org/fedora-toolbox:latest")
+
+
+# ---------------------------------------------------------------- detection
+def detect(path):
+    """Return the app kind for a file, by content first, then by extension."""
+    path = Path(path)
+    try:
+        with open(path, "rb") as fh:
+            head = fh.read(4096)
+    except OSError:
+        head = b""
+    ext = path.suffix.lower()
+
+    if head[:8] == b"!<arch>\n" and b"debian-binary" in head[:200]:
+        return "deb"
+    if head[:4] == b"\xed\xab\xee\xdb":
+        return "rpm"
+    if head[:4] == b"\x7fELF":
+        if head[8:11] in (b"AI\x01", b"AI\x02"):
+            return "appimage"
+        return "appimage" if ext == ".appimage" else "elf"
+    if head[:2] == b"MZ":
+        return "exe"
+    if head[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" and ext == ".msi":
+        return "msi"
+    if head[:2] == b"PK":
+        try:
+            with zipfile.ZipFile(path) as zf:
+                names = set(zf.namelist())
+            if "AndroidManifest.xml" in names:
+                return "apk"
+        except (zipfile.BadZipFile, OSError):
+            pass
+    by_ext = {
+        ".exe": "exe", ".msi": "msi", ".apk": "apk", ".appimage": "appimage",
+        ".deb": "deb", ".rpm": "rpm", ".flatpakref": "flatpakref", ".flatpak": "flatpak",
+    }
+    return by_ext.get(ext, "unknown")
+
+
+def slug(name):
+    """Safe folder name for an app, e.g. 'Setup Foo 1.2.exe' -> 'setup-foo-1-2'."""
+    base = re.sub(r"\.(exe|msi)$", "", name, flags=re.I)
+    base = re.sub(r"[^a-z0-9]+", "-", base.lower()).strip("-")
+    return base or "app"
+
+
+# ---------------------------------------------------------------- planning
+def plan(path, kind, conf, which=shutil.which):
+    """Return a list of steps. Each step is ('run', cmd, env) or ('call', name, args)."""
+    path = str(Path(path).resolve())
+    name = Path(path).name
+    steps = []
+
+    if kind in ("exe", "msi"):
+        prefix = str(PREFIXES / slug(name))
+        env = {"WINEPREFIX": prefix, "WINEDEBUG": "-all"}
+        sandbox = is_on(conf, "sandbox_windows_apps", default=True)
+        steps.append(("call", "prepare_prefix", [prefix, sandbox]))
+        target = path
+        if sandbox:
+            # the sandbox can't see your home folder, so the file is copied in first
+            target = str(Path(prefix) / "drive_c" / "gosaab-files" / name)
+            steps.append(("call", "stage_file", [path, target]))
+        args = ["msiexec", "/i", target] if kind == "msi" else [target]
+        steps.append(("run", wine_command(prefix, args, sandbox, which), env))
+        steps.append(("call", "fix_menu_entries", [prefix, sandbox]))
+    elif kind == "apk":
+        steps.append(("call", "require_waydroid", []))
+        steps.append(("run", ["waydroid", "app", "install", path], {}))
+    elif kind == "appimage":
+        target = str(APPDIR / name)
+        steps.append(("call", "install_appimage", [path, target]))
+        steps.append(("run", [target], {}))
+    elif kind in ("deb", "rpm"):
+        box, image = UBUNTU_BOX if kind == "deb" else FEDORA_BOX
+        steps.append(("call", "ensure_box", [box, image]))
+        if kind == "deb":
+            install = ["sudo", "apt-get", "install", "-y", path]
+        else:
+            install = ["sudo", "dnf", "install", "-y", path]
+        steps.append(("run", ["distrobox", "enter", box, "--"] + install, {}))
+        steps.append(("call", "export_apps", [box, path, kind]))
+    elif kind == "flatpakref":
+        steps.append(("run", ["flatpak", "install", "--user", "-y", "--from", path], {}))
+    elif kind == "flatpak":
+        steps.append(("run", ["flatpak", "install", "--user", "-y", "--bundle", path], {}))
+    elif kind == "elf":
+        steps.append(("call", "make_executable", [path]))
+        steps.append(("run", [path], {}))
+    return steps
+
+
+# ---------------------------------------------------------------- Windows sandbox
+MENU_DIR = DATA / "applications" / "wine"
+ICON_DIR = DATA / "icons"
+
+
+def home_root(home=None):
+    """The mount that holds home folders (/var/home on Fedora Atomic, else /home)."""
+    home = os.path.realpath(home or Path.home())
+    return "/var/home" if home.startswith("/var/home/") else "/home"
+
+
+def wine_command(prefix, args, sandbox, which=shutil.which):
+    """Wine command line; in sandbox mode wrapped in bubblewrap so the app only
+    sees its own prefix (plus the menu/icon folders Wine writes shortcuts to)."""
+    base = ["wine"] + list(args)
+    if not sandbox or not which("bwrap"):
+        return base
+    home = str(Path.home())
+    return [
+        "bwrap", "--die-with-parent",
+        "--ro-bind", "/", "/",
+        "--dev-bind", "/dev", "/dev",
+        "--proc", "/proc",
+        "--tmpfs", "/tmp",
+        "--ro-bind-try", "/tmp/.X11-unix", "/tmp/.X11-unix",
+        "--tmpfs", home_root(home),
+        "--dir", home,
+        "--bind", prefix, prefix,
+        "--bind", str(MENU_DIR), str(MENU_DIR),
+        "--bind", str(ICON_DIR), str(ICON_DIR),
+        "--setenv", "WINEPREFIX", prefix,
+        "--",
+    ] + base
+
+
+EXEC_RE = re.compile(r'^Exec=env WINEPREFIX="([^"]+)" wine(?:64)? (.*)$', re.M)
+
+
+def rewrite_exec(text):
+    """Point a Wine menu entry at gosaab-open so later launches stay sandboxed."""
+    return EXEC_RE.sub(lambda m: f'Exec=gosaab-open --wine-run "{m.group(1)}" {m.group(2)}', text)
+
+
+def fix_menu_entries(prefix, sandbox):
+    if not sandbox or not MENU_DIR.is_dir():
+        return
+    for desktop in MENU_DIR.rglob("*.desktop"):
+        text = desktop.read_text(errors="replace")
+        if f'WINEPREFIX="{prefix}"' in text:
+            new = rewrite_exec(text)
+            if new != text:
+                desktop.write_text(new)
+
+
+def stage_file(src, target):
+    target = Path(target)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if Path(src).resolve() != target.resolve():
+        shutil.copy2(src, target)
+
+
+def wine_run(prefix, args):
+    """Launch an already-installed Windows app inside its sandbox."""
+    conf = read_conf(ETC / "features.conf")
+    sandbox = is_on(conf, "sandbox_windows_apps", default=True)
+    env = {**os.environ, "WINEPREFIX": prefix, "WINEDEBUG": "-all"}
+    return subprocess.run(wine_command(prefix, args, sandbox), env=env, check=False).returncode
+
+
+# ---------------------------------------------------------------- actions
+def prepare_prefix(prefix, sandbox):
+    """Create the Wine prefix; in sandbox mode, cut it off from the home folder."""
+    prefix = Path(prefix)
+    if not (prefix / "system.reg").exists():
+        notify("Setting up Windows app support", "First launch of this app takes about a minute.")
+        prefix.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["wineboot", "-u"], env={**os.environ, "WINEPREFIX": str(prefix), "WINEDEBUG": "-all"},
+                       check=False)
+    if sandbox:
+        sandbox_prefix(prefix)
+        MENU_DIR.mkdir(parents=True, exist_ok=True)
+        ICON_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def sandbox_prefix(prefix):
+    """Remove the Z: drive (whole filesystem) and turn the user's shell folders
+    (Desktop, Documents, ...) from links into your home into private folders."""
+    prefix = Path(prefix)
+    zdrive = prefix / "dosdevices" / "z:"
+    if zdrive.is_symlink() or zdrive.exists():
+        zdrive.unlink()
+    users = prefix / "drive_c" / "users"
+    if users.is_dir():
+        for user_dir in users.iterdir():
+            if not user_dir.is_dir() or user_dir.is_symlink():
+                continue
+            for item in user_dir.iterdir():
+                if item.is_symlink():
+                    item.unlink()
+                    item.mkdir(exist_ok=True)
+
+
+def require_waydroid():
+    if not shutil.which("waydroid"):
+        raise SetupNeeded("Android apps need Waydroid, which isn't installed.")
+    status = subprocess.run(["waydroid", "status"], capture_output=True, text=True, check=False)
+    output = (status.stdout + status.stderr).lower()
+    if "not initialized" in output:
+        raise SetupNeeded("Set up Android once: open a terminal and run  ujust setup-waydroid")
+    if "running" not in output:
+        subprocess.Popen(["waydroid", "session", "start"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(["sleep", "8"], check=False)
+
+
+def install_appimage(src, target):
+    target = Path(target)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if Path(src).resolve() != target.resolve():
+        shutil.copy2(src, target)
+    make_executable(target)
+    desktop = DATA / "applications" / f"gosaab-{slug(target.stem)}.desktop"
+    desktop.parent.mkdir(parents=True, exist_ok=True)
+    desktop.write_text(
+        "[Desktop Entry]\nType=Application\n"
+        f"Name={target.stem}\nExec=\"{target}\" %U\nIcon=application-x-executable\n"
+        "Categories=Utility;\nComment=Installed by Gill-OSaab\n"
+    )
+
+
+def make_executable(path):
+    mode = os.stat(path).st_mode
+    os.chmod(path, mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+
+def ensure_box(box, image):
+    if not shutil.which("distrobox"):
+        raise SetupNeeded("Linux packages need distrobox, which isn't installed.")
+    listed = subprocess.run(["distrobox", "list", "--no-color"], capture_output=True, text=True, check=False)
+    if not re.search(rf"\|\s*{re.escape(box)}\s*\|", listed.stdout):
+        notify("Setting up Linux container", f"First .{box.split('-')[-1]} install takes a few minutes.")
+        subprocess.run(["distrobox", "create", "--yes", "--name", box, "--image", image], check=True)
+
+
+def export_apps(box, path, kind):
+    """Export the package's menu entries from the container to the host menu."""
+    if kind == "deb":
+        pkg = subprocess.run(["distrobox", "enter", box, "--", "dpkg-deb", "-f", path, "Package"],
+                             capture_output=True, text=True, check=False).stdout.strip()
+        files_cmd = ["dpkg", "-L", pkg]
+    else:
+        pkg = subprocess.run(["distrobox", "enter", box, "--", "rpm", "-qp", "--qf", "%{NAME}", path],
+                             capture_output=True, text=True, check=False).stdout.strip()
+        files_cmd = ["rpm", "-ql", pkg]
+    if not pkg:
+        return
+    files = subprocess.run(["distrobox", "enter", box, "--"] + files_cmd,
+                           capture_output=True, text=True, check=False).stdout.splitlines()
+    for entry in desktop_entries(files):
+        subprocess.run(["distrobox", "enter", box, "--", "distrobox-export", "--app", entry], check=False)
+
+
+def desktop_entries(file_list):
+    """Menu entries (.desktop names) from a package's file list."""
+    names = []
+    for line in file_list:
+        line = line.strip()
+        if line.startswith("/usr/share/applications/") and line.endswith(".desktop"):
+            names.append(Path(line).stem)
+    return names
+
+
+ACTIONS = {
+    "prepare_prefix": prepare_prefix, "stage_file": stage_file, "fix_menu_entries": fix_menu_entries,
+    "require_waydroid": require_waydroid,
+    "install_appimage": install_appimage, "make_executable": make_executable,
+    "ensure_box": ensure_box, "export_apps": export_apps,
+}
+
+
+class SetupNeeded(Exception):
+    pass
+
+
+def execute(steps):
+    for step in steps:
+        if step[0] == "call":
+            ACTIONS[step[1]](*step[2])
+        else:
+            _, cmd, env = step
+            log("open", "run: " + " ".join(cmd))
+            result = subprocess.run(cmd, env={**os.environ, **env}, check=False)
+            if result.returncode != 0:
+                raise RuntimeError(f"{Path(cmd[0]).name} exited with code {result.returncode}")
+
+
+def describe(steps):
+    out = []
+    for step in steps:
+        if step[0] == "call":
+            out.append(f"{step[1]}({', '.join(map(str, step[2]))})")
+        else:
+            env = " ".join(f"{k}={v}" for k, v in step[2].items())
+            out.append((env + " " if env else "") + " ".join(step[1]))
+    return out
+
+
+def main(argv):
+    if argv[:1] == ["--wine-run"] and len(argv) >= 3:
+        return wine_run(argv[1], argv[2:])
+    dry = "--dry-run" in argv
+    files = [a for a in argv if a != "--dry-run"]
+    if not files or files[0] in ("-h", "--help"):
+        print(__doc__.strip())
+        return 0 if files else 2
+    conf = read_conf(ETC / "features.conf")
+    status = 0
+    for f in files:
+        if not Path(f).is_file():
+            notify("Can't open file", f"{f} was not found.", "critical")
+            status = 1
+            continue
+        kind = detect(f)
+        if kind == "unknown":
+            notify("Unknown app type", f"Gill-OSaab doesn't know how to open {Path(f).name}.", "critical")
+            status = 1
+            continue
+        steps = plan(f, kind, conf)
+        if dry:
+            print(f"{Path(f).name}: {kind}")
+            for line in describe(steps):
+                print("  " + line)
+            continue
+        log("open", f"{f}: {kind}")
+        try:
+            execute(steps)
+            if kind not in ("exe", "msi", "appimage", "elf"):
+                notify("Installed", f"{Path(f).name} is ready in your app menu.")
+        except SetupNeeded as exc:
+            notify("One-time setup needed", str(exc), "critical")
+            status = 1
+        except (RuntimeError, subprocess.CalledProcessError, OSError) as exc:
+            log("open", f"error: {exc}")
+            notify("Couldn't open app", f"{Path(f).name}: {exc}", "critical")
+            status = 1
+    return status
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

@@ -1,0 +1,10 @@
+[Unit]
+Description=Gill-OSaab updates (respects /etc/gill-osaab/updates.conf)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/gill-osaab/gosaab-update-run
+Nice=10
+IOSchedulingClass=idle

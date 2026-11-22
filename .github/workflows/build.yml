@@ -1,0 +1,50 @@
+name: build-gill-osaab
+on:
+  schedule:
+    - cron: "00 07 * * *" # daily, after Bazzite's own builds
+  push:
+    paths-ignore:
+      - "**.md"
+      - "tests/**"
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m unittest discover -s tests -v
+
+  bluebuild:
+    name: Build image
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        recipe:
+          - recipe-handheld.yml
+          - recipe-desktop.yml
+    steps:
+      - name: Build custom image
+        uses: blue-build/github-action@v1.14
+        with:
+          recipe: ${{ matrix.recipe }}
+          # no key: BlueBuild signs keyless through GitHub's OIDC identity
+          cosign_private_key: ${{ secrets.SIGNING_SECRET }}
+          registry_token: ${{ github.token }}
+          pr_event_number: ${{ github.event.number }}
+          maximize_build_space: true

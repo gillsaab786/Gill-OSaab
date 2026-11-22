@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+# Runs once at image build time.
+set -euo pipefail
+
+log() { echo "[gill-osaab] $*"; }
+
+# Executables
+chmod 0755 /usr/bin/gosaab-* /usr/libexec/gill-osaab/* 2>/dev/null || true
+
+# --- Updates: Gill-OSaab's own updater replaces the stock ones so the
+# on/off switches in /etc/gill-osaab/updates.conf are the single source of truth.
+for unit in uupd.timer rpm-ostreed-automatic.timer flatpak-system-update.timer; do
+    if systemctl list-unit-files "$unit" >/dev/null 2>&1; then
+        systemctl disable "$unit" >/dev/null 2>&1 || true
+        systemctl mask "$unit" >/dev/null 2>&1 || true
+        log "disabled stock updater $unit"
+    fi
+done
+systemctl --global disable flatpak-user-update.timer >/dev/null 2>&1 || true
+systemctl enable gosaab-update.timer
+
+# --- Performance: gaming CPU scheduler (scx_lavd) when the loader exists
+if systemctl list-unit-files scx_loader.service >/dev/null 2>&1; then
+    systemctl enable scx_loader.service || log "warning: could not enable scx_loader"
+else
+    log "scx_loader not in base image; skipping scheduler setup"
+fi
+
+# --- App launcher: make gosaab-open the default for app files, keeping the
+# base image's other defaults, then refresh caches
+python3 - <<'EOF'
+import configparser, pathlib
+target = pathlib.Path("/etc/xdg/mimeapps.list")
+ours = configparser.ConfigParser(interpolation=None, strict=False, delimiters=("=",))
+ours.optionxform = str
+ours.read("/usr/share/gill-osaab/mimeapps-defaults.list")
+cfg = configparser.ConfigParser(interpolation=None, strict=False, allow_no_value=True, delimiters=("=",))
+cfg.optionxform = str
+if target.exists():
+    cfg.read(target)
+if not cfg.has_section("Default Applications"):
+    cfg.add_section("Default Applications")
+for key, value in ours["Default Applications"].items():
+    cfg["Default Applications"][key] = value
+target.parent.mkdir(parents=True, exist_ok=True)
+with open(target, "w") as fh:
+    cfg.write(fh, space_around_delimiters=False)
+EOF
+update-desktop-database /usr/share/applications || true
+
+# --- Look and feel: system-wide KDE defaults (merged, base settings kept)
+python3 - <<'EOF'
+import configparser, pathlib
+
+FONT = "Inter,10,-1,5,400,0,0,0,0,0,0,0,0,0,0,1"
+DEFAULTS = {
+    "/etc/xdg/kdeglobals": {
+        "KDE": {"LookAndFeelPackage": "org.gillosaab.desktop", "widgetStyle": "Breeze"},
+        "General": {"ColorScheme": "GillOSaabDark", "font": FONT, "menuFont": FONT,
+                    "toolBarFont": "Inter,9,-1,5,400,0,0,0,0,0,0,0,0,0,0,1",
+                    "smallestReadableFont": "Inter,8,-1,5,400,0,0,0,0,0,0,0,0,0,0,1"},
+        "WM": {"activeFont": "Inter,10,-1,5,600,0,0,0,0,0,0,0,0,0,0,1"},
+        "Icons": {"Theme": "Papirus-Dark"},
+    },
+    "/etc/xdg/kwinrc": {
+        "Plugins": {"blurEnabled": "true", "contrastEnabled": "true", "magiclampEnabled": "true",
+                    "squashEnabled": "false", "shakecursorEnabled": "true"},
+        "org.kde.kdecoration2": {"library": "org.kde.breeze", "theme": "Breeze",
+                                 "ButtonsOnLeft": "XIA", "ButtonsOnRight": ""},
+        "WindowSwitcher": {"LayoutName": "thumbnail_grid"},
+    },
+    "/etc/xdg/kscreenlockerrc": {
+        "Greeter][Wallpaper][org.kde.image][General": {"Image": "file:///usr/share/wallpapers/GillOSaab/"},
+    },
+}
+
+for path, groups in DEFAULTS.items():
+    cfg = configparser.ConfigParser(interpolation=None, strict=False, delimiters=("=",), allow_no_value=True)
+    cfg.optionxform = str
+    p = pathlib.Path(path)
+    if p.exists():
+        cfg.read(p)
+    for group, keys in groups.items():
+        if not cfg.has_section(group):
+            cfg.add_section(group)
+        for k, v in keys.items():
+            cfg[group][k] = v
+    p.parent.mkdir(parents=True, exist_ok=True)
+    with open(p, "w") as fh:
+        cfg.write(fh, space_around_delimiters=False)
+    print("[gill-osaab] defaults merged into", path)
+EOF
+
+# Login screen wallpaper (SDDM Breeze theme), when present
+if [ -d /usr/share/sddm/themes/breeze ]; then
+    printf '[General]\nbackground=/usr/share/wallpapers/GillOSaab/contents/images_dark/3840x2160.png\n' \
+        > /usr/share/sddm/themes/breeze/theme.conf.user
+fi
+
+gtk-update-icon-cache -f /usr/share/icons/hicolor >/dev/null 2>&1 || true
+
+log "setup complete"
