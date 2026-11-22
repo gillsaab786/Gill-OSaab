@@ -139,7 +139,9 @@ def wine_command(prefix, args, sandbox, which=shutil.which):
     base = ["wine"] + list(args)
     if not sandbox or not which("bwrap"):
         return base
-    home = str(Path.home())
+    real = os.path.realpath  # /home is a link to /var/home on Fedora Atomic
+    home, prefix = real(Path.home()), real(prefix)
+    menu, icons = real(MENU_DIR), real(ICON_DIR)
     return [
         "bwrap", "--die-with-parent",
         "--ro-bind", "/", "/",
@@ -150,8 +152,8 @@ def wine_command(prefix, args, sandbox, which=shutil.which):
         "--tmpfs", home_root(home),
         "--dir", home,
         "--bind", prefix, prefix,
-        "--bind", str(MENU_DIR), str(MENU_DIR),
-        "--bind", str(ICON_DIR), str(ICON_DIR),
+        "--bind", menu, menu,
+        "--bind", icons, icons,
         "--setenv", "WINEPREFIX", prefix,
         "--",
     ] + base
