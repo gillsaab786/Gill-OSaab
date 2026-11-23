@@ -7,7 +7,7 @@ BUILD=${1:-shell/compositor/build}
 OUT=${2:-artifacts}
 WALL=files/system/usr/share/wallpapers/GillOSaab/contents/images_dark/3840x2160.png
 mkdir -p "$OUT"
-export XDG_RUNTIME_DIR=/tmp/gosaab-xdg
+export XDG_RUNTIME_DIR=/tmp/gosaab-xdg LANG=C.UTF-8 LC_ALL=C.UTF-8
 rm -rf "$XDG_RUNTIME_DIR" && mkdir -p -m 700 "$XDG_RUNTIME_DIR"
 export WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 GOSAAB_HEADLESS_SIZE=1920x1080 WLR_RENDERER_ALLOW_SOFTWARE=1
 unset WAYLAND_DISPLAY
@@ -85,11 +85,14 @@ def load(n):
     return Image.open(f"{out}/{n}.png").convert("RGB")
 def diff(a, b):
     return sum(ImageStat.Stat(ImageChops.difference(load(a), load(b))).mean) / 3
+def changed(a, b):  # fraction of pixels that visibly changed
+    d = ImageChops.difference(load(a), load(b)).convert("L").point(lambda v: 255 if v > 24 else 0)
+    return ImageStat.Stat(d).mean[0] / 255
 checks = [
     ("wallpaper is drawn (not a flat colour)", ImageStat.Stat(load("01-wallpaper")).stddev[0] > 5),
     ("a window appears", diff("01-wallpaper", "03-one-window") > 2),
-    ("second window appears", diff("03-one-window", "04-two-windows") > 1),
-    ("closing removes the window", diff("04-two-windows", "06-after-close") > 1),
+    ("second window appears", changed("03-one-window", "04-two-windows") > 0.005),
+    ("closing removes the window", changed("04-two-windows", "06-after-close") > 0.005),
     ("after close matches one window", diff("03-one-window", "06-after-close") < 1.5),
 ]
 bad = 0

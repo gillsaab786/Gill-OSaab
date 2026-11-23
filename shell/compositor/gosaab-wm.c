@@ -456,14 +456,17 @@ static void apply_toplevel_visual(struct gs_toplevel *t, float scale, float alph
 	}
 	int sigma = (int)SHADOW_SIGMA;
 	int radius = flat ? 0 : CORNER_RADIUS;
+	int sradius = (int)lroundf(radius * scale);
 	wlr_scene_blur_set_size(t->blur, sw, sh);
+	wlr_scene_blur_set_corner_radii(t->blur, corner_radii_all(sradius));
+	wlr_scene_blur_set_alpha(t->blur, alpha);
 	wlr_scene_node_set_position(&t->blur->node, dx, dy);
 	float shadow_color[4] = { 0.0f, 0.0f, 0.0f, (t->activated ? 0.55f : 0.35f) * alpha };
 	wlr_scene_shadow_set_color(t->shadow, shadow_color);
 	wlr_scene_shadow_set_size(t->shadow, sw + sigma * 2, sh + sigma * 2);
 	wlr_scene_node_set_position(&t->shadow->node, dx - sigma, dy - sigma + SHADOW_OFFSET_Y);
 	wlr_scene_shadow_set_clipped_region(t->shadow, (struct clipped_region){
-		.corners = corner_radii_all(radius),
+		.corners = corner_radii_all(sradius),
 		.area = { sigma, sigma - SHADOW_OFFSET_Y, sw, sh },
 	});
 	wlr_scene_subsurface_tree_set_clip(&t->xdg_tree->node, geo);
