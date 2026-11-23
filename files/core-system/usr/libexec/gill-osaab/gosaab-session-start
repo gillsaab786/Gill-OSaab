@@ -15,6 +15,8 @@ swayidle -w \
   timeout 240 'brightnessctl -s -q set 30%' resume 'brightnessctl -r -q' \
   timeout 300 'qs -c gill-osaab ipc call lock lock' \
   before-sleep 'qs -c gill-osaab ipc call lock lock' &
+# download/copy/install progress from any app -> notifications with progress bars
+/usr/libexec/gill-osaab/gosaab-notify-hub --desktop &
 # the menu bar, Dock, notifications, Control Centre, Spotlight, Launchpad, lock screen
 while :; do
   qs -c gill-osaab

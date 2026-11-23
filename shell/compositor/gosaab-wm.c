@@ -175,6 +175,8 @@ struct gs_server {
 	struct wl_listener touch_down, touch_up, touch_motion, touch_cancel, touch_frame;
 	struct wlr_pointer_gestures_v1 *gestures; /* pinch-zoom etc. passed on to apps */
 	bool has_touch;
+	struct wlr_input_device *pointers[16]; /* to re-apply touchpad settings when they change */
+	int npointers;
 	int touch_grab_id;          /* finger dragging a title bar / resize edge, or -1 */
 	struct wlr_scene_rect *snap_preview; /* where a dragged window will snap */
 	int snap_zone;              /* 0 none, 1 left half, 2 right half, 3 full */
@@ -2064,6 +2066,9 @@ static void server_new_input(struct wl_listener *listener, void *data) {
 	case WLR_INPUT_DEVICE_POINTER:
 		configure_pointer(device);
 		wlr_cursor_attach_input_device(server->cursor, device);
+		if (server->npointers < 16) {
+			server->pointers[server->npointers++] = device;
+		}
 		break;
 	case WLR_INPUT_DEVICE_TOUCH:
 		wlr_cursor_attach_input_device(server->cursor, device);
@@ -2592,6 +2597,15 @@ static void crash_handler(int sig) {
 	raise(sig);
 }
 
+/* Settings changed the touchpad options (it sends SIGRTMIN+2) */
+static int handle_input_settings(int sig, void *data) {
+	struct gs_server *server = data;
+	for (int i = 0; i < server->npointers; i++) {
+		configure_pointer(server->pointers[i]);
+	}
+	return 0;
+}
+
 static int handle_sigterm(int sig, void *data) {
 	struct gs_server *server = data;
 	wl_display_terminate(server->display);
@@ -2890,7 +2904,8 @@ int main(int argc, char *argv[]) {
 
 	wl_event_loop_add_signal(loop, SIGUSR1, handle_sigusr1, &server);
 	wl_event_loop_add_signal(loop, SIGUSR2, handle_sigusr2, &server);
-	wl_event_loop_add_signal(loop, SIGRTMIN + 1, handle_sigoverview, &server); /* the shell asks for Mission Control */
+	wl_event_loop_add_signal(loop, SIGRTMIN + 1, handle_sigoverview, &server);
+	wl_event_loop_add_signal(loop, SIGRTMIN + 2, handle_input_settings, &server); /* the shell asks for Mission Control */
 	wl_event_loop_add_signal(loop, SIGTERM, handle_sigterm, &server);
 	wl_event_loop_add_signal(loop, SIGINT, handle_sigterm, &server);
 	signal(SIGCHLD, SIG_IGN);

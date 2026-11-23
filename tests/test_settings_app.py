@@ -44,6 +44,12 @@ class FakeBackend:
     def kde_night_light(self):
         return False
 
+    def input_setting(self, key, default=True):
+        return default
+
+    def set_input_setting(self, key, on):
+        return 0
+
     def boot_mode(self):
         return "auto"
 

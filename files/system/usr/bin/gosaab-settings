@@ -115,6 +115,29 @@ class Backend:
             self.LSFG_CONF.unlink()
         return 0
 
+    INPUT_CONF = Path.home() / ".config/gill-osaab/input.conf"
+
+    def input_setting(self, key, default=True):
+        try:
+            for line in self.INPUT_CONF.read_text().splitlines():
+                if line.startswith(key + "="):
+                    return line.split("=", 1)[1].strip() == "on"
+        except OSError:
+            pass
+        return default
+
+    def set_input_setting(self, key, on):
+        lines = []
+        try:
+            lines = [ln for ln in self.INPUT_CONF.read_text().splitlines() if not ln.startswith(key + "=")]
+        except OSError:
+            pass
+        lines.append(f"{key}={'on' if on else 'off'}")
+        self.INPUT_CONF.parent.mkdir(parents=True, exist_ok=True)
+        self.INPUT_CONF.write_text("\n".join(lines) + "\n")
+        subprocess.run(["pkill", "-RTMIN+2", "-x", "gosaab-wm"], check=False)  # apply now
+        return 0
+
     def decky_plugin_installed(self):
         return (Path.home() / "homebrew/plugins/gill-osaab-notify/plugin.json").exists()
 
@@ -626,6 +649,15 @@ class Settings(QMainWindow):
             Row("Night light", "Warmer screen in the evening.", self.night),
             Row("Auto dark mode at sunset", "Coming in a later update.", auto),
         ])
+        rows = []
+        for key, title, sub in [("tap_to_click", "Tap to click", "Tap the touchpad instead of pressing it."),
+                                ("natural_scroll", "Natural scrolling", "Content follows your fingers, like a phone.")]:
+            sw = Switch()
+            sw.set_quiet(self.backend.input_setting(key))
+            sw.toggled.connect(lambda on, k=key: self.backend.set_input_setting(k, on))
+            rows.append(Row(title, sub, sw))
+        p.section("Touchpad", rows, "Pinch to zoom works in apps. Three fingers: swipe sideways to change "
+                  "space, up for Mission Control.")
         reset = p.button("Apply Gill-OSaab look (top bar + dock)")
         reset.clicked.connect(self.apply_look)
         p.finish()

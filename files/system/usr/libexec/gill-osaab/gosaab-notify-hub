@@ -13,6 +13,8 @@ State is written to $XDG_RUNTIME_DIR/gill-osaab/notifications.json.
 Control API: org.gillosaab.NotifyHub (List, Dismiss, Cancel, Clear).
 
 In desktop mode KDE Plasma provides all of this itself, so the hub steps aside.
+On the Gill-OSaab desktop (--desktop) the shell shows notifications; the hub then only turns
+progress jobs and app progress bars into notifications with a progress bar for it.
 """
 import json
 import os
@@ -176,6 +178,8 @@ def unpack(variant_dict):
 
 
 class Hub:
+    desktop = False  # forward progress to the desktop's notification server instead of owning it
+
     def __init__(self, store=None):
         self.store = store or Store(on_change=self.schedule_write)
         if store is not None:
@@ -184,6 +188,7 @@ class Hub:
         self.jobs = {}  # object path -> (item id, registration id, interface)
         self.launchers = {}  # app uri -> item id
         self.write_pending = False
+        self.forwarded = {}  # item id -> (notification id on the desktop, last percent)
         self.infos = {name: Gio.DBusNodeInfo.new_for_xml(xml) for name, xml in
                       (("notify", NOTIFY_XML), ("server", SERVER_XML), ("job", JOB_XML), ("hub", HUB_XML))}
 
@@ -195,6 +200,8 @@ class Hub:
 
     def flush(self):
         self.write_pending = False
+        if self.desktop:
+            self.forward()
         try:
             self.store.write()
         except OSError as exc:
@@ -212,10 +219,39 @@ class Hub:
         conn.signal_subscribe(None, "com.canonical.Unity.LauncherEntry", "Update", None, None,
                               Gio.DBusSignalFlags.NONE, self.on_launcher_update)
         flags = Gio.BusNameOwnerFlags.ALLOW_REPLACEMENT | Gio.BusNameOwnerFlags.DO_NOT_QUEUE
-        for name in ("org.freedesktop.Notifications", "org.kde.JobViewServer", "org.kde.kuiserver"):
+        names = ("org.kde.JobViewServer", "org.kde.kuiserver") if self.desktop else \
+            ("org.freedesktop.Notifications", "org.kde.JobViewServer", "org.kde.kuiserver")
+        for name in names:
             Gio.bus_own_name_on_connection(conn, name, flags, None, None)
         Gio.bus_own_name_on_connection(conn, "org.gillosaab.NotifyHub", Gio.BusNameOwnerFlags.NONE, None, None)
         self.flush()
+
+    def forward(self):
+        """Desktop mode: show each progress item as a notification with a live progress bar."""
+        items = self.store.snapshot()["items"]
+        live = set()
+        for item in items:
+            item_id, percent = item.get("id"), item.get("percent")
+            if percent is None:
+                continue
+            live.add(item_id)
+            nid, last = self.forwarded.get(item_id, (0, None))
+            if last == percent:
+                continue
+            hints = {"value": GLib.Variant("i", int(percent)), "transient": GLib.Variant("b", False)}
+            body = item.get("body", "") or ("Done" if item.get("state") == "done" else f"{int(percent)}%")
+            try:
+                res = self.conn.call_sync("org.freedesktop.Notifications", "/org/freedesktop/Notifications",
+                                          "org.freedesktop.Notifications", "Notify",
+                                          GLib.Variant("(susssasa{sv}i)", (item.get("app", "") or "Gill-OSaab", nid,
+                                                       item.get("icon", "") or "", item.get("title", "") or "Working",
+                                                       body, [], hints, -1)),
+                                          GLib.VariantType("(u)"), Gio.DBusCallFlags.NONE, 2000, None)
+                self.forwarded[item_id] = (res.unpack()[0], percent)
+            except GLib.Error as exc:
+                print(f"gosaab-notify-hub: cannot show progress: {exc.message}", file=sys.stderr)
+        for gone in set(self.forwarded) - live:
+            del self.forwarded[gone]
 
     # ------------------------------------------------------------ notifications
     def notify(self, app, replaces_id, icon, summary, body, actions, hints, timeout):
@@ -374,7 +410,8 @@ def plasma_running():
 
 
 def main(argv):
-    if "--force" not in argv and plasma_running():
+    Hub.desktop = "--desktop" in argv
+    if "--force" not in argv and not Hub.desktop and plasma_running():
         print("gosaab-notify-hub: KDE Plasma handles notifications here; exiting.")
         return 0
     loop = GLib.MainLoop()

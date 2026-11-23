@@ -314,6 +314,19 @@ if command -v qs >/dev/null; then
   sleep 0.15; shot 22a-banner-sliding
   sleep 1.5; shot 22-notification
   check "notification arrived" "[ \$(qs -p $SHELLDIR ipc call notifications count) -ge 1 ]"
+  # progress from file copies / browser downloads (KDE job API, Unity launcher API) -> notifications
+  python3 files/system/usr/libexec/gill-osaab/gosaab-notify-hub --desktop >"$OUT/notify-hub.log" 2>&1 & HUBPID=$!
+  for _ in $(seq 1 30); do gdbus introspect --session --dest org.gillosaab.NotifyHub --object-path / >/dev/null 2>&1 && break; sleep 0.2; done
+  n0=$(qs -p "$SHELLDIR" ipc call notifications count)
+  P=$(gdbus call --session --dest org.kde.JobViewServer --object-path /JobViewServer \
+    --method org.kde.JobViewServerV2.requestView "org.gnome.Nautilus" 1 "{}" | grep -o "/JobView/[0-9]*")
+  gdbus call --session --dest org.kde.JobViewServer --object-path $P --method org.kde.JobViewV3.update \
+    "{'title': <'Copying Movies'>, 'percent': <uint32 37>}" >/dev/null
+  gdbus emit --session --object-path /x --signal com.canonical.Unity.LauncherEntry.Update \
+    "application://chromium.desktop" "{'progress': <0.62>, 'progress-visible': <true>}"
+  sleep 1.5; shot 22b-progress-from-apps
+  check "app progress (copies, downloads) shows as notifications" "[ \$(qs -p $SHELLDIR ipc call notifications count) -ge \$((n0 + 2)) ]"
+  kill $HUBPID 2>/dev/null
   qs -p "$SHELLDIR" ipc call controlcenter toggle; sleep 1.2; shot 23-control-center
   qs -p "$SHELLDIR" ipc call controlcenter toggle; sleep 0.8
   qs -p "$SHELLDIR" ipc call notifications toggle; sleep 1.2; shot 24-notification-center
