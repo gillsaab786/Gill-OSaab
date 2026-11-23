@@ -138,6 +138,25 @@ for name, good in ok:
     print(("PASS: " if good else "FAIL: ") + name)
 sys.exit(0 if all(g for _, g in ok) else 1)
 EOF2
+# minimise flies into the Dock (slow motion)
+foot -W 100x30 -e sh -c 'echo "minimise me"; sleep 120' &
+sleep 4.5; shot 10a-slow-window
+kill -USR2 $WM
+sleep 1.6; shot 10b-slow-minimizing
+sleep 3.5; shot 10c-slow-minimized
+python3 - "$OUT" <<'EOF6' || fail=1
+import sys
+from PIL import Image, ImageChops, ImageStat
+out = sys.argv[1]
+d = lambda a, b: sum(ImageStat.Stat(ImageChops.difference(
+    Image.open(f"{out}/{a}.png").convert("RGB"), Image.open(f"{out}/{b}.png").convert("RGB"))).mean) / 3
+r = {"mid vs open": d("10b-slow-minimizing", "10a-slow-window"), "mid vs gone": d("10b-slow-minimizing", "10c-slow-minimized"),
+     "gone vs empty": d("10c-slow-minimized", "10-slow-closed")}
+print("minimise diffs:", {k: round(v, 2) for k, v in r.items()})
+ok = r["mid vs open"] > 0.3 and r["mid vs gone"] > 0.3 and r["gone vs empty"] < 0.5
+print(("PASS: " if ok else "FAIL: ") + "minimise animates into the Dock and the window ends hidden")
+sys.exit(0 if ok else 1)
+EOF6
 kill -TERM $WM 2>/dev/null; wait $WM 2>/dev/null
 
 # ---- M2: macOS-style title bar (traffic lights, title), clicked like a real user would
@@ -208,6 +227,25 @@ if [ ${#L[@]} -eq 6 ]; then
   sleep 1.5; shot 18-close-me; C=($(lights 18-close-me))
   click ${C[0]:-0} ${C[1]:-0}; sleep 1.2; shot 19-closed   # red: close
   check "close button closes the app" "[ -z \"\$(lights 19-closed)\" ] && [ \$(pgrep -c -f 'Close me') -eq 0 ]"
+  # Mission Control: three windows side by side, click the desktop to go back
+  pkill -f "Close me|Second window|Gill-OSaab Terminal" 2>/dev/null; sleep 0.8
+  for n in 1 2 3; do foot -W $((60 + n * 15))x$((18 + n * 4)) -T "Window $n" -e sh -c 'sleep 300' & sleep 0.6; done
+  sleep 1.2; shot 30-three-windows
+  echo overview >>"$CLICKS"; sleep 1.2; shot 31-mission-control
+  click 6 1074; sleep 1.0; shot 32-back-to-desktop
+  python3 - "$OUT" <<'EOF7' || fail=1
+import sys
+from PIL import Image, ImageChops, ImageStat
+out = sys.argv[1]
+def changed(a, b):
+    d = ImageChops.difference(Image.open(f"{out}/{a}.png").convert("RGB"), Image.open(f"{out}/{b}.png").convert("RGB"))
+    return ImageStat.Stat(d.convert("L").point(lambda v: 255 if v > 24 else 0)).mean[0] / 255
+a, b = changed("30-three-windows", "31-mission-control"), changed("30-three-windows", "32-back-to-desktop")
+print("mission control change", round(a, 3), "after leaving", round(b, 4))
+for name, ok in [("Mission Control spreads the windows out", a > 0.05), ("clicking the desktop returns to normal", b < 0.01)]:
+    print(("PASS: " if ok else "FAIL: ") + name)
+sys.exit(0 if a > 0.05 and b < 0.01 else 1)
+EOF7
 fi
 check "compositor survived the clicks" "kill -0 $WM"
 kill -TERM $WM 2>/dev/null; wait $WM; rc=$?

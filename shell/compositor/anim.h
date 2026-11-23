@@ -49,4 +49,19 @@ static inline double gs_ease_in_cubic(double t) {
 	return t * t * t;
 }
 
+/* Minimise to the Dock: smooth start and stop */
+static inline double gs_ease_in_out_cubic(double t) {
+	if (t <= 0) {
+		return 0;
+	}
+	if (t >= 1) {
+		return 1;
+	}
+	return t < 0.5 ? 4 * t * t * t : 1 - pow(-2 * t + 2, 3) / 2;
+}
+
+static inline double gs_lerp(double a, double b, double t) {
+	return a + (b - a) * t;
+}
+
 #endif

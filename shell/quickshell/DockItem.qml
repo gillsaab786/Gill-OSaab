@@ -14,6 +14,17 @@ Item {
     property string label: entry ? entry.name : appId
     property string builtinIcon: "" // Gill-OSaab's own items (Launchpad, Trash) draw their own icon
     signal activated()
+    property var dockWindow: null
+
+    // Tell the window manager where this icon is, so minimised windows fly into it
+    function publishRect() {
+        if (!dockWindow || windows.length === 0) return
+        const p = item.mapToItem(null, 0, 0)
+        for (const w of windows) w.setRectangle(dockWindow, Qt.rect(Math.round(p.x), Math.round(p.y), Math.round(width), Math.round(height)))
+    }
+    Timer { id: rectTimer; interval: 250; onTriggered: item.publishRect() }
+    onWindowsChanged: rectTimer.restart()
+    onXChanged: rectTimer.restart()
 
     // macOS magnification: icons swell smoothly as the pointer passes over them
     readonly property real centre: x + width / 2

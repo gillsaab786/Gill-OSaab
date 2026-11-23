@@ -77,6 +77,7 @@
 
 #include "anim.h"
 #include "frame.h"
+#include "overview.h"
 #include "text.h"
 
 #define CORNER_RADIUS 10
@@ -86,6 +87,8 @@
 #define CLOSE_MS 200.0
 #define TITLE_FONT "Inter Semi-Bold 10"
 #define DOUBLE_CLICK_MS 400
+#define MINIMIZE_MS 380.0
+#define OVERVIEW_MS 340.0
 
 /* Colours (premultiplied alpha) */
 static const float COLOR_TITLE_ACTIVE[4] = { 0.165f, 0.165f, 0.180f, 1.0f };
@@ -109,7 +112,8 @@ struct gs_server {
 	struct wlr_scene *scene;
 	struct wlr_scene_output_layout *scene_layout;
 	struct {
-		struct wlr_scene_tree *background, *bottom, *toplevels, *closing, *top, *overlay;
+		struct wlr_scene_tree *background, *bottom, *dim, *toplevels, *closing, *top, *overlay;
+		struct wlr_scene_rect *dim_rect; /* darkens the desktop behind Mission Control */
 		struct wlr_scene_optimized_blur *blur;
 		struct wlr_scene_rect *backdrop;
 	} layers;
@@ -146,6 +150,12 @@ struct gs_server {
 	double last_click_ms;
 	float scale; /* output scale, for crisp title text */
 
+	bool overview;              /* Mission Control is showing */
+	bool overview_entering;
+	struct gs_anim overview_anim;
+	double overview_t;          /* 0 = normal desktop, 1 = full Mission Control */
+	double overview_from;
+
 	struct wlr_output_layout *output_layout;
 	struct wl_list outputs;
 	struct wl_listener new_output;
@@ -179,7 +189,10 @@ struct gs_toplevel {
 	struct gs_titlebar tb;
 	struct wl_listener map, unmap, commit, destroy, set_title, set_app_id;
 	struct wlr_foreign_toplevel_handle_v1 *ftl;
-	struct wl_listener ftl_activate, ftl_close, ftl_maximize, ftl_minimize, ftl_fullscreen;
+	struct wl_listener ftl_activate, ftl_close, ftl_maximize, ftl_minimize, ftl_fullscreen, ftl_rectangle;
+	struct wlr_box dock_rect;   /* where this app's Dock icon is (layout coords), for minimise */
+	struct gs_anim min_anim;    /* minimise into / restore out of the Dock */
+	struct gs_slot ov;          /* place in Mission Control */
 	struct wl_listener request_move, request_resize, request_maximize, request_minimize, request_fullscreen;
 	bool mapped, placed, maximized, minimized, fullscreen, ssd, activated;
 	struct wlr_box saved; /* frame box before zoom/fullscreen */
@@ -443,12 +456,12 @@ static void style_buffer(struct wlr_scene_buffer *buffer, int sx, int sy, void *
 }
 
 /* Draw the whole window (title bar, content, shadow, blur) at a scale about its centre. */
-static void apply_toplevel_visual(struct gs_toplevel *t, float scale, float alpha) {
+static void apply_toplevel_visual(struct gs_toplevel *t, float scale, float alpha, double ox, double oy) {
 	struct wlr_box *geo = content_geo(t);
 	int fw = frame_w(t), fh = frame_h(t), th = title_h(t);
-	int dx = (int)lroundf(fw * (1.0f - scale) / 2.0f);
-	int dy = (int)lroundf(fh * (1.0f - scale) / 2.0f);
-	int sw = fw - dx * 2, sh = fh - dy * 2;
+	int dx = (int)lroundf(fw * (1.0f - scale) / 2.0f + ox);
+	int dy = (int)lroundf(fh * (1.0f - scale) / 2.0f + oy);
+	int sw = (int)lroundf(fw * scale), sh = (int)lroundf(fh * scale);
 	int sth = (int)lroundf(th * scale);
 
 	titlebar_layout(t, dx, dy, scale, alpha);
@@ -481,29 +494,87 @@ static void apply_toplevel_visual(struct gs_toplevel *t, float scale, float alph
 	wlr_scene_subsurface_tree_set_clip(&t->xdg_tree->node, geo);
 }
 
-static void refresh_toplevel(struct gs_toplevel *t) {
-	if (!t->open.active) {
-		apply_toplevel_visual(t, 1.0f, 1.0f);
+/* Where a minimised window flies to: its Dock icon, or the bottom middle of the screen. */
+static struct wlr_box minimize_target(struct gs_toplevel *t) {
+	if (t->dock_rect.width > 0 && t->dock_rect.height > 0) {
+		return t->dock_rect;
 	}
+	struct wlr_box full = output_full_area(t->server);
+	return (struct wlr_box){ full.x + full.width / 2 - 32, full.y + full.height - 72, 64, 64 };
+}
+
+/* Work out how a window should look right now from everything animating it
+ * (opening, minimising/restoring, Mission Control) and draw it. Returns true while animating. */
+static bool update_toplevel_visual(struct gs_toplevel *t, double now) {
+	struct gs_server *server = t->server;
+	double scale = 1, alpha = 1, ox = 0, oy = 0;
+	bool running = false;
+	int fw = frame_w(t), fh = frame_h(t);
+	double cx = t->tree->node.x + fw / 2.0, cy = t->tree->node.y + fh / 2.0;
+	if (t->open.active) {
+		double p = gs_anim_progress(&t->open, now), e = gs_ease_spring(p);
+		scale *= 0.94 + 0.06 * e;
+		alpha *= fmin(1.0, e * 1.15);
+		if (p >= 1.0) {
+			t->open.active = false;
+		} else {
+			running = true;
+		}
+	}
+	if (t->min_anim.active) {
+		double p = gs_anim_progress(&t->min_anim, now);
+		double m = t->minimized ? gs_ease_in_out_cubic(p) : 1.0 - gs_ease_spring(p);
+		struct wlr_box r = minimize_target(t);
+		double ts = fmin((double)r.width / (fw > 0 ? fw : 1), (double)r.height / (fh > 0 ? fh : 1));
+		scale *= gs_lerp(1.0, ts, m);
+		ox += (r.x + r.width / 2.0 - cx) * m;
+		oy += (r.y + r.height / 2.0 - cy) * m;
+		alpha *= 1.0 - 0.6 * m * m;
+		if (p >= 1.0) {
+			t->min_anim.active = false;
+			if (t->minimized) {
+				wlr_scene_node_set_enabled(&t->tree->node, false);
+			}
+		} else {
+			running = true;
+		}
+	}
+	if (server->overview_t > 0 && !t->minimized) {
+		double o = server->overview_t;
+		scale *= gs_lerp(1.0, t->ov.scale, o);
+		ox += (t->ov.cx - cx) * o;
+		oy += (t->ov.cy - cy) * o;
+	}
+	apply_toplevel_visual(t, (float)scale, (float)alpha, ox, oy);
+	return running;
+}
+
+static void refresh_toplevel(struct gs_toplevel *t) {
+	update_toplevel_visual(t, now_ms());
 }
 
 /* Advance every running animation; returns true while any is still running. */
 static bool tick_animations(struct gs_server *server) {
 	double now = now_ms();
 	bool running = false;
-	struct gs_toplevel *t;
-	wl_list_for_each(t, &server->toplevels, link) {
-		if (!t->open.active) {
-			continue;
-		}
-		double p = gs_anim_progress(&t->open, now);
-		double e = gs_ease_spring(p);
-		apply_toplevel_visual(t, (float)(0.94 + 0.06 * e), (float)fmin(1.0, e * 1.15));
+	bool overview_moving = server->overview_anim.active;
+	if (overview_moving) {
+		double p = gs_anim_progress(&server->overview_anim, now);
+		server->overview_t = gs_lerp(server->overview_from, server->overview_entering ? 1.0 : 0.0, gs_ease_spring(p));
 		if (p >= 1.0) {
-			t->open.active = false;
-			apply_toplevel_visual(t, 1.0f, 1.0f);
+			server->overview_anim.active = false;
+			server->overview_t = server->overview_entering ? 1.0 : 0.0;
 		} else {
 			running = true;
+		}
+		float dim[4] = { 0, 0, 0, (float)(0.45 * server->overview_t) };
+		wlr_scene_rect_set_color(server->layers.dim_rect, dim);
+		wlr_scene_node_set_enabled(&server->layers.dim_rect->node, server->overview_t > 0.001);
+	}
+	struct gs_toplevel *t;
+	wl_list_for_each(t, &server->toplevels, link) {
+		if (t->open.active || t->min_anim.active || overview_moving) {
+			running = update_toplevel_visual(t, now) || running;
 		}
 	}
 	struct gs_closing *c, *tmp;
@@ -597,7 +668,7 @@ static void focus_toplevel(struct gs_toplevel *t) {
 			wlr_foreign_toplevel_handle_v1_set_minimized(t->ftl, false);
 		}
 		wlr_scene_node_set_enabled(&t->tree->node, true);
-		gs_anim_start(&t->open, now_ms(), anim_ms(OPEN_MS));
+		gs_anim_start(&t->min_anim, now_ms(), anim_ms(MINIMIZE_MS));
 		schedule_frames(server);
 	}
 	struct gs_toplevel *other;
@@ -633,7 +704,9 @@ static void minimize_toplevel(struct gs_toplevel *t) {
 		wlr_foreign_toplevel_handle_v1_set_minimized(t->ftl, true);
 	}
 	set_activated(t, false);
-	wlr_scene_node_set_enabled(&t->tree->node, false);
+	/* fly into the Dock; the window is hidden when the animation ends */
+	gs_anim_start(&t->min_anim, now_ms(), anim_ms(MINIMIZE_MS));
+	schedule_frames(server);
 	if (server->seat->keyboard_state.focused_surface == t->xdg_toplevel->base->surface) {
 		wlr_seat_keyboard_clear_focus(server->seat);
 	}
@@ -644,6 +717,49 @@ static void minimize_toplevel(struct gs_toplevel *t) {
 	if (next) {
 		focus_toplevel(next);
 	}
+}
+
+/* ------------------------------------------------------------------ Mission Control */
+
+/* Show every window side by side (or go back). `pick` gets focus when leaving. */
+static void overview_set(struct gs_server *server, bool on, struct gs_toplevel *pick) {
+	if (server->overview == on) {
+		return;
+	}
+	if (on) {
+		struct gs_toplevel *list[64];
+		int w[64], h[64], n = 0;
+		struct gs_toplevel *t;
+		wl_list_for_each_reverse(t, &server->toplevels, link) { /* oldest first: stable places */
+			if (t->mapped && !t->minimized && n < 64) {
+				list[n] = t;
+				w[n] = frame_w(t);
+				h[n] = frame_h(t);
+				n++;
+			}
+		}
+		if (n == 0) {
+			return;
+		}
+		struct gs_slot slots[64];
+		struct wlr_box area = output_usable_area(server);
+		gs_overview_layout(n, w, h, area.x + 40, area.y + 40, area.width - 80, area.height - 80, slots);
+		for (int i = 0; i < n; i++) {
+			list[i]->ov = slots[i];
+		}
+		wlr_seat_pointer_clear_focus(server->seat);
+		server->cursor_mode = CURSOR_PASSTHROUGH;
+		server->grabbed = NULL;
+	}
+	server->overview = on;
+	server->overview_entering = on;
+	/* start from wherever the previous animation got to, so quick toggles don't jump */
+	server->overview_from = server->overview_t;
+	gs_anim_start(&server->overview_anim, now_ms(), anim_ms(OVERVIEW_MS));
+	if (!on && pick) {
+		focus_toplevel(pick);
+	}
+	schedule_frames(server);
 }
 
 /* ------------------------------------------------------------------ layer shell */
@@ -674,6 +790,8 @@ static void arrange_layers(struct gs_server *server) {
 	output->usable = usable;
 	wlr_scene_rect_set_size(server->layers.backdrop, full.width, full.height);
 	wlr_scene_node_set_position(&server->layers.backdrop->node, full.x, full.y);
+	wlr_scene_rect_set_size(server->layers.dim_rect, full.width, full.height);
+	wlr_scene_node_set_position(&server->layers.dim_rect->node, full.x, full.y);
 }
 
 static struct wlr_scene_tree *layer_tree(struct gs_server *server, enum zwlr_layer_shell_v1_layer layer) {
@@ -913,6 +1031,21 @@ static void ftl_fullscreen(struct wl_listener *listener, void *data) {
 	wlr_xdg_surface_schedule_configure(t->xdg_toplevel->base);
 }
 
+static void ftl_rectangle(struct wl_listener *listener, void *data) {
+	struct gs_toplevel *t = wl_container_of(listener, t, ftl_rectangle);
+	struct wlr_foreign_toplevel_handle_v1_set_rectangle_event *event = data;
+	t->dock_rect = (struct wlr_box){0};
+	if (event->surface == NULL || event->width <= 0 || event->height <= 0) {
+		return;
+	}
+	struct wlr_layer_surface_v1 *ls = wlr_layer_surface_v1_try_from_wlr_surface(event->surface);
+	struct wlr_scene_tree *tree = ls ? ls->data : NULL;
+	int lx, ly;
+	if (tree && wlr_scene_node_coords(&tree->node, &lx, &ly)) {
+		t->dock_rect = (struct wlr_box){ lx + event->x, ly + event->y, event->width, event->height };
+	}
+}
+
 static void ftl_create(struct gs_toplevel *t) {
 	struct gs_server *server = t->server;
 	t->ftl = wlr_foreign_toplevel_handle_v1_create(server->foreign_mgr);
@@ -939,6 +1072,8 @@ static void ftl_create(struct gs_toplevel *t) {
 	wl_signal_add(&t->ftl->events.request_minimize, &t->ftl_minimize);
 	t->ftl_fullscreen.notify = ftl_fullscreen;
 	wl_signal_add(&t->ftl->events.request_fullscreen, &t->ftl_fullscreen);
+	t->ftl_rectangle.notify = ftl_rectangle;
+	wl_signal_add(&t->ftl->events.set_rectangle, &t->ftl_rectangle);
 }
 
 static void ftl_destroy(struct gs_toplevel *t) {
@@ -950,6 +1085,7 @@ static void ftl_destroy(struct gs_toplevel *t) {
 	wl_list_remove(&t->ftl_maximize.link);
 	wl_list_remove(&t->ftl_minimize.link);
 	wl_list_remove(&t->ftl_fullscreen.link);
+	wl_list_remove(&t->ftl_rectangle.link);
 	wlr_foreign_toplevel_handle_v1_destroy(t->ftl);
 	t->ftl = NULL;
 }
@@ -995,6 +1131,7 @@ static void toplevel_commit(struct wl_listener *listener, void *data) {
 
 static void toplevel_map(struct wl_listener *listener, void *data) {
 	struct gs_toplevel *t = wl_container_of(listener, t, map);
+	overview_set(t->server, false, NULL);
 	t->mapped = true;
 	wlr_scene_node_set_enabled(&t->tree->node, true);
 	if (!t->placed) {
@@ -1008,7 +1145,7 @@ static void toplevel_map(struct wl_listener *listener, void *data) {
 	if (t->ssd) {
 		titlebar_render_title(t);
 	}
-	apply_toplevel_visual(t, 0.94f, 0.0f);
+	apply_toplevel_visual(t, 0.94f, 0.0f, 0, 0);
 	schedule_frames(t->server);
 }
 
@@ -1073,8 +1210,10 @@ static void start_close_animation(struct gs_toplevel *t) {
 static void toplevel_unmap(struct wl_listener *listener, void *data) {
 	struct gs_toplevel *t = wl_container_of(listener, t, unmap);
 	struct gs_server *server = t->server;
+	overview_set(server, false, NULL);
 	start_close_animation(t);
 	ftl_destroy(t);
+	t->min_anim.active = false;
 	t->mapped = false;
 	t->placed = false;
 	t->minimized = false;
@@ -1346,6 +1485,14 @@ static bool handle_keybinding(struct gs_server *server, uint32_t mods, xkb_keysy
 		focus_next_toplevel(server);
 		return true;
 	}
+	if (server->overview && (sym == XKB_KEY_Escape || sym == XKB_KEY_Return)) {
+		overview_set(server, false, sym == XKB_KEY_Return ? focused_toplevel(server) : NULL);
+		return true;
+	}
+	if (sym == XKB_KEY_XF86LaunchA || (super && sym == XKB_KEY_Up)) { /* F3 / Super+Up: Mission Control */
+		overview_set(server, !server->overview, NULL);
+		return true;
+	}
 	if (sym == XKB_KEY_XF86LaunchB) {
 		shell_ipc("launchpad toggle");
 		return true;
@@ -1606,6 +1753,11 @@ static void process_cursor_motion(struct gs_server *server, uint32_t time) {
 		process_cursor_resize(server);
 		return;
 	}
+	if (server->overview) {
+		wlr_cursor_set_xcursor(server->cursor, server->cursor_mgr, "default");
+		wlr_seat_pointer_clear_focus(server->seat);
+		return;
+	}
 	struct gs_hit hit = hit_test(server, server->cursor->x, server->cursor->y);
 	if (hit.surface == NULL) {
 		wlr_cursor_set_xcursor(server->cursor, server->cursor_mgr,
@@ -1634,6 +1786,10 @@ static void cursor_motion_absolute(struct wl_listener *listener, void *data) {
 /* Handle a press at a layout point (also used by the test hook). */
 static void press_at(struct gs_server *server, double lx, double ly) {
 	struct gs_hit hit = hit_test(server, lx, ly);
+	if (server->overview) { /* pick a window, or click the desktop to go back */
+		overview_set(server, false, (hit.toplevel && !hit.toplevel->minimized) ? hit.toplevel : NULL);
+		return;
+	}
 	struct gs_toplevel *t = hit.toplevel;
 	if (t == NULL) {
 		if (hit.surface) {
@@ -1684,7 +1840,7 @@ static void cursor_button(struct wl_listener *listener, void *data) {
 		return;
 	}
 	struct gs_hit hit = hit_test(server, server->cursor->x, server->cursor->y);
-	if (hit.surface) {
+	if (hit.surface && !server->overview) {
 		wlr_seat_pointer_notify_button(server->seat, event->time_msec, event->button, event->state);
 	}
 	press_at(server, server->cursor->x, server->cursor->y);
@@ -1790,6 +1946,12 @@ static int handle_sigusr2(int sig, void *data) {
 	return 0;
 }
 
+static int handle_sigoverview(int sig, void *data) {
+	struct gs_server *server = data;
+	overview_set(server, !server->overview, NULL);
+	return 0;
+}
+
 static int handle_sigterm(int sig, void *data) {
 	struct gs_server *server = data;
 	wl_display_terminate(server->display);
@@ -1805,15 +1967,20 @@ static int test_click_tick(void *data) {
 	FILE *f = fopen(getenv("GOSAAB_TEST_CLICKS"), "r");
 	if (f) {
 		fseek(f, test_click_offset, SEEK_SET);
-		double x, y;
-		while (fscanf(f, "%lf %lf", &x, &y) == 2) {
-			wlr_cursor_warp(server->cursor, NULL, x, y);
-			press_at(server, x, y);
-			server->cursor_mode = CURSOR_PASSTHROUGH;
-			server->grabbed = NULL;
+		char line[128];
+		while (fgets(line, sizeof(line), f) != NULL && strchr(line, '\n') != NULL) {
+			double x, y;
+			if (strncmp(line, "overview", 8) == 0) {
+				overview_set(server, !server->overview, NULL);
+			} else if (sscanf(line, "%lf %lf", &x, &y) == 2) {
+				wlr_cursor_warp(server->cursor, NULL, x, y);
+				press_at(server, x, y);
+				server->cursor_mode = CURSOR_PASSTHROUGH;
+				server->grabbed = NULL;
+			}
 			schedule_frames(server);
+			test_click_offset = ftell(f);
 		}
-		test_click_offset = ftell(f);
 		fclose(f);
 	}
 	wl_event_source_timer_update(test_click_timer, 100);
@@ -1912,6 +2079,9 @@ int main(int argc, char *argv[]) {
 	server.layers.backdrop = wlr_scene_rect_create(server.layers.background, 0, 0,
 		(float[4]){ 0.04f, 0.05f, 0.10f, 1.0f });
 	server.layers.bottom = wlr_scene_tree_create(&server.scene->tree);
+	server.layers.dim = wlr_scene_tree_create(&server.scene->tree);
+	server.layers.dim_rect = wlr_scene_rect_create(server.layers.dim, 0, 0, (float[4]){ 0, 0, 0, 0 });
+	wlr_scene_node_set_enabled(&server.layers.dim_rect->node, false);
 	server.layers.blur = wlr_scene_optimized_blur_create(&server.scene->tree, 0, 0);
 	server.layers.toplevels = wlr_scene_tree_create(&server.scene->tree);
 	server.layers.closing = wlr_scene_tree_create(&server.scene->tree);
@@ -1966,6 +2136,7 @@ int main(int argc, char *argv[]) {
 
 	wl_event_loop_add_signal(loop, SIGUSR1, handle_sigusr1, &server);
 	wl_event_loop_add_signal(loop, SIGUSR2, handle_sigusr2, &server);
+	wl_event_loop_add_signal(loop, SIGRTMIN + 1, handle_sigoverview, &server); /* the shell asks for Mission Control */
 	wl_event_loop_add_signal(loop, SIGTERM, handle_sigterm, &server);
 	wl_event_loop_add_signal(loop, SIGINT, handle_sigterm, &server);
 	signal(SIGCHLD, SIG_IGN);

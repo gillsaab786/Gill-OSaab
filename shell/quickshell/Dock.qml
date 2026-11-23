@@ -87,6 +87,7 @@ PanelWindow {
                 model: dock.pinned
                 DockItem {
                     entry: modelData
+                    dockWindow: dock
                     windows: dock.windowsFor(modelData, "")
                     pointerX: dock.mouseX
                 }
@@ -101,6 +102,7 @@ PanelWindow {
                 DockItem {
                     entry: modelData.entry
                     appId: modelData.appId
+                    dockWindow: dock
                     windows: dock.windowsFor(modelData.entry, modelData.appId)
                     pointerX: dock.mouseX
                 }

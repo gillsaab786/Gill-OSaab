@@ -51,3 +51,5 @@ test('animation curves', test_anim)
 
 test_frame = executable('test-frame', 'tests/test_frame.c')
 test('window frame hit-testing', test_frame)
+test_overview = executable('test-overview', 'tests/test_overview.c', dependencies: [math])
+test('mission control layout', test_overview)
