@@ -26,9 +26,9 @@ Singleton {
         || "/usr/share/wallpapers/GillOSaab/contents/images_dark/3840x2160.png"
 
     readonly property int radius: 22
-    readonly property int barHeight: 30
-    readonly property int dockIcon: 52
-    readonly property int dockMagnified: 78
+    readonly property int barHeight: 38
+    readonly property int dockIcon: 60
+    readonly property int dockMagnified: 86
 
     // An icon path that exists, trying each name in turn ("" if none do)
     function icon() {

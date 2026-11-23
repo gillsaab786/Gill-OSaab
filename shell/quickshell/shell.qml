@@ -33,6 +33,7 @@ ShellRoot {
     Launchpad {}
     LockScreen {}
     GlassesProfiles {}
+    BluetoothBatteries {}
 
     IpcHandler {
         target: "shell"

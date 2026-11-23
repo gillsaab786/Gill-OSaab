@@ -2,6 +2,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Wayland
 import Quickshell.Services.UPower
+import Quickshell.Bluetooth
 
 // The menu bar across the top of the screen, macOS style.
 PanelWindow {
@@ -36,16 +37,30 @@ PanelWindow {
         BarButton {
             active: ShellState.systemMenu
             onClicked: ShellState.toggle("systemMenu")
-            Icon { name: "logo"; width: 17; height: 17; color: Theme.text }
+            Icon { name: "logo"; width: 20; height: 20; color: Theme.text }
         }
         BarButton {
-            Text { text: bar.appName; color: Theme.text; font { family: Theme.font; pixelSize: 13; weight: Font.Bold } }
+            Text { text: bar.appName; color: Theme.text; font { family: Theme.font; pixelSize: 14; weight: Font.Bold } }
         }
     }
 
     Row {
         anchors { right: parent.right; rightMargin: 10; verticalCenter: parent.verticalCenter }
         spacing: 2
+        Repeater { // Bluetooth devices with a battery: headphones, controllers, mice
+            model: Bluetooth.devices.values.filter(d => d.connected && d.batteryAvailable)
+            BarButton {
+                required property var modelData
+                readonly property int pct: Math.round(modelData.battery <= 1 ? modelData.battery * 100 : modelData.battery)
+                Icon { name: "bluetooth"; width: 15; height: 15; anchors.verticalCenter: parent.verticalCenter }
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: parent.parent.pct + "%"
+                    color: parent.parent.pct <= 10 ? Theme.red : parent.parent.pct <= 20 ? Theme.orange : Theme.text
+                    font { family: Theme.font; pixelSize: 13 }
+                }
+            }
+        }
         BarButton {
             visible: UPower.displayDevice && UPower.displayDevice.isLaptopBattery
             readonly property real pct: UPower.displayDevice ? UPower.displayDevice.percentage : 1
@@ -75,7 +90,7 @@ PanelWindow {
             Text {
                 text: Qt.formatDateTime(clock.date, "ddd d MMM  h:mm AP")
                 color: Theme.text
-                font { family: Theme.font; pixelSize: 13; weight: Font.Medium }
+                font { family: Theme.font; pixelSize: 14; weight: Font.Medium }
             }
         }
     }

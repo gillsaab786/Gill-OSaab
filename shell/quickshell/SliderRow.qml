@@ -7,16 +7,16 @@ Item {
     property string icon: "sun"
     property real value: 0.5
     signal moved(real v)
-    implicitHeight: 52
+    implicitHeight: 60
     Text { id: title; text: row.label; color: Theme.text; font { family: Theme.font; pixelSize: 13; weight: Font.DemiBold } }
     Rectangle {
         id: track
         anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
-        height: 26; radius: 13
+        height: 32; radius: 16
         color: Qt.rgba(1, 1, 1, 0.12)
         clip: true
         Rectangle {
-            width: Math.max(track.height, track.width * row.value); height: parent.height; radius: 13
+            width: Math.max(track.height, track.width * row.value); height: parent.height; radius: 16
             color: "white"; opacity: 0.92
             Behavior on width { enabled: !drag.pressed; NumberAnimation { duration: Theme.fast } }
         }

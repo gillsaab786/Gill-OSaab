@@ -97,3 +97,43 @@ struct wlr_buffer *gs_text_render(const char *text, const char *font, const floa
 	*logical_h = (int)(h / scale + 0.5f);
 	return &buffer->base;
 }
+
+/* The symbol drawn on a traffic-light button: 0 close (x), 1 minimise (-), 2 zoom (two arrows). */
+struct wlr_buffer *gs_glyph_render(int kind, int size, float scale, const float color[4]) {
+	int px = (int)(size * scale + 0.5f);
+	if (px < 4) {
+		return NULL;
+	}
+	cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, px, px);
+	cairo_t *cr = cairo_create(surface);
+	cairo_scale(cr, px / 24.0, px / 24.0);
+	cairo_set_source_rgba(cr, color[0], color[1], color[2], color[3]);
+	cairo_set_line_width(cr, 2.6);
+	cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+	switch (kind) {
+	case 0:
+		cairo_move_to(cr, 7.5, 7.5); cairo_line_to(cr, 16.5, 16.5);
+		cairo_move_to(cr, 16.5, 7.5); cairo_line_to(cr, 7.5, 16.5);
+		cairo_stroke(cr);
+		break;
+	case 1:
+		cairo_move_to(cr, 6.5, 12); cairo_line_to(cr, 17.5, 12);
+		cairo_stroke(cr);
+		break;
+	default: /* zoom: two triangles pointing to opposite corners */
+		cairo_move_to(cr, 7, 7); cairo_line_to(cr, 14.5, 7); cairo_line_to(cr, 7, 14.5); cairo_close_path(cr);
+		cairo_move_to(cr, 17, 17); cairo_line_to(cr, 9.5, 17); cairo_line_to(cr, 17, 9.5); cairo_close_path(cr);
+		cairo_fill(cr);
+		break;
+	}
+	cairo_destroy(cr);
+	cairo_surface_flush(surface);
+	struct gs_text_buffer *buffer = calloc(1, sizeof(*buffer));
+	if (buffer == NULL) {
+		cairo_surface_destroy(surface);
+		return NULL;
+	}
+	buffer->surface = surface;
+	wlr_buffer_init(&buffer->base, &text_buffer_impl, px, px);
+	return &buffer->base;
+}

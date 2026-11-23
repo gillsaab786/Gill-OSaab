@@ -97,7 +97,7 @@
 #define SHADOW_OFFSET_Y 8
 #define OPEN_MS 280.0
 #define CLOSE_MS 200.0
-#define TITLE_FONT "Inter Semi-Bold 10"
+#define TITLE_FONT "Inter Semi-Bold 11"
 #define DOUBLE_CLICK_MS 400
 #define MINIMIZE_MS 380.0
 #define OVERVIEW_MS 340.0
@@ -232,7 +232,9 @@ struct gs_output {
 struct gs_titlebar {
 	struct wlr_scene_tree *tree;
 	struct wlr_scene_rect *bg;
+	struct wlr_scene_rect *pill;       /* Liquid Glass capsule behind the buttons */
 	struct wlr_scene_rect *buttons[3];
+	struct wlr_scene_buffer *glyphs[3]; /* x, -, zoom arrows */
 	struct wlr_scene_buffer *title;
 	struct wlr_buffer *title_buffer; /* our reference; reused by the close animation */
 	int title_w, title_h;
@@ -501,6 +503,16 @@ static void titlebar_layout(struct gs_toplevel *t, int ox, int oy, float scale, 
 	wlr_scene_rect_set_corner_radii(tb->bg, t->maximized ? corner_radii_none() :
 		corner_radii_top((int)lroundf(CORNER_RADIUS * scale)));
 	int d = (int)lroundf(GS_BUTTON_D * scale);
+	/* glass pill: from the first button's left edge to the last button's right edge, padded */
+	int pad = (int)lroundf(GS_PILL_PAD * scale);
+	int px0 = (int)lroundf((gs_button_cx(0) - GS_BUTTON_D / 2.0) * scale) - pad;
+	int px1 = (int)lroundf((gs_button_cx(2) + GS_BUTTON_D / 2.0) * scale) + pad;
+	int ph = d + pad * 2;
+	scale_color((float[4]){ 1.0f, 1.0f, 1.0f, t->activated ? 0.13f : 0.07f }, alpha, c);
+	wlr_scene_rect_set_size(tb->pill, px1 - px0, ph);
+	wlr_scene_rect_set_color(tb->pill, c);
+	wlr_scene_rect_set_corner_radii(tb->pill, corner_radii_all(ph / 2));
+	wlr_scene_node_set_position(&tb->pill->node, px0, (h - ph) / 2);
 	for (int i = 0; i < 3; i++) {
 		scale_color(t->activated ? COLOR_BUTTONS[i] : COLOR_BUTTON_INACTIVE, alpha, c);
 		wlr_scene_rect_set_size(tb->buttons[i], d, d);
@@ -508,6 +520,12 @@ static void titlebar_layout(struct gs_toplevel *t, int ox, int oy, float scale, 
 		wlr_scene_rect_set_corner_radii(tb->buttons[i], corner_radii_all(d / 2));
 		int cx = (int)lroundf(gs_button_cx(i) * scale);
 		wlr_scene_node_set_position(&tb->buttons[i]->node, cx - d / 2, (h - d) / 2);
+		if (tb->glyphs[i]) {
+			wlr_scene_node_set_enabled(&tb->glyphs[i]->node, t->activated);
+			wlr_scene_buffer_set_dest_size(tb->glyphs[i], d, d);
+			wlr_scene_buffer_set_opacity(tb->glyphs[i], alpha);
+			wlr_scene_node_set_position(&tb->glyphs[i]->node, cx - d / 2, (h - d) / 2);
+		}
 	}
 	if (tb->title) {
 		int tw = (int)lroundf(tb->title_w * scale), th = (int)lroundf(tb->title_h * scale);
@@ -517,12 +535,25 @@ static void titlebar_layout(struct gs_toplevel *t, int ox, int oy, float scale, 
 	}
 }
 
+/* button symbols are drawn once and shared by every window */
+static struct wlr_buffer *glyph_buffer(int i) {
+	static struct wlr_buffer *glyphs[3];
+	static const float ink[4] = { 0.30f * 0.6f, 0.0f, 0.0f, 0.6f }; /* dark, see-through ink */
+	if (glyphs[i] == NULL) {
+		glyphs[i] = gs_glyph_render(i, GS_BUTTON_D, 3.0f, ink);
+	}
+	return glyphs[i];
+}
+
 static void titlebar_create(struct gs_toplevel *t) {
 	struct gs_titlebar *tb = &t->tb;
 	tb->tree = wlr_scene_tree_create(t->tree);
 	tb->bg = wlr_scene_rect_create(tb->tree, 0, 0, COLOR_TITLE_ACTIVE);
+	tb->pill = wlr_scene_rect_create(tb->tree, 0, 0, (float[4]){ 0.13f, 0.13f, 0.13f, 0.13f });
 	for (int i = 0; i < 3; i++) {
 		tb->buttons[i] = wlr_scene_rect_create(tb->tree, GS_BUTTON_D, GS_BUTTON_D, COLOR_BUTTONS[i]);
+		struct wlr_buffer *g = glyph_buffer(i);
+		tb->glyphs[i] = g ? wlr_scene_buffer_create(tb->tree, g) : NULL;
 	}
 	wlr_scene_node_set_enabled(&tb->tree->node, false);
 }

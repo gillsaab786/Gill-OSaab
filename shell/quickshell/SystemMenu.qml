@@ -6,17 +6,17 @@ Popup {
     id: menu
     open: ShellState.systemMenu
     alignLeft: true
-    panelWidth: 260
+    panelWidth: 300
 
     component Item_: Rectangle {
         property string label
         property string command
         property bool separatorAfter: false
         width: parent ? parent.width : 0
-        height: 30; radius: 7
+        height: 42; radius: 14
         color: m.containsMouse ? Theme.accent : "transparent"
         Text { anchors { left: parent.left; leftMargin: 10; verticalCenter: parent.verticalCenter }
-            text: parent.label; color: m.containsMouse ? "white" : Theme.text; font { family: Theme.font; pixelSize: 13 } }
+            text: parent.label; color: m.containsMouse ? "white" : Theme.text; font { family: Theme.font; pixelSize: 15 } }
         MouseArea { id: m; anchors.fill: parent; hoverEnabled: true
             onClicked: { ShellState.closeAll(); ShellState.run(parent.command) } }
     }

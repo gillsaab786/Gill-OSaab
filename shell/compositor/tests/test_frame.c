@@ -11,12 +11,12 @@ int main(void) {
 	EXPECT(gs_frame_hit(w, h, true, gs_button_cx(0), 15, &e) == GS_PART_CLOSE);
 	EXPECT(gs_frame_hit(w, h, true, gs_button_cx(1), 15, &e) == GS_PART_MINIMIZE);
 	EXPECT(gs_frame_hit(w, h, true, gs_button_cx(2), 15, &e) == GS_PART_ZOOM);
-	EXPECT(gs_frame_hit(w, h, true, gs_button_cx(2) + 12, 15, &e) == GS_PART_TITLE);
+	EXPECT(gs_frame_hit(w, h, true, gs_button_cx(2) + GS_BUTTON_D + GS_BUTTON_GAP, 15, &e) == GS_PART_TITLE);
 	EXPECT(gs_frame_hit(w, h, true, 400, 10, &e) == GS_PART_TITLE);
-	EXPECT(gs_frame_hit(w, h, true, 400, 30, &e) == GS_PART_CONTENT);
-	EXPECT(gs_frame_hit(w, h, true, 400, 529, &e) == GS_PART_CONTENT);
+	EXPECT(gs_frame_hit(w, h, true, 400, GS_TITLE_H, &e) == GS_PART_CONTENT);
+	EXPECT(gs_frame_hit(w, h, true, 400, h + GS_TITLE_H - 1, &e) == GS_PART_CONTENT);
 	EXPECT(gs_frame_hit(w, h, true, -3, 200, &e) == GS_PART_RESIZE && e == GS_EDGE_LEFT);
-	EXPECT(gs_frame_hit(w, h, true, 803, 533, &e) == GS_PART_RESIZE && e == (GS_EDGE_RIGHT | GS_EDGE_BOTTOM));
+	EXPECT(gs_frame_hit(w, h, true, 803, h + GS_TITLE_H + 3, &e) == GS_PART_RESIZE && e == (GS_EDGE_RIGHT | GS_EDGE_BOTTOM));
 	EXPECT(gs_frame_hit(w, h, true, 100, -2, &e) == GS_PART_RESIZE && e == GS_EDGE_TOP);
 	EXPECT(gs_frame_hit(w, h, true, -20, 200, &e) == GS_PART_NONE);
 	/* client-side decorations: no title bar, no outside resize grips */

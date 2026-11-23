@@ -7,7 +7,7 @@ import Quickshell.Services.Pipewire
 Popup {
     id: cc
     open: ShellState.controlCenter
-    panelWidth: 340
+    panelWidth: 380
 
     property bool wifiOn: true
     property bool btOn: false

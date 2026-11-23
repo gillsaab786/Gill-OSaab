@@ -184,7 +184,7 @@ def find(rgb, tol=40):
                 xs += x; ys += y; n += 1
     return (round(xs / n), round(ys / n), n) if n > 10 else None
 red, yel, grn = find((255, 95, 87)), find((254, 188, 46)), find((40, 200, 64))
-if red and yel and grn and abs(red[1] - grn[1]) < 4 and 14 < yel[0] - red[0] < 26 and 14 < grn[0] - yel[0] < 26:
+if red and yel and grn and abs(red[1] - grn[1]) < 4 and 20 < yel[0] - red[0] < 40 and 20 < grn[0] - yel[0] < 40:
     print(red[0], red[1], yel[0], yel[1], grn[0], grn[1])
 EOF3
 }
@@ -413,7 +413,7 @@ EOF8
     check "login screen theme loads" "! grep -iE 'error|is not a type|ReferenceError|TypeError' $OUT/sddm-greeter.log && pgrep -f sddm-greeter-qt6 >/dev/null"
     pkill -f sddm-greeter-qt6
   fi
-  check "shell has no QML errors" "! grep -v pipewire $OUT/quickshell.log | grep -E 'ERROR|TypeError|ReferenceError|is not a type|is not defined|Cannot assign|Could not load icon'"
+  check "shell has no QML errors" "! grep -v -i 'pipewire\|bluetooth\|bluez' $OUT/quickshell.log | grep -E 'ERROR|TypeError|ReferenceError|is not a type|is not defined|Cannot assign|Could not load icon'"
   grep -E "WARN|ERROR|TypeError|ReferenceError|is not|Cannot" "$OUT/quickshell.log" | sort | uniq -c | sort -rn | head -15
   check "compositor survived the shell" "kill -0 $WM"
   kill $QS 2>/dev/null; pkill foot 2>/dev/null

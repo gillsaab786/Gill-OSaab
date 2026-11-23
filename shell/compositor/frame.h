@@ -4,10 +4,12 @@
 
 #include <stdbool.h>
 
-#define GS_TITLE_H 30
-#define GS_BUTTON_D 12
-#define GS_BUTTON_GAP 8
-#define GS_BUTTON_X0 13
+/* Big enough for fingers on handheld touchscreens: 20 px buttons in a glass pill, 40 px title bar */
+#define GS_TITLE_H 40
+#define GS_BUTTON_D 20
+#define GS_BUTTON_GAP 10
+#define GS_BUTTON_X0 18
+#define GS_PILL_PAD 6
 #define GS_RESIZE_MARGIN 8
 
 enum gs_frame_part {
@@ -56,7 +58,7 @@ static inline enum gs_frame_part gs_frame_hit(int w, int h, bool ssd, double x, 
 	double cy = th / 2.0;
 	for (int i = 0; i < 3; i++) {
 		double dx = x - gs_button_cx(i), dy = y - cy;
-		double r = GS_BUTTON_D / 2.0 + 2; /* a little forgiving, like macOS */
+		double r = GS_BUTTON_D / 2.0 + GS_BUTTON_GAP / 2.0; /* the whole pill is a target: easy with a finger */
 		if (dx * dx + dy * dy <= r * r) {
 			return (enum gs_frame_part)(GS_PART_CLOSE + i);
 		}

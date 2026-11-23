@@ -76,7 +76,7 @@ Rectangle {
                 width: parent.width
                 text: card.notification.summary
                 color: Theme.text; elide: Text.ElideRight
-                font { family: Theme.font; pixelSize: 13; weight: Font.DemiBold }
+                font { family: Theme.font; pixelSize: 14; weight: Font.DemiBold }
             }
             Text {
                 width: parent.width
@@ -85,7 +85,7 @@ Rectangle {
                 color: Theme.text; opacity: 0.85
                 wrapMode: Text.Wrap; maximumLineCount: 3; elide: Text.ElideRight
                 textFormat: Text.StyledText
-                font { family: Theme.font; pixelSize: 12 }
+                font { family: Theme.font; pixelSize: 13 }
             }
             Item { // progress bar (downloads, installs, updates)
                 visible: card.progress >= 0
