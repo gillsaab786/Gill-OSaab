@@ -15,6 +15,17 @@ Qt Quick via Quickshell. Runs on the Gill-OSaab Core image (minimal Fedora bootc
   set after the toplevel's initial commit; GitHub artifact downloads are blocked from the agent
   workspace, so use the ci-shots branch.
 
+## Next up (asked by Jas, do these first)
+1. Touchscreen in the desktop (wlr touch events -> clients; tap, drag, scroll) - Ally/GPD screens.
+2. libinput setup: tap-to-click, natural scrolling, disable-while-typing (+ Settings switches).
+3. Pinch-zoom and 2-finger swipe back/forward in browsers: wlr pointer-gestures protocol
+   (forward pinch/hold; only 3+ finger swipes are kept for spaces).
+4. Window snapping / split screen: drag to an edge or Super+Left/Right = half screen, corners =
+   quarters, macOS-style tile menu on the green button.
+5. Download/progress notifications in the desktop: run gosaab-notify-hub's JobView + Unity
+   LauncherEntry bridges in the Core desktop too (Chromium, file copies, Steam, Flatpak).
+6. Android (Waydroid) notifications, incl. download progress, mirrored to the shell.
+
 ## Milestones
 - [x] **M1 Window manager core**: windows, popups, layer-shell (bar/dock/wallpaper), centred
       placement, maximise/fullscreen, Alt/Super+Tab, Super+Q/Return/F, spring open + fade/shrink
