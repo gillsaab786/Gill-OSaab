@@ -19,7 +19,7 @@ for card in /sys/class/drm/card[0-9]*; do
   drv=$(basename "$(readlink -f "$card/device/driver" 2>/dev/null)")
   dev=$(basename "$(readlink -f "$card/device" 2>/dev/null)")
   echo "$(basename "$card"): driver=$drv device=$dev"
-  if [ "$drv" = vkms ] || [ "$dev" = vkms ]; then
+  if [ "$dev" = "${GOSAAB_TEST_GPU:-vgem}" ]; then
     GOSAAB_RENDER_CARD=/dev/dri/$(basename "$card")
     export GOSAAB_RENDER_CARD
   fi
