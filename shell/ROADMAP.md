@@ -34,6 +34,10 @@ Qt Quick via Quickshell. Runs on the Gill-OSaab Core image (minimal Fedora bootc
    --filesystem=<folder>`; Windows apps: bwrap binds in gosaab-open; Android: Waydroid shared
    folder. Default: each app gets only its own folder; picking a file in a dialog still works.
    Steam stays outside the sandbox (games need full speed / controllers).
+10. Android files in Files: an "Android" place in the file manager (Download, Pictures, Movies,
+   Music, Documents + Android/data/<app>), readable without root (bind mounts with the right
+   owner). Settings > Android > Folders: point each Android folder (e.g. Download) at any Linux
+   folder you choose (bind mount into ~/.local/share/waydroid/data/media/0).
 
 ## Milestones
 - [x] **M1 Window manager core**: windows, popups, layer-shell (bar/dock/wallpaper), centred
