@@ -14,7 +14,7 @@ PanelWindow {
     exclusiveZone: Theme.dockIcon + 22
     exclusionMode: ExclusionMode.Normal
     color: "transparent"
-    WlrLayershell.namespace: "gosaab-dock"
+    WlrLayershell.namespace: "gosaab-dock:r28"
     WlrLayershell.layer: WlrLayer.Top
     mask: Region { item: hitArea }
 
@@ -58,9 +58,9 @@ PanelWindow {
         anchors { horizontalCenter: parent.horizontalCenter; bottom: parent.bottom; bottomMargin: 8 }
         width: items.width + 16
         height: Theme.dockIcon + 14
-        radius: 20
+        radius: 28
         color: Theme.dock
-        border { color: Qt.rgba(1, 1, 1, 0.16); width: 1 }
+        GlassRim { radius: 28 }
         Behavior on width { NumberAnimation { duration: Theme.normal; easing.type: Easing.OutCubic } }
 
         MouseArea {

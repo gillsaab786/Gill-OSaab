@@ -86,6 +86,35 @@ class Backend:
         except OSError:
             return False
 
+    # ---- Game Mode (Core edition)
+    BOOT_STATE = Path("/etc/gill-osaab/boot-mode")
+    LSFG_CONF = Path.home() / ".config/lsfg-vk/conf.toml"
+
+    def boot_mode(self):
+        try:
+            return self.BOOT_STATE.read_text().strip() or "auto"
+        except OSError:
+            return "auto"
+
+    def set_boot_mode(self, mode):
+        user = os.environ.get("USER", "")
+        return self.run(["pkexec", "/usr/libexec/gill-osaab/gosaab-session-select-root", "--boot", user, mode])
+
+    def frame_gen_enabled(self):
+        return self.LSFG_CONF.exists()
+
+    def set_frame_gen(self, on, multiplier=2):
+        if on:
+            self.LSFG_CONF.parent.mkdir(parents=True, exist_ok=True)
+            self.LSFG_CONF.write_text(
+                "# Gill-OSaab frame generation. Games opt in with the Steam launch option:\n"
+                "#   LSFG_PROCESS=gosaab %command%\n"
+                "version = 1\n\n[[game]]\nexe = \"gosaab\"\n"
+                f"multiplier = {multiplier}\nflow_scale = 0.8\nperformance_mode = true\n")
+        elif self.LSFG_CONF.exists():
+            self.LSFG_CONF.unlink()
+        return 0
+
     def decky_plugin_installed(self):
         return (Path.home() / "homebrew/plugins/gill-osaab-notify/plugin.json").exists()
 
@@ -324,6 +353,7 @@ PAGES = [
     ("Notifications", "#FF453A", "preferences-system-notifications-symbolic", "N"),
     ("Screen Off", "#FF9F0A", "video-display-symbolic", "O"),
     ("Appearance", "#1FB6C9", "preferences-desktop-appearance-symbolic", "A"),
+    ("Game Mode", "#32D74B", "input-gaming-symbolic", "G"),
     ("Optional Features", "#BF5AF2", "view-more-symbolic", "+"),
     ("About", "#8E8E93", "help-about-symbolic", "i"),
 ]
@@ -371,7 +401,7 @@ class Settings(QMainWindow):
         self.setCentralWidget(root)
 
         builders = [self.page_updates, self.page_device, self.page_security, self.page_notifications,
-                    self.page_screen, self.page_appearance, self.page_optional, self.page_about]
+                    self.page_screen, self.page_appearance, self.page_gamemode, self.page_optional, self.page_about]
         self.pages = []
         for (name, color, glyph, letter), builder in zip(PAGES, builders):
             item = QListWidgetItem(tile_icon(color, glyph, letter), name)
@@ -599,6 +629,50 @@ class Settings(QMainWindow):
         p.finish()
         return p
 
+    def page_gamemode(self):
+        p = Page("Game Mode")
+        b = self.backend
+        start = QWidget()
+        sl = QHBoxLayout(start)
+        sl.setContentsMargins(0, 0, 0, 0)
+        sl.setSpacing(0)
+        self.boot_group = QButtonGroup(self)
+        current = b.boot_mode()
+        choices = [("Game Mode", "game"), ("Desktop", "desktop"), ("Ask", "ask")]
+        for i, (label, mode) in enumerate(choices):
+            btn = QPushButton(label)
+            btn.setCheckable(True)
+            btn.setObjectName("segLeft" if i == 0 else "segRight" if i == len(choices) - 1 else "segMid")
+            btn.setChecked(current == mode)
+            btn.clicked.connect(lambda _=False, m=mode: b.set_boot_mode(m))
+            self.boot_group.addButton(btn)
+            sl.addWidget(btn)
+        p.section("Start up", [
+            Row("Start up in", "What opens when you turn it on. Handhelds start in Game Mode, PCs on the "
+                "desktop, until you choose.", start),
+        ])
+        self.fg = Switch()
+        self.fg.set_quiet(b.frame_gen_enabled())
+        self.fg.toggled.connect(lambda on: b.set_frame_gen(on))
+        fg_ready = Path("/usr/share/vulkan/implicit_layer.d").exists() and any(
+            "lsfg" in f.name for f in Path("/usr/share/vulkan/implicit_layer.d").glob("*.json"))
+        p.section("Performance", [
+            Row("TDP, fans and buttons", "In Game Mode press the ··· (Quick Access) button: Handheld Daemon "
+                "sets TDP, fan curve and charge limit." if b.have("hhd") else "Handheld Daemon is not installed.",
+                QLabel("●  Ready" if b.have("hhd") else "●  Not found")),
+            Row("Frame generation", "Off by default. Doubles frames in games you choose: add the Steam launch "
+                "option  LSFG_PROCESS=gosaab %command%. Needs Lossless Scaling from Steam."
+                + ("" if fg_ready else "  (Not installed on this system.)"), self.fg),
+        ])
+        decky = p.button("Install Decky Loader (Game Mode plugins, notifications)")
+        decky.clicked.connect(lambda: b.run(["foot", "-e", "sh", "-c",
+            "curl -L https://github.com/SteamDeckHomebrew/decky-installer/releases/latest/download/"
+            "install_release.sh | sh; echo; read -p 'Done. Press Enter to close.' x"], wait=False))
+        switch = p.button("Switch to Game Mode now", primary=True)
+        switch.clicked.connect(lambda: b.run(["gosaab-game-mode"], wait=False))
+        p.finish()
+        return p
+
     def page_optional(self):
         p = Page("Optional Features")
         rows = []
@@ -695,10 +769,10 @@ QPushButton#primary { background: #1fb6c9; color: #ffffff; font-weight: 600; }
 QPushButton#primary:hover { background: #27c7db; }
 QPushButton#pill { background: #34343a; border-radius: 14px; padding: 6px 16px; color: #5ad2e2; font-weight: 600; }
 QPushButton#pill:hover { background: #3d3d44; }
-QPushButton#segLeft, QPushButton#segRight { background: #34343a; padding: 6px 18px; border-radius: 0; }
+QPushButton#segLeft, QPushButton#segMid, QPushButton#segRight { background: #34343a; padding: 6px 18px; border-radius: 0; }
 QPushButton#segLeft { border-top-left-radius: 9px; border-bottom-left-radius: 9px; }
 QPushButton#segRight { border-top-right-radius: 9px; border-bottom-right-radius: 9px; }
-QPushButton#segLeft:checked, QPushButton#segRight:checked { background: #1fb6c9; color: #ffffff; }
+QPushButton#segLeft:checked, QPushButton#segMid:checked, QPushButton#segRight:checked { background: #1fb6c9; color: #ffffff; }
 QSpinBox { background: #34343a; border: none; border-radius: 9px; padding: 4px 8px; min-width: 70px; }
 QScrollArea { background: transparent; }
 QScrollBar:vertical { width: 8px; background: transparent; }

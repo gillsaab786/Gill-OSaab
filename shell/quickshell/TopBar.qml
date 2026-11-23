@@ -27,7 +27,7 @@ PanelWindow {
     Rectangle {
         anchors.fill: parent
         color: Theme.bar
-        Rectangle { anchors { left: parent.left; right: parent.right; bottom: parent.bottom } height: 1; color: Qt.rgba(1, 1, 1, 0.06) }
+
     }
 
     Row {

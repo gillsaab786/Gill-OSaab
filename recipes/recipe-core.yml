@@ -16,6 +16,7 @@ modules:
       copr:
         - bieszczaders/kernel-cachyos-addons # gaming CPU schedulers (scx)
         - errornointernet/quickshell # newest Quickshell (the shell UI toolkit)
+        - hhd-dev/hhd # Handheld Daemon: TDP, fans, controller buttons in Steam's quick menu
     install:
       skip-unavailable: true
       packages:
@@ -71,6 +72,10 @@ modules:
         - steam
         - steam-devices
         - gamescope
+        - hhd
+        - hhd-ui
+        - adjustor
+        - ryzenadj
         - mangohud
         - scx-scheds
         - scx-tools

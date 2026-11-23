@@ -51,7 +51,7 @@ Popup {
     }
 
     Rectangle {
-        width: parent.width; height: sliders.implicitHeight + 20; radius: 14
+        width: parent.width; height: sliders.implicitHeight + 20; radius: 24
         color: Theme.tile
         Column {
             id: sliders
@@ -66,7 +66,7 @@ Popup {
     }
 
     Rectangle {
-        width: parent.width; height: 40; radius: 12
+        width: parent.width; height: 44; radius: 22
         color: settingsMouse.containsMouse ? Theme.tileHover : Theme.tile
         Text { anchors.centerIn: parent; text: "Gill-OSaab Settings…"; color: Theme.text; font { family: Theme.font; pixelSize: 13 } }
         MouseArea { id: settingsMouse; anchors.fill: parent; hoverEnabled: true

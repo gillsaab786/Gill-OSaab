@@ -8,8 +8,10 @@ Rectangle {
     property string detail: ""
     property bool on: false
     signal toggled()
-    implicitHeight: 58
-    radius: 14
+    implicitHeight: 60
+    radius: 30
+    scale: mouse.pressed ? 0.95 : 1
+    Behavior on scale { SpringAnimation { spring: 5; damping: 0.38; epsilon: 0.002 } }
     color: mouse.containsMouse ? Theme.tileHover : Theme.tile
     Behavior on color { ColorAnimation { duration: Theme.fast } }
     Row {
@@ -27,5 +29,6 @@ Rectangle {
             Text { visible: text !== ""; text: tile.detail; color: Theme.subtext; font { family: Theme.font; pixelSize: 11 } }
         }
     }
+    GlassRim { radius: 30; strength: 0.6 }
     MouseArea { id: mouse; anchors.fill: parent; hoverEnabled: true; onClicked: tile.toggled() }
 }

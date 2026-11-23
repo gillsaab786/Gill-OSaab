@@ -12,6 +12,15 @@ for b in gosaab-wm gosaab-session gosaab-game-mode steamos-session-select qs swa
 done
 echo "wine files: $(ls -d /usr/bin/wine* /etc/alternatives/wine* 2>/dev/null | tr "\n" " ")"
 check "Windows apps: wine runs" "wine --version >/dev/null 2>&1"
+check "TDP/fans/buttons: Handheld Daemon installed" "command -v hhd >/dev/null"
+check "frame generation layer installed (lsfg-vk)" "ls /usr/share/vulkan/implicit_layer.d/ 2>/dev/null | grep -qi lsfg"
+check "start-up choice applied at boot" "systemctl is-enabled gosaab-boot-mode.service >/dev/null 2>&1"
+/usr/libexec/gill-osaab/gosaab-session-select-root --boot root game
+check "Settings: start in Game Mode" "grep -q 'Session=gill-osaab-gamemode.desktop' /etc/sddm.conf.d/zz-gill-osaab-autologin.conf"
+/usr/libexec/gill-osaab/gosaab-session-select-root --boot root desktop
+check "Settings: start in Desktop" "grep -q 'Session=gill-osaab.desktop' /etc/sddm.conf.d/zz-gill-osaab-autologin.conf"
+/usr/libexec/gill-osaab/gosaab-session-select-root --boot root ask
+check "Settings: ask at the login screen" "[ ! -e /etc/sddm.conf.d/zz-gill-osaab-autologin.conf ]"
 check "shell config installed" "[ -f /etc/xdg/quickshell/gill-osaab/shell.qml ]"
 check "login theme installed" "[ -f /usr/share/sddm/themes/gill-osaab/Main.qml ]"
 check "desktop session listed" "[ -f /usr/share/wayland-sessions/gill-osaab.desktop ]"
@@ -37,10 +46,14 @@ for _ in $(seq 1 40); do qs -c gill-osaab ipc call shell ping 2>/dev/null | grep
 check "Gill-OSaab session starts and the shell answers" "qs -c gill-osaab ipc call shell ping | grep -q ok"
 sleep 3; grim "$OUT/01-core-desktop.png"
 foot -T Terminal -e sh -c 'sleep 60' & sleep 2; grim "$OUT/02-core-window.png"
+notify-send -a Steam -h int:value:64 "Downloading Cyberpunk 2077" "41.2 GB of 64 GB"; sleep 1.5; grim "$OUT/03a-core-notification.png"
 qs -c gill-osaab ipc call controlcenter toggle; sleep 1.5; grim "$OUT/03-core-control-centre.png"
 qs -c gill-osaab ipc call controlcenter toggle
 qs -c gill-osaab ipc call launchpad toggle; sleep 1.5; grim "$OUT/04-core-launchpad.png"
 qs -c gill-osaab ipc call launchpad toggle; sleep 0.5
+qs -c gill-osaab ipc call spotlight search "fire"; sleep 1.5; grim "$OUT/05-core-spotlight.png"
+qs -c gill-osaab ipc call spotlight toggle; sleep 0.5
+QT_QPA_PLATFORM=wayland gosaab-settings >/dev/null 2>&1 & sleep 4; grim "$OUT/06-core-settings.png"
 check "desktop still running" "pgrep -x gosaab-wm >/dev/null"
 grep -E "ERROR|TypeError|ReferenceError|is not a type" "$OUT/session.log" | grep -v "EGL\|pipewire\|renderer" | sort -u | head -10
 exit $fail

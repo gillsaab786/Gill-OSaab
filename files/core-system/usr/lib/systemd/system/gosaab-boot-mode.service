@@ -1,0 +1,11 @@
+[Unit]
+Description=Gill-OSaab: start in Game Mode or Desktop (Settings > Game Mode)
+Before=display-manager.service
+After=systemd-user-sessions.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/gill-osaab/gosaab-boot-mode
+
+[Install]
+WantedBy=graphical.target

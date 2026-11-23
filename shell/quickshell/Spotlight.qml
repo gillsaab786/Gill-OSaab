@@ -12,7 +12,7 @@ PanelWindow {
     anchors { top: true; left: true; right: true; bottom: true }
     color: "transparent"
     exclusionMode: ExclusionMode.Ignore
-    WlrLayershell.namespace: "gosaab-spotlight"
+    WlrLayershell.namespace: "gosaab-spotlight:r29"
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.keyboardFocus: ShellState.spotlight ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
     mask: Region { item: ShellState.spotlight ? fullArea : box }
@@ -61,7 +61,7 @@ PanelWindow {
         width: 640
         height: 58 + (list.count > 0 || spot.maths !== "" ? results.height + 10 : 0)
         anchors { horizontalCenter: parent.horizontalCenter; top: parent.top; topMargin: parent.height * 0.22 }
-        radius: 18
+        radius: 29
         color: Theme.panel
         border { color: Theme.panelBorder; width: 1 }
         clip: true
@@ -70,6 +70,7 @@ PanelWindow {
         Behavior on opacity { NumberAnimation { duration: Theme.fast } }
         Behavior on scale { SpringAnimation { spring: 4.5; damping: 0.4; epsilon: 0.002 } }
         Behavior on height { NumberAnimation { duration: Theme.fast; easing.type: Easing.OutCubic } }
+        GlassRim { radius: 29 }
         MouseArea { anchors.fill: parent } // keep clicks inside from closing
 
         Icon { id: glass; name: "search"; width: 22; height: 22; color: Theme.subtext

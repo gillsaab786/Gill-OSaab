@@ -52,7 +52,7 @@ Scope {
         visible: root.banners.length > 0 && !ShellState.notificationCenter && !ShellState.controlCenter
         color: "transparent"
         exclusionMode: ExclusionMode.Normal
-        WlrLayershell.namespace: "gosaab-notifications:r16"
+        WlrLayershell.namespace: "gosaab-notifications:r24"
         WlrLayershell.layer: WlrLayer.Overlay
 
         Column {

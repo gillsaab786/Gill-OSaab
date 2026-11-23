@@ -17,13 +17,13 @@ PanelWindow {
     color: "transparent"
     visible: open || panel.opacity > 0.01
     exclusionMode: ExclusionMode.Normal // sit below the menu bar
-    WlrLayershell.namespace: "gosaab-popup:r18"
+    WlrLayershell.namespace: "gosaab-popup:r26"
     WlrLayershell.layer: WlrLayer.Overlay
 
     Rectangle {
         id: panel
         anchors.fill: parent
-        radius: 18
+        radius: 26
         color: Theme.panel
         border { color: Theme.panelBorder; width: 1 }
         opacity: popup.open ? 1 : 0
@@ -31,6 +31,7 @@ PanelWindow {
         transformOrigin: popup.alignLeft ? Item.TopLeft : Item.TopRight
         Behavior on opacity { NumberAnimation { duration: Theme.fast; easing.type: Easing.OutCubic } }
         Behavior on scale { SpringAnimation { spring: 4.5; damping: 0.38; epsilon: 0.002 } }
+        GlassRim { radius: 26 }
         Column {
             id: inner
             anchors { left: parent.left; right: parent.right; top: parent.top; margins: 14 }

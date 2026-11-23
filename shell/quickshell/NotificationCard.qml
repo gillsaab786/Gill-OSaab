@@ -11,7 +11,7 @@ Rectangle {
     signal timedOut()
 
     implicitHeight: body.implicitHeight + 24
-    radius: 16
+    radius: 24
     color: Theme.panel
     border { color: Theme.panelBorder; width: 1 }
 
@@ -27,6 +27,11 @@ Rectangle {
         interval: card.progress >= 100 ? 3000 : 5000
         onTriggered: card.timedOut()
     }
+
+    GlassRim { radius: 24 }
+    // press: glass squishes a little, like iOS 26
+    scale: hover.pressed ? 0.97 : 1
+    Behavior on scale { SpringAnimation { spring: 5; damping: 0.4; epsilon: 0.002 } }
 
     MouseArea {
         id: hover

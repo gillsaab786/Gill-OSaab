@@ -44,6 +44,19 @@ class FakeBackend:
     def kde_night_light(self):
         return False
 
+    def boot_mode(self):
+        return "auto"
+
+    def set_boot_mode(self, mode):
+        self.calls.append(["boot", mode]) if hasattr(self, "calls") else None
+        return 0
+
+    def frame_gen_enabled(self):
+        return False
+
+    def set_frame_gen(self, on, multiplier=2):
+        return 0
+
     def decky_plugin_installed(self):
         return False
 
@@ -111,10 +124,16 @@ class SettingsApp(unittest.TestCase):
 
     def test_every_page_builds(self):
         w = self.gs.Settings(FakeBackend())
-        self.assertEqual(w.stack.count(), 8)
-        for i in range(8):
+        self.assertEqual(w.stack.count(), 9)
+        for i in range(9):
             w.nav.setCurrentRow(i)
             self.assertEqual(w.stack.currentIndex(), i)
+
+    def test_game_mode_page(self):
+        w = self.gs.Settings(FakeBackend())
+        names = [w.nav.item(i).text() for i in range(w.nav.count())]
+        self.assertIn("Game Mode", names)
+        self.assertEqual([b.text() for b in w.boot_group.buttons()], ["Game Mode", "Desktop", "Ask"])
 
     def test_apply_dark_light(self):
         b = FakeBackend()
