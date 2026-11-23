@@ -1,0 +1,1323 @@
+/*
+ * gosaab-wm: the Gill-OSaab window manager (Wayland compositor).
+ *
+ * Built on wlroots 0.20 + scenefx 0.5 (blur, rounded corners, shadows).
+ * Started from scenefx's tinywl example (MIT) and grown into Gill-OSaab's own:
+ *   - macOS/iOS-style motion: windows spring open and fade/shrink closed
+ *   - rounded corners, soft drop shadows, background blur behind windows
+ *   - layer-shell for the Gill-OSaab bar, dock and wallpaper
+ *   - new windows centred, maximise/fullscreen, Alt/Super+Tab switching
+ *   - screencopy + xdg-output so screenshots (and tests) work
+ *
+ * Run:  gosaab-wm [-s "startup command"]
+ * Keys: Super+Q close, Super+Return terminal, Super+F maximise, Alt/Super+Tab switch
+ * Test hooks: SIGUSR1 closes the focused window; the socket name is written to
+ *             $XDG_RUNTIME_DIR/gosaab-wm.socket
+ */
+#define _POSIX_C_SOURCE 200809L
+#include <assert.h>
+#include <getopt.h>
+#include <math.h>
+#include <signal.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+#include <unistd.h>
+#include <scenefx/render/fx_renderer/fx_renderer.h>
+#include <scenefx/types/fx/clipped_region.h>
+#include <scenefx/types/wlr_scene.h>
+#include <wayland-server-core.h>
+#include <wlr/backend.h>
+#include <wlr/backend/headless.h>
+#include <wlr/render/allocator.h>
+#include <wlr/render/wlr_renderer.h>
+#include <wlr/types/wlr_compositor.h>
+#include <wlr/types/wlr_cursor.h>
+#include <wlr/types/wlr_cursor_shape_v1.h>
+#include <wlr/types/wlr_data_control_v1.h>
+#include <wlr/types/wlr_data_device.h>
+#include <wlr/types/wlr_export_dmabuf_v1.h>
+#include <wlr/types/wlr_fractional_scale_v1.h>
+#include <wlr/types/wlr_gamma_control_v1.h>
+#include <wlr/types/wlr_idle_inhibit_v1.h>
+#include <wlr/types/wlr_idle_notify_v1.h>
+#include <wlr/types/wlr_input_device.h>
+#include <wlr/types/wlr_keyboard.h>
+#include <wlr/types/wlr_layer_shell_v1.h>
+#include <wlr/types/wlr_output.h>
+#include <wlr/types/wlr_output_layout.h>
+#include <wlr/types/wlr_pointer.h>
+#include <wlr/types/wlr_presentation_time.h>
+#include <wlr/types/wlr_primary_selection_v1.h>
+#include <wlr/types/wlr_screencopy_v1.h>
+#include <wlr/types/wlr_seat.h>
+#include <wlr/types/wlr_single_pixel_buffer_v1.h>
+#include <wlr/types/wlr_subcompositor.h>
+#include <wlr/types/wlr_viewporter.h>
+#include <wlr/types/wlr_xcursor_manager.h>
+#include <wlr/types/wlr_xdg_decoration_v1.h>
+#include <wlr/types/wlr_xdg_output_v1.h>
+#include <wlr/types/wlr_xdg_shell.h>
+#include <wlr/util/log.h>
+#include <xkbcommon/xkbcommon.h>
+
+#include "anim.h"
+
+#define CORNER_RADIUS 10
+#define SHADOW_SIGMA 22.0f
+#define SHADOW_OFFSET_Y 8
+#define OPEN_MS 280.0
+#define CLOSE_MS 200.0
+
+enum gs_cursor_mode { CURSOR_PASSTHROUGH, CURSOR_MOVE, CURSOR_RESIZE };
+
+struct gs_server {
+	struct wl_display *display;
+	struct wlr_backend *backend;
+	struct wlr_renderer *renderer;
+	struct wlr_allocator *allocator;
+	struct wlr_scene *scene;
+	struct wlr_scene_output_layout *scene_layout;
+	struct {
+		struct wlr_scene_tree *background, *bottom, *toplevels, *closing, *top, *overlay;
+		struct wlr_scene_optimized_blur *blur;
+		struct wlr_scene_rect *backdrop;
+	} layers;
+
+	struct wlr_xdg_shell *xdg_shell;
+	struct wl_listener new_xdg_toplevel, new_xdg_popup;
+	struct wl_list toplevels; /* gs_toplevel.link, most recently focused first */
+	struct wl_list closing;   /* gs_closing.link */
+
+	struct wlr_layer_shell_v1 *layer_shell;
+	struct wl_listener new_layer_surface;
+	struct wl_list layer_surfaces; /* gs_layer.link */
+
+	struct wlr_xdg_decoration_manager_v1 *decoration_mgr;
+	struct wl_listener new_decoration;
+
+	struct wlr_cursor *cursor;
+	struct wlr_xcursor_manager *cursor_mgr;
+	struct wlr_cursor_shape_manager_v1 *cursor_shape_mgr;
+	struct wl_listener cursor_motion, cursor_motion_absolute, cursor_button, cursor_axis, cursor_frame;
+	struct wl_listener request_cursor_shape;
+
+	struct wlr_seat *seat;
+	struct wl_listener new_input, request_cursor, request_set_selection, request_set_primary_selection;
+	struct wl_list keyboards;
+	enum gs_cursor_mode cursor_mode;
+	struct gs_toplevel *grabbed;
+	double grab_x, grab_y;
+	struct wlr_box grab_geobox;
+	uint32_t resize_edges;
+
+	struct wlr_output_layout *output_layout;
+	struct wl_list outputs;
+	struct wl_listener new_output;
+};
+
+struct gs_output {
+	struct wl_list link;
+	struct gs_server *server;
+	struct wlr_output *wlr_output;
+	struct wlr_box usable; /* layout coords, after bar/dock exclusive zones */
+	struct wl_listener frame, request_state, destroy;
+};
+
+struct gs_toplevel {
+	struct wl_list link;
+	struct gs_server *server;
+	struct wlr_xdg_toplevel *xdg_toplevel;
+	struct wlr_scene_tree *tree;     /* positioned at the window's layout position */
+	struct wlr_scene_tree *xdg_tree; /* client content, offset while animating */
+	struct wlr_scene_shadow *shadow;
+	struct wlr_scene_blur *blur;
+	struct wl_listener map, unmap, commit, destroy;
+	struct wl_listener request_move, request_resize, request_maximize, request_fullscreen;
+	bool mapped, placed, maximized;
+	struct wlr_box saved; /* geometry before maximise */
+	struct gs_anim open;
+};
+
+struct gs_closing_buffer {
+	struct wlr_scene_buffer *buffer;
+	int x, y, w, h; /* relative to the closing tree, unscaled */
+};
+
+struct gs_closing {
+	struct wl_list link;
+	struct gs_server *server;
+	struct wlr_scene_tree *tree;
+	struct wlr_scene_shadow *shadow;
+	struct gs_closing_buffer bufs[16];
+	int nbufs, width, height;
+	struct gs_anim anim;
+};
+
+struct gs_layer {
+	struct wl_list link;
+	struct gs_server *server;
+	struct wlr_layer_surface_v1 *layer_surface;
+	struct wlr_scene_layer_surface_v1 *scene;
+	struct wl_listener map, unmap, commit, destroy;
+	bool mapped;
+};
+
+struct gs_popup {
+	struct wlr_xdg_popup *xdg_popup;
+	struct wl_listener commit, destroy;
+};
+
+struct gs_keyboard {
+	struct wl_list link;
+	struct gs_server *server;
+	struct wlr_keyboard *wlr_keyboard;
+	struct wl_listener modifiers, key, destroy;
+};
+
+static struct gs_server *g_server; /* for signal handlers only */
+
+/* ------------------------------------------------------------------ helpers */
+
+static double now_ms(void) {
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return ts.tv_sec * 1000.0 + ts.tv_nsec / 1e6;
+}
+
+static void schedule_frames(struct gs_server *server) {
+	struct gs_output *output;
+	wl_list_for_each(output, &server->outputs, link) {
+		wlr_output_schedule_frame(output->wlr_output);
+	}
+}
+
+static struct gs_output *first_output(struct gs_server *server) {
+	if (wl_list_empty(&server->outputs)) {
+		return NULL;
+	}
+	struct gs_output *output = wl_container_of(server->outputs.next, output, link);
+	return output;
+}
+
+static struct wlr_box output_usable_area(struct gs_server *server) {
+	struct gs_output *output = first_output(server);
+	if (output == NULL) {
+		return (struct wlr_box){0, 0, 1280, 720};
+	}
+	if (output->usable.width > 0 && output->usable.height > 0) {
+		return output->usable;
+	}
+	struct wlr_box box;
+	wlr_output_layout_get_box(server->output_layout, output->wlr_output, &box);
+	return box;
+}
+
+static struct gs_toplevel *focused_toplevel(struct gs_server *server) {
+	if (wl_list_empty(&server->toplevels)) {
+		return NULL;
+	}
+	struct gs_toplevel *t = wl_container_of(server->toplevels.next, t, link);
+	return t;
+}
+
+/* ------------------------------------------------------------------ visuals */
+
+struct visual_args {
+	struct gs_toplevel *toplevel;
+	float scale, alpha;
+};
+
+static void style_buffer(struct wlr_scene_buffer *buffer, int sx, int sy, void *data) {
+	struct visual_args *args = data;
+	struct wlr_scene_surface *scene_surface = wlr_scene_surface_try_from_buffer(buffer);
+	if (scene_surface == NULL) {
+		return;
+	}
+	struct wlr_surface *surface = scene_surface->surface;
+	wlr_scene_buffer_set_opacity(buffer, args->alpha);
+	struct wlr_xdg_surface *xdg = wlr_xdg_surface_try_from_wlr_surface(surface);
+	if (xdg && xdg->role == WLR_XDG_SURFACE_ROLE_TOPLEVEL) {
+		wlr_scene_buffer_set_corner_radii(buffer, corner_radii_all(args->toplevel->maximized ? 0 : CORNER_RADIUS));
+		wlr_scene_blur_set_transparency_mask_source(args->toplevel->blur, buffer);
+		int w = surface->current.width, h = surface->current.height;
+		if (args->scale < 0.999f) {
+			wlr_scene_buffer_set_dest_size(buffer, (int)lroundf(w * args->scale), (int)lroundf(h * args->scale));
+		} else {
+			wlr_scene_buffer_set_dest_size(buffer, w, h);
+		}
+	}
+}
+
+/* Apply opacity/scale to a window (scale is about the window centre). */
+static void apply_toplevel_visual(struct gs_toplevel *t, float scale, float alpha) {
+	struct wlr_box *geo = &t->xdg_toplevel->base->geometry;
+	int dx = (int)lroundf(geo->width * (1.0f - scale) / 2.0f);
+	int dy = (int)lroundf(geo->height * (1.0f - scale) / 2.0f);
+	wlr_scene_node_set_position(&t->xdg_tree->node, dx, dy);
+	struct visual_args args = { t, scale, alpha };
+	wlr_scene_node_for_each_buffer(&t->xdg_tree->node, style_buffer, &args);
+	float shadow_color[4] = { 0.0f, 0.0f, 0.0f, 0.42f * alpha };
+	wlr_scene_shadow_set_color(t->shadow, shadow_color);
+	wlr_scene_node_set_enabled(&t->shadow->node, !t->maximized);
+}
+
+static void update_decor_geometry(struct gs_toplevel *t) {
+	struct wlr_box *geo = &t->xdg_toplevel->base->geometry;
+	wlr_scene_subsurface_tree_set_clip(&t->xdg_tree->node, geo);
+	wlr_scene_blur_set_size(t->blur, geo->width, geo->height);
+	int sigma = (int)SHADOW_SIGMA;
+	wlr_scene_shadow_set_size(t->shadow, geo->width + sigma * 2, geo->height + sigma * 2);
+	wlr_scene_node_set_position(&t->shadow->node, -sigma, -sigma + SHADOW_OFFSET_Y);
+	wlr_scene_shadow_set_clipped_region(t->shadow, (struct clipped_region){
+		.corners = corner_radii_all(CORNER_RADIUS),
+		.area = { sigma, sigma - SHADOW_OFFSET_Y, geo->width, geo->height },
+	});
+}
+
+/* Advance every running animation; returns true while any is still running. */
+static bool tick_animations(struct gs_server *server) {
+	double now = now_ms();
+	bool running = false;
+	struct gs_toplevel *t;
+	wl_list_for_each(t, &server->toplevels, link) {
+		if (!t->open.active) {
+			continue;
+		}
+		double p = gs_anim_progress(&t->open, now);
+		double e = gs_ease_spring(p);
+		apply_toplevel_visual(t, (float)(0.94 + 0.06 * e), (float)fmin(1.0, e * 1.15));
+		if (p >= 1.0) {
+			t->open.active = false;
+			apply_toplevel_visual(t, 1.0f, 1.0f);
+		} else {
+			running = true;
+		}
+	}
+	struct gs_closing *c, *tmp;
+	wl_list_for_each_safe(c, tmp, &server->closing, link) {
+		double p = gs_anim_progress(&c->anim, now);
+		double e = gs_ease_in_cubic(p);
+		float scale = (float)(1.0 - 0.07 * e), alpha = (float)(1.0 - e);
+		int dx = (int)lroundf(c->width * (1.0f - scale) / 2.0f);
+		int dy = (int)lroundf(c->height * (1.0f - scale) / 2.0f);
+		for (int i = 0; i < c->nbufs; i++) {
+			struct gs_closing_buffer *b = &c->bufs[i];
+			wlr_scene_node_set_position(&b->buffer->node, dx + (int)lroundf(b->x * scale),
+				dy + (int)lroundf(b->y * scale));
+			wlr_scene_buffer_set_dest_size(b->buffer, (int)lroundf(b->w * scale), (int)lroundf(b->h * scale));
+			wlr_scene_buffer_set_opacity(b->buffer, alpha);
+		}
+		float shadow_color[4] = { 0.0f, 0.0f, 0.0f, 0.42f * alpha };
+		wlr_scene_shadow_set_color(c->shadow, shadow_color);
+		if (p >= 1.0) {
+			wlr_scene_node_destroy(&c->tree->node);
+			wl_list_remove(&c->link);
+			free(c);
+		} else {
+			running = true;
+		}
+	}
+	return running;
+}
+
+/* ------------------------------------------------------------------ focus */
+
+static void focus_surface(struct gs_server *server, struct wlr_surface *surface) {
+	struct wlr_keyboard *keyboard = wlr_seat_get_keyboard(server->seat);
+	if (keyboard && surface) {
+		wlr_seat_keyboard_notify_enter(server->seat, surface, keyboard->keycodes,
+			keyboard->num_keycodes, &keyboard->modifiers);
+	} else if (surface) {
+		wlr_seat_keyboard_notify_enter(server->seat, surface, NULL, 0, NULL);
+	}
+}
+
+static bool exclusive_layer_has_focus(struct gs_server *server) {
+	struct gs_layer *l;
+	wl_list_for_each(l, &server->layer_surfaces, link) {
+		if (l->mapped && l->layer_surface->current.keyboard_interactive ==
+				ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE &&
+				l->layer_surface->current.layer >= ZWLR_LAYER_SHELL_V1_LAYER_TOP) {
+			return true;
+		}
+	}
+	return false;
+}
+
+static void focus_toplevel(struct gs_toplevel *t) {
+	if (t == NULL) {
+		return;
+	}
+	struct gs_server *server = t->server;
+	struct wlr_surface *prev = server->seat->keyboard_state.focused_surface;
+	struct wlr_surface *surface = t->xdg_toplevel->base->surface;
+	if (prev == surface) {
+		return;
+	}
+	if (prev) {
+		struct wlr_xdg_toplevel *prev_toplevel = wlr_xdg_toplevel_try_from_wlr_surface(prev);
+		if (prev_toplevel) {
+			wlr_xdg_toplevel_set_activated(prev_toplevel, false);
+		}
+	}
+	wlr_scene_node_raise_to_top(&t->tree->node);
+	wl_list_remove(&t->link);
+	wl_list_insert(&server->toplevels, &t->link);
+	wlr_xdg_toplevel_set_activated(t->xdg_toplevel, true);
+	if (!exclusive_layer_has_focus(server)) {
+		focus_surface(server, surface);
+	}
+}
+
+static void focus_next_toplevel(struct gs_server *server) {
+	if (wl_list_length(&server->toplevels) < 2) {
+		return;
+	}
+	struct gs_toplevel *last = wl_container_of(server->toplevels.prev, last, link);
+	focus_toplevel(last);
+}
+
+/* ------------------------------------------------------------------ layer shell */
+
+static void arrange_layers(struct gs_server *server) {
+	struct gs_output *output = first_output(server);
+	if (output == NULL) {
+		return;
+	}
+	struct wlr_box full;
+	wlr_output_layout_get_box(server->output_layout, output->wlr_output, &full);
+	struct wlr_box usable = full;
+	/* Exclusive-zone surfaces first (bar, dock), then everything else, top layers first. */
+	for (int pass = 0; pass < 2; pass++) {
+		for (int layer = ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY; layer >= ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND; layer--) {
+			struct gs_layer *l;
+			wl_list_for_each(l, &server->layer_surfaces, link) {
+				struct wlr_layer_surface_v1 *ls = l->layer_surface;
+				if (!ls->initialized || (int)ls->current.layer != layer) {
+					continue;
+				}
+				bool exclusive = ls->current.exclusive_zone > 0;
+				if ((pass == 0) != exclusive) {
+					continue;
+				}
+				wlr_scene_layer_surface_v1_configure(l->scene, &full, &usable);
+			}
+		}
+	}
+	output->usable = usable;
+	wlr_scene_rect_set_size(server->layers.backdrop, full.width, full.height);
+	wlr_scene_node_set_position(&server->layers.backdrop->node, full.x, full.y);
+}
+
+static struct wlr_scene_tree *layer_tree(struct gs_server *server, enum zwlr_layer_shell_v1_layer layer) {
+	switch (layer) {
+	case ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND: return server->layers.background;
+	case ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM: return server->layers.bottom;
+	case ZWLR_LAYER_SHELL_V1_LAYER_TOP: return server->layers.top;
+	default: return server->layers.overlay;
+	}
+}
+
+static void layer_commit(struct wl_listener *listener, void *data) {
+	struct gs_layer *l = wl_container_of(listener, l, commit);
+	struct wlr_layer_surface_v1 *ls = l->layer_surface;
+	if (ls->current.committed & WLR_LAYER_SURFACE_V1_STATE_LAYER) {
+		wlr_scene_node_reparent(&l->scene->tree->node, layer_tree(l->server, ls->current.layer));
+	}
+	if (ls->initial_commit || ls->current.committed) {
+		arrange_layers(l->server);
+	}
+}
+
+static void layer_map(struct wl_listener *listener, void *data) {
+	struct gs_layer *l = wl_container_of(listener, l, map);
+	l->mapped = true;
+	arrange_layers(l->server);
+	if (l->layer_surface->current.keyboard_interactive != ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE &&
+			l->layer_surface->current.layer >= ZWLR_LAYER_SHELL_V1_LAYER_TOP) {
+		focus_surface(l->server, l->layer_surface->surface);
+	}
+}
+
+static void layer_unmap(struct wl_listener *listener, void *data) {
+	struct gs_layer *l = wl_container_of(listener, l, unmap);
+	l->mapped = false;
+	arrange_layers(l->server);
+	struct gs_server *server = l->server;
+	if (server->seat->keyboard_state.focused_surface == l->layer_surface->surface) {
+		wlr_seat_keyboard_clear_focus(server->seat);
+		struct gs_toplevel *t = focused_toplevel(server);
+		if (t) {
+			focus_surface(server, t->xdg_toplevel->base->surface);
+		}
+	}
+}
+
+static void layer_destroy(struct wl_listener *listener, void *data) {
+	struct gs_layer *l = wl_container_of(listener, l, destroy);
+	wl_list_remove(&l->link);
+	wl_list_remove(&l->map.link);
+	wl_list_remove(&l->unmap.link);
+	wl_list_remove(&l->commit.link);
+	wl_list_remove(&l->destroy.link);
+	struct gs_server *server = l->server;
+	free(l);
+	arrange_layers(server);
+}
+
+static void server_new_layer_surface(struct wl_listener *listener, void *data) {
+	struct gs_server *server = wl_container_of(listener, server, new_layer_surface);
+	struct wlr_layer_surface_v1 *ls = data;
+	struct gs_output *output = first_output(server);
+	if (ls->output == NULL) {
+		if (output == NULL) {
+			wlr_layer_surface_v1_destroy(ls);
+			return;
+		}
+		ls->output = output->wlr_output;
+	}
+	struct gs_layer *l = calloc(1, sizeof(*l));
+	l->server = server;
+	l->layer_surface = ls;
+	l->scene = wlr_scene_layer_surface_v1_create(layer_tree(server, ls->pending.layer), ls);
+	ls->data = l->scene->tree; /* parent tree for this surface's popups */
+	l->map.notify = layer_map;
+	wl_signal_add(&ls->surface->events.map, &l->map);
+	l->unmap.notify = layer_unmap;
+	wl_signal_add(&ls->surface->events.unmap, &l->unmap);
+	l->commit.notify = layer_commit;
+	wl_signal_add(&ls->surface->events.commit, &l->commit);
+	l->destroy.notify = layer_destroy;
+	wl_signal_add(&ls->events.destroy, &l->destroy);
+	wl_list_insert(&server->layer_surfaces, &l->link);
+}
+
+/* ------------------------------------------------------------------ toplevels */
+
+static void place_centered(struct gs_toplevel *t) {
+	struct wlr_box area = output_usable_area(t->server);
+	struct wlr_box *geo = &t->xdg_toplevel->base->geometry;
+	int x = area.x + (area.width - geo->width) / 2 - geo->x;
+	int y = area.y + (area.height - geo->height) / 2 - geo->y;
+	if (y < area.y) {
+		y = area.y;
+	}
+	wlr_scene_node_set_position(&t->tree->node, x, y);
+}
+
+static void set_maximized(struct gs_toplevel *t, bool maximized) {
+	if (t->maximized == maximized) {
+		return;
+	}
+	struct wlr_box *geo = &t->xdg_toplevel->base->geometry;
+	if (maximized) {
+		t->saved = (struct wlr_box){ t->tree->node.x, t->tree->node.y, geo->width, geo->height };
+		struct wlr_box area = output_usable_area(t->server);
+		wlr_scene_node_set_position(&t->tree->node, area.x - geo->x, area.y - geo->y);
+		wlr_xdg_toplevel_set_size(t->xdg_toplevel, area.width, area.height);
+	} else {
+		wlr_scene_node_set_position(&t->tree->node, t->saved.x, t->saved.y);
+		wlr_xdg_toplevel_set_size(t->xdg_toplevel, t->saved.width, t->saved.height);
+	}
+	t->maximized = maximized;
+	wlr_xdg_toplevel_set_maximized(t->xdg_toplevel, maximized);
+}
+
+static void toplevel_commit(struct wl_listener *listener, void *data) {
+	struct gs_toplevel *t = wl_container_of(listener, t, commit);
+	if (t->xdg_toplevel->base->initial_commit) {
+		wlr_xdg_toplevel_set_size(t->xdg_toplevel, 0, 0);
+		wlr_xdg_toplevel_set_wm_capabilities(t->xdg_toplevel,
+			WLR_XDG_TOPLEVEL_WM_CAPABILITIES_MAXIMIZE | WLR_XDG_TOPLEVEL_WM_CAPABILITIES_FULLSCREEN);
+		return;
+	}
+	update_decor_geometry(t);
+	if (t->mapped && !t->placed && t->xdg_toplevel->base->geometry.width > 0) {
+		place_centered(t);
+		t->placed = true;
+	}
+	if (!t->open.active) {
+		apply_toplevel_visual(t, 1.0f, 1.0f);
+	}
+}
+
+static void toplevel_map(struct wl_listener *listener, void *data) {
+	struct gs_toplevel *t = wl_container_of(listener, t, map);
+	t->mapped = true;
+	wlr_scene_node_set_enabled(&t->tree->node, true);
+	update_decor_geometry(t);
+	if (!t->placed) {
+		place_centered(t);
+		t->placed = true;
+	}
+	wl_list_insert(&t->server->toplevels, &t->link);
+	gs_anim_start(&t->open, now_ms(), OPEN_MS);
+	apply_toplevel_visual(t, 0.94f, 0.0f);
+	focus_toplevel(t);
+	schedule_frames(t->server);
+}
+
+struct snapshot_args {
+	struct gs_closing *closing;
+	int base_x, base_y;
+};
+
+static void snapshot_buffer(struct wlr_scene_buffer *buffer, int sx, int sy, void *data) {
+	struct snapshot_args *args = data;
+	struct gs_closing *c = args->closing;
+	if (buffer->buffer == NULL || c->nbufs >= (int)(sizeof(c->bufs) / sizeof(c->bufs[0]))) {
+		return;
+	}
+	struct wlr_scene_buffer *copy = wlr_scene_buffer_create(c->tree, buffer->buffer);
+	if (copy == NULL) {
+		return;
+	}
+	int w = buffer->dst_width > 0 ? buffer->dst_width : buffer->buffer->width;
+	int h = buffer->dst_height > 0 ? buffer->dst_height : buffer->buffer->height;
+	wlr_scene_buffer_set_dest_size(copy, w, h);
+	wlr_scene_buffer_set_corner_radii(copy, buffer->corners);
+	wlr_scene_node_set_position(&copy->node, sx - args->base_x, sy - args->base_y);
+	c->bufs[c->nbufs++] = (struct gs_closing_buffer){ copy, sx - args->base_x, sy - args->base_y, w, h };
+}
+
+/* Keep a picture of the window and let it fade/shrink away (macOS-style close). */
+static void start_close_animation(struct gs_toplevel *t) {
+	struct gs_server *server = t->server;
+	struct wlr_box *geo = &t->xdg_toplevel->base->geometry;
+	if (geo->width <= 0 || geo->height <= 0) {
+		return;
+	}
+	struct gs_closing *c = calloc(1, sizeof(*c));
+	c->server = server;
+	c->tree = wlr_scene_tree_create(server->layers.closing);
+	int lx = 0, ly = 0;
+	wlr_scene_node_coords(&t->xdg_tree->node, &lx, &ly);
+	wlr_scene_node_set_position(&c->tree->node, lx + geo->x, ly + geo->y);
+	c->width = geo->width;
+	c->height = geo->height;
+	int sigma = (int)SHADOW_SIGMA;
+	c->shadow = wlr_scene_shadow_create(c->tree, geo->width + sigma * 2, geo->height + sigma * 2,
+		CORNER_RADIUS, SHADOW_SIGMA, (float[4]){ 0.0f, 0.0f, 0.0f, 0.42f });
+	wlr_scene_node_set_position(&c->shadow->node, -sigma, -sigma + SHADOW_OFFSET_Y);
+	struct snapshot_args args = { c, lx + geo->x, ly + geo->y };
+	wlr_scene_node_for_each_buffer(&t->xdg_tree->node, snapshot_buffer, &args);
+	if (c->nbufs == 0) {
+		wlr_scene_node_destroy(&c->tree->node);
+		free(c);
+		return;
+	}
+	gs_anim_start(&c->anim, now_ms(), CLOSE_MS);
+	wl_list_insert(&server->closing, &c->link);
+	schedule_frames(server);
+}
+
+static void toplevel_unmap(struct wl_listener *listener, void *data) {
+	struct gs_toplevel *t = wl_container_of(listener, t, unmap);
+	struct gs_server *server = t->server;
+	start_close_animation(t);
+	t->mapped = false;
+	t->placed = false;
+	t->open.active = false;
+	wlr_scene_node_set_enabled(&t->tree->node, false);
+	if (t == server->grabbed) {
+		server->cursor_mode = CURSOR_PASSTHROUGH;
+		server->grabbed = NULL;
+	}
+	bool was_focused = server->seat->keyboard_state.focused_surface == t->xdg_toplevel->base->surface;
+	wl_list_remove(&t->link);
+	if (was_focused) {
+		wlr_seat_keyboard_clear_focus(server->seat);
+		focus_toplevel(focused_toplevel(server));
+	}
+}
+
+static void toplevel_destroy(struct wl_listener *listener, void *data) {
+	struct gs_toplevel *t = wl_container_of(listener, t, destroy);
+	wl_list_remove(&t->map.link);
+	wl_list_remove(&t->unmap.link);
+	wl_list_remove(&t->commit.link);
+	wl_list_remove(&t->destroy.link);
+	wl_list_remove(&t->request_move.link);
+	wl_list_remove(&t->request_resize.link);
+	wl_list_remove(&t->request_maximize.link);
+	wl_list_remove(&t->request_fullscreen.link);
+	wlr_scene_node_destroy(&t->tree->node);
+	free(t);
+}
+
+static void begin_interactive(struct gs_toplevel *t, enum gs_cursor_mode mode, uint32_t edges) {
+	struct gs_server *server = t->server;
+	if (t->maximized) {
+		set_maximized(t, false);
+	}
+	server->grabbed = t;
+	server->cursor_mode = mode;
+	if (mode == CURSOR_MOVE) {
+		server->grab_x = server->cursor->x - t->tree->node.x;
+		server->grab_y = server->cursor->y - t->tree->node.y;
+	} else {
+		struct wlr_box *geo = &t->xdg_toplevel->base->geometry;
+		double bx = (t->tree->node.x + geo->x) + ((edges & WLR_EDGE_RIGHT) ? geo->width : 0);
+		double by = (t->tree->node.y + geo->y) + ((edges & WLR_EDGE_BOTTOM) ? geo->height : 0);
+		server->grab_x = server->cursor->x - bx;
+		server->grab_y = server->cursor->y - by;
+		server->grab_geobox = *geo;
+		server->grab_geobox.x += t->tree->node.x;
+		server->grab_geobox.y += t->tree->node.y;
+		server->resize_edges = edges;
+	}
+}
+
+static void toplevel_request_move(struct wl_listener *listener, void *data) {
+	struct gs_toplevel *t = wl_container_of(listener, t, request_move);
+	begin_interactive(t, CURSOR_MOVE, 0);
+}
+
+static void toplevel_request_resize(struct wl_listener *listener, void *data) {
+	struct wlr_xdg_toplevel_resize_event *event = data;
+	struct gs_toplevel *t = wl_container_of(listener, t, request_resize);
+	begin_interactive(t, CURSOR_RESIZE, event->edges);
+}
+
+static void toplevel_request_maximize(struct wl_listener *listener, void *data) {
+	struct gs_toplevel *t = wl_container_of(listener, t, request_maximize);
+	if (t->xdg_toplevel->base->initialized) {
+		set_maximized(t, t->xdg_toplevel->requested.maximized);
+		wlr_xdg_surface_schedule_configure(t->xdg_toplevel->base);
+	}
+}
+
+static void toplevel_request_fullscreen(struct wl_listener *listener, void *data) {
+	struct gs_toplevel *t = wl_container_of(listener, t, request_fullscreen);
+	if (!t->xdg_toplevel->base->initialized) {
+		return;
+	}
+	bool fs = t->xdg_toplevel->requested.fullscreen;
+	struct gs_output *output = first_output(t->server);
+	if (fs && output) {
+		struct wlr_box full;
+		wlr_output_layout_get_box(t->server->output_layout, output->wlr_output, &full);
+		t->saved = (struct wlr_box){ t->tree->node.x, t->tree->node.y,
+			t->xdg_toplevel->base->geometry.width, t->xdg_toplevel->base->geometry.height };
+		wlr_scene_node_set_position(&t->tree->node, full.x, full.y);
+		wlr_scene_node_reparent(&t->tree->node, t->server->layers.overlay);
+		wlr_xdg_toplevel_set_size(t->xdg_toplevel, full.width, full.height);
+	} else {
+		wlr_scene_node_reparent(&t->tree->node, t->server->layers.toplevels);
+		wlr_scene_node_set_position(&t->tree->node, t->saved.x, t->saved.y);
+		wlr_xdg_toplevel_set_size(t->xdg_toplevel, t->saved.width, t->saved.height);
+	}
+	wlr_xdg_toplevel_set_fullscreen(t->xdg_toplevel, fs);
+}
+
+static void server_new_xdg_toplevel(struct wl_listener *listener, void *data) {
+	struct gs_server *server = wl_container_of(listener, server, new_xdg_toplevel);
+	struct wlr_xdg_toplevel *xdg_toplevel = data;
+	struct gs_toplevel *t = calloc(1, sizeof(*t));
+	t->server = server;
+	t->xdg_toplevel = xdg_toplevel;
+	t->tree = wlr_scene_tree_create(server->layers.toplevels);
+	t->tree->node.data = t;
+	wlr_scene_node_set_enabled(&t->tree->node, false);
+	t->blur = wlr_scene_blur_create(t->tree, 0, 0);
+	wlr_scene_blur_set_should_only_blur_bottom_layer(t->blur, true);
+	t->shadow = wlr_scene_shadow_create(t->tree, 0, 0, CORNER_RADIUS, SHADOW_SIGMA,
+		(float[4]){ 0.0f, 0.0f, 0.0f, 0.42f });
+	t->xdg_tree = wlr_scene_xdg_surface_create(t->tree, xdg_toplevel->base);
+	xdg_toplevel->base->data = t->xdg_tree;
+	wlr_scene_node_lower_to_bottom(&t->shadow->node);
+	wlr_scene_node_lower_to_bottom(&t->blur->node);
+
+	t->map.notify = toplevel_map;
+	wl_signal_add(&xdg_toplevel->base->surface->events.map, &t->map);
+	t->unmap.notify = toplevel_unmap;
+	wl_signal_add(&xdg_toplevel->base->surface->events.unmap, &t->unmap);
+	t->commit.notify = toplevel_commit;
+	wl_signal_add(&xdg_toplevel->base->surface->events.commit, &t->commit);
+	t->destroy.notify = toplevel_destroy;
+	wl_signal_add(&xdg_toplevel->events.destroy, &t->destroy);
+	t->request_move.notify = toplevel_request_move;
+	wl_signal_add(&xdg_toplevel->events.request_move, &t->request_move);
+	t->request_resize.notify = toplevel_request_resize;
+	wl_signal_add(&xdg_toplevel->events.request_resize, &t->request_resize);
+	t->request_maximize.notify = toplevel_request_maximize;
+	wl_signal_add(&xdg_toplevel->events.request_maximize, &t->request_maximize);
+	t->request_fullscreen.notify = toplevel_request_fullscreen;
+	wl_signal_add(&xdg_toplevel->events.request_fullscreen, &t->request_fullscreen);
+}
+
+static void popup_commit(struct wl_listener *listener, void *data) {
+	struct gs_popup *popup = wl_container_of(listener, popup, commit);
+	if (popup->xdg_popup->base->initial_commit) {
+		wlr_xdg_surface_schedule_configure(popup->xdg_popup->base);
+	}
+}
+
+static void popup_destroy(struct wl_listener *listener, void *data) {
+	struct gs_popup *popup = wl_container_of(listener, popup, destroy);
+	wl_list_remove(&popup->commit.link);
+	wl_list_remove(&popup->destroy.link);
+	free(popup);
+}
+
+static void server_new_xdg_popup(struct wl_listener *listener, void *data) {
+	struct wlr_xdg_popup *xdg_popup = data;
+	struct wlr_scene_tree *parent_tree = NULL;
+	struct wlr_xdg_surface *parent = wlr_xdg_surface_try_from_wlr_surface(xdg_popup->parent);
+	if (parent != NULL) {
+		parent_tree = parent->data;
+	} else {
+		struct wlr_layer_surface_v1 *ls = wlr_layer_surface_v1_try_from_wlr_surface(xdg_popup->parent);
+		if (ls != NULL) {
+			parent_tree = ls->data;
+		}
+	}
+	if (parent_tree == NULL) {
+		return;
+	}
+	struct gs_popup *popup = calloc(1, sizeof(*popup));
+	popup->xdg_popup = xdg_popup;
+	xdg_popup->base->data = wlr_scene_xdg_surface_create(parent_tree, xdg_popup->base);
+	popup->commit.notify = popup_commit;
+	wl_signal_add(&xdg_popup->base->surface->events.commit, &popup->commit);
+	popup->destroy.notify = popup_destroy;
+	wl_signal_add(&xdg_popup->events.destroy, &popup->destroy);
+}
+
+static void handle_new_decoration(struct wl_listener *listener, void *data) {
+	struct wlr_xdg_toplevel_decoration_v1 *decoration = data;
+	/* Apps draw their own title bars for now; Gill-OSaab title bars come later. */
+	wlr_xdg_toplevel_decoration_v1_set_mode(decoration, WLR_XDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE);
+}
+
+/* ------------------------------------------------------------------ input */
+
+static void spawn(const char *cmd) {
+	if (cmd == NULL || cmd[0] == '\0') {
+		return;
+	}
+	if (fork() == 0) {
+		setsid();
+		execl("/bin/sh", "/bin/sh", "-c", cmd, (void *)NULL);
+		_exit(127);
+	}
+}
+
+static void close_focused(struct gs_server *server) {
+	struct gs_toplevel *t = focused_toplevel(server);
+	if (t) {
+		wlr_xdg_toplevel_send_close(t->xdg_toplevel);
+	}
+}
+
+static bool handle_keybinding(struct gs_server *server, uint32_t mods, xkb_keysym_t sym) {
+	bool super = mods & WLR_MODIFIER_LOGO;
+	bool alt = mods & WLR_MODIFIER_ALT;
+	if ((super || alt) && sym == XKB_KEY_Tab) {
+		focus_next_toplevel(server);
+		return true;
+	}
+	if (!super) {
+		return false;
+	}
+	switch (sym) {
+	case XKB_KEY_q:
+		close_focused(server);
+		return true;
+	case XKB_KEY_Return: {
+		const char *term = getenv("GOSAAB_TERMINAL");
+		spawn(term ? term : "foot");
+		return true;
+	}
+	case XKB_KEY_f: {
+		struct gs_toplevel *t = focused_toplevel(server);
+		if (t) {
+			set_maximized(t, !t->maximized);
+		}
+		return true;
+	}
+	case XKB_KEY_Escape:
+		if (getenv("GOSAAB_WM_DEBUG")) {
+			wl_display_terminate(server->display);
+			return true;
+		}
+		return false;
+	default:
+		return false;
+	}
+}
+
+static void keyboard_modifiers(struct wl_listener *listener, void *data) {
+	struct gs_keyboard *kb = wl_container_of(listener, kb, modifiers);
+	wlr_seat_set_keyboard(kb->server->seat, kb->wlr_keyboard);
+	wlr_seat_keyboard_notify_modifiers(kb->server->seat, &kb->wlr_keyboard->modifiers);
+}
+
+static void keyboard_key(struct wl_listener *listener, void *data) {
+	struct gs_keyboard *kb = wl_container_of(listener, kb, key);
+	struct gs_server *server = kb->server;
+	struct wlr_keyboard_key_event *event = data;
+	uint32_t keycode = event->keycode + 8;
+	const xkb_keysym_t *syms;
+	int nsyms = xkb_state_key_get_syms(kb->wlr_keyboard->xkb_state, keycode, &syms);
+	bool handled = false;
+	uint32_t mods = wlr_keyboard_get_modifiers(kb->wlr_keyboard);
+	if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
+		for (int i = 0; i < nsyms; i++) {
+			handled = handle_keybinding(server, mods, syms[i]) || handled;
+		}
+	}
+	if (!handled) {
+		wlr_seat_set_keyboard(server->seat, kb->wlr_keyboard);
+		wlr_seat_keyboard_notify_key(server->seat, event->time_msec, event->keycode, event->state);
+	}
+}
+
+static void keyboard_destroy(struct wl_listener *listener, void *data) {
+	struct gs_keyboard *kb = wl_container_of(listener, kb, destroy);
+	wl_list_remove(&kb->modifiers.link);
+	wl_list_remove(&kb->key.link);
+	wl_list_remove(&kb->destroy.link);
+	wl_list_remove(&kb->link);
+	free(kb);
+}
+
+static void new_keyboard(struct gs_server *server, struct wlr_input_device *device) {
+	struct wlr_keyboard *wlr_keyboard = wlr_keyboard_from_input_device(device);
+	struct gs_keyboard *kb = calloc(1, sizeof(*kb));
+	kb->server = server;
+	kb->wlr_keyboard = wlr_keyboard;
+	struct xkb_context *context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
+	struct xkb_keymap *keymap = xkb_keymap_new_from_names(context, NULL, XKB_KEYMAP_COMPILE_NO_FLAGS);
+	wlr_keyboard_set_keymap(wlr_keyboard, keymap);
+	xkb_keymap_unref(keymap);
+	xkb_context_unref(context);
+	wlr_keyboard_set_repeat_info(wlr_keyboard, 30, 400);
+	kb->modifiers.notify = keyboard_modifiers;
+	wl_signal_add(&wlr_keyboard->events.modifiers, &kb->modifiers);
+	kb->key.notify = keyboard_key;
+	wl_signal_add(&wlr_keyboard->events.key, &kb->key);
+	kb->destroy.notify = keyboard_destroy;
+	wl_signal_add(&device->events.destroy, &kb->destroy);
+	wlr_seat_set_keyboard(server->seat, wlr_keyboard);
+	wl_list_insert(&server->keyboards, &kb->link);
+}
+
+static void server_new_input(struct wl_listener *listener, void *data) {
+	struct gs_server *server = wl_container_of(listener, server, new_input);
+	struct wlr_input_device *device = data;
+	switch (device->type) {
+	case WLR_INPUT_DEVICE_KEYBOARD:
+		new_keyboard(server, device);
+		break;
+	case WLR_INPUT_DEVICE_POINTER:
+		wlr_cursor_attach_input_device(server->cursor, device);
+		break;
+	default:
+		break;
+	}
+	uint32_t caps = WL_SEAT_CAPABILITY_POINTER;
+	if (!wl_list_empty(&server->keyboards)) {
+		caps |= WL_SEAT_CAPABILITY_KEYBOARD;
+	}
+	wlr_seat_set_capabilities(server->seat, caps);
+}
+
+static void seat_request_cursor(struct wl_listener *listener, void *data) {
+	struct gs_server *server = wl_container_of(listener, server, request_cursor);
+	struct wlr_seat_pointer_request_set_cursor_event *event = data;
+	if (server->seat->pointer_state.focused_client == event->seat_client) {
+		wlr_cursor_set_surface(server->cursor, event->surface, event->hotspot_x, event->hotspot_y);
+	}
+}
+
+static void request_cursor_shape(struct wl_listener *listener, void *data) {
+	struct gs_server *server = wl_container_of(listener, server, request_cursor_shape);
+	struct wlr_cursor_shape_manager_v1_request_set_shape_event *event = data;
+	if (server->seat->pointer_state.focused_client == event->seat_client) {
+		wlr_cursor_set_xcursor(server->cursor, server->cursor_mgr, wlr_cursor_shape_v1_name(event->shape));
+	}
+}
+
+static void seat_request_set_selection(struct wl_listener *listener, void *data) {
+	struct gs_server *server = wl_container_of(listener, server, request_set_selection);
+	struct wlr_seat_request_set_selection_event *event = data;
+	wlr_seat_set_selection(server->seat, event->source, event->serial);
+}
+
+static void seat_request_set_primary_selection(struct wl_listener *listener, void *data) {
+	struct gs_server *server = wl_container_of(listener, server, request_set_primary_selection);
+	struct wlr_seat_request_set_primary_selection_event *event = data;
+	wlr_seat_set_primary_selection(server->seat, event->source, event->serial);
+}
+
+/* Topmost surface under a layout point; *toplevel is set when it belongs to a window. */
+static struct wlr_surface *surface_at(struct gs_server *server, double lx, double ly,
+		double *sx, double *sy, struct gs_toplevel **toplevel) {
+	*toplevel = NULL;
+	struct wlr_scene_node *node = wlr_scene_node_at(&server->scene->tree.node, lx, ly, sx, sy);
+	if (node == NULL || node->type != WLR_SCENE_NODE_BUFFER) {
+		return NULL;
+	}
+	struct wlr_scene_surface *scene_surface =
+		wlr_scene_surface_try_from_buffer(wlr_scene_buffer_from_node(node));
+	if (scene_surface == NULL) {
+		return NULL;
+	}
+	struct wlr_scene_tree *tree = node->parent;
+	while (tree != NULL && tree->node.data == NULL) {
+		tree = tree->node.parent;
+	}
+	if (tree != NULL) {
+		*toplevel = tree->node.data;
+	}
+	return scene_surface->surface;
+}
+
+static void process_cursor_resize(struct gs_server *server) {
+	struct gs_toplevel *t = server->grabbed;
+	double bx = server->cursor->x - server->grab_x;
+	double by = server->cursor->y - server->grab_y;
+	int left = server->grab_geobox.x, right = server->grab_geobox.x + server->grab_geobox.width;
+	int top = server->grab_geobox.y, bottom = server->grab_geobox.y + server->grab_geobox.height;
+	if (server->resize_edges & WLR_EDGE_TOP) {
+		top = by < bottom - 1 ? by : bottom - 1;
+	} else if (server->resize_edges & WLR_EDGE_BOTTOM) {
+		bottom = by > top + 1 ? by : top + 1;
+	}
+	if (server->resize_edges & WLR_EDGE_LEFT) {
+		left = bx < right - 1 ? bx : right - 1;
+	} else if (server->resize_edges & WLR_EDGE_RIGHT) {
+		right = bx > left + 1 ? bx : left + 1;
+	}
+	struct wlr_box *geo = &t->xdg_toplevel->base->geometry;
+	wlr_scene_node_set_position(&t->tree->node, left - geo->x, top - geo->y);
+	wlr_xdg_toplevel_set_size(t->xdg_toplevel, right - left, bottom - top);
+}
+
+static void process_cursor_motion(struct gs_server *server, uint32_t time) {
+	if (server->cursor_mode == CURSOR_MOVE) {
+		struct gs_toplevel *t = server->grabbed;
+		wlr_scene_node_set_position(&t->tree->node, server->cursor->x - server->grab_x,
+			server->cursor->y - server->grab_y);
+		return;
+	}
+	if (server->cursor_mode == CURSOR_RESIZE) {
+		process_cursor_resize(server);
+		return;
+	}
+	double sx, sy;
+	struct gs_toplevel *t;
+	struct wlr_surface *surface = surface_at(server, server->cursor->x, server->cursor->y, &sx, &sy, &t);
+	if (surface == NULL) {
+		wlr_cursor_set_xcursor(server->cursor, server->cursor_mgr, "default");
+		wlr_seat_pointer_clear_focus(server->seat);
+		return;
+	}
+	wlr_seat_pointer_notify_enter(server->seat, surface, sx, sy);
+	wlr_seat_pointer_notify_motion(server->seat, time, sx, sy);
+}
+
+static void cursor_motion(struct wl_listener *listener, void *data) {
+	struct gs_server *server = wl_container_of(listener, server, cursor_motion);
+	struct wlr_pointer_motion_event *event = data;
+	wlr_cursor_move(server->cursor, &event->pointer->base, event->delta_x, event->delta_y);
+	process_cursor_motion(server, event->time_msec);
+}
+
+static void cursor_motion_absolute(struct wl_listener *listener, void *data) {
+	struct gs_server *server = wl_container_of(listener, server, cursor_motion_absolute);
+	struct wlr_pointer_motion_absolute_event *event = data;
+	wlr_cursor_warp_absolute(server->cursor, &event->pointer->base, event->x, event->y);
+	process_cursor_motion(server, event->time_msec);
+}
+
+static void cursor_button(struct wl_listener *listener, void *data) {
+	struct gs_server *server = wl_container_of(listener, server, cursor_button);
+	struct wlr_pointer_button_event *event = data;
+	wlr_seat_pointer_notify_button(server->seat, event->time_msec, event->button, event->state);
+	if (event->state == WL_POINTER_BUTTON_STATE_RELEASED) {
+		server->cursor_mode = CURSOR_PASSTHROUGH;
+		server->grabbed = NULL;
+		return;
+	}
+	double sx, sy;
+	struct gs_toplevel *t;
+	struct wlr_surface *surface = surface_at(server, server->cursor->x, server->cursor->y, &sx, &sy, &t);
+	if (t) {
+		focus_toplevel(t);
+	} else if (surface) {
+		struct wlr_layer_surface_v1 *ls = wlr_layer_surface_v1_try_from_wlr_surface(surface);
+		if (ls && ls->current.keyboard_interactive != ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE) {
+			focus_surface(server, surface);
+		}
+	}
+}
+
+static void cursor_axis(struct wl_listener *listener, void *data) {
+	struct gs_server *server = wl_container_of(listener, server, cursor_axis);
+	struct wlr_pointer_axis_event *event = data;
+	wlr_seat_pointer_notify_axis(server->seat, event->time_msec, event->orientation, event->delta,
+		event->delta_discrete, event->source, event->relative_direction);
+}
+
+static void cursor_frame(struct wl_listener *listener, void *data) {
+	struct gs_server *server = wl_container_of(listener, server, cursor_frame);
+	wlr_seat_pointer_notify_frame(server->seat);
+}
+
+/* ------------------------------------------------------------------ outputs */
+
+static void output_frame(struct wl_listener *listener, void *data) {
+	struct gs_output *output = wl_container_of(listener, output, frame);
+	struct gs_server *server = output->server;
+	bool animating = tick_animations(server);
+	struct wlr_scene_output *scene_output = wlr_scene_get_scene_output(server->scene, output->wlr_output);
+	wlr_scene_output_commit(scene_output, NULL);
+	struct timespec now;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	wlr_scene_output_send_frame_done(scene_output, &now);
+	if (animating) {
+		wlr_output_schedule_frame(output->wlr_output);
+	}
+}
+
+static void output_request_state(struct wl_listener *listener, void *data) {
+	struct gs_output *output = wl_container_of(listener, output, request_state);
+	const struct wlr_output_event_request_state *event = data;
+	wlr_output_commit_state(output->wlr_output, event->state);
+	wlr_scene_optimized_blur_set_size(output->server->layers.blur, output->wlr_output->width,
+		output->wlr_output->height);
+	arrange_layers(output->server);
+}
+
+static void output_destroy(struct wl_listener *listener, void *data) {
+	struct gs_output *output = wl_container_of(listener, output, destroy);
+	wl_list_remove(&output->frame.link);
+	wl_list_remove(&output->request_state.link);
+	wl_list_remove(&output->destroy.link);
+	wl_list_remove(&output->link);
+	free(output);
+}
+
+static void server_new_output(struct wl_listener *listener, void *data) {
+	struct gs_server *server = wl_container_of(listener, server, new_output);
+	struct wlr_output *wlr_output = data;
+	wlr_output_init_render(wlr_output, server->allocator, server->renderer);
+	struct wlr_output_state state;
+	wlr_output_state_init(&state);
+	wlr_output_state_set_enabled(&state, true);
+	struct wlr_output_mode *mode = wlr_output_preferred_mode(wlr_output);
+	if (mode != NULL) {
+		wlr_output_state_set_mode(&state, mode);
+	} else if (wlr_output_is_headless(wlr_output)) {
+		const char *size = getenv("GOSAAB_HEADLESS_SIZE");
+		int w = 1920, h = 1080;
+		if (size) {
+			sscanf(size, "%dx%d", &w, &h);
+		}
+		wlr_output_state_set_custom_mode(&state, w, h, 60000);
+	}
+	wlr_output_commit_state(wlr_output, &state);
+	wlr_output_state_finish(&state);
+
+	struct gs_output *output = calloc(1, sizeof(*output));
+	output->wlr_output = wlr_output;
+	output->server = server;
+	output->frame.notify = output_frame;
+	wl_signal_add(&wlr_output->events.frame, &output->frame);
+	output->request_state.notify = output_request_state;
+	wl_signal_add(&wlr_output->events.request_state, &output->request_state);
+	output->destroy.notify = output_destroy;
+	wl_signal_add(&wlr_output->events.destroy, &output->destroy);
+	wl_list_insert(&server->outputs, &output->link);
+
+	struct wlr_output_layout_output *l_output = wlr_output_layout_add_auto(server->output_layout, wlr_output);
+	struct wlr_scene_output *scene_output = wlr_scene_output_create(server->scene, wlr_output);
+	wlr_scene_output_layout_add_output(server->scene_layout, l_output, scene_output);
+	wlr_scene_optimized_blur_set_size(server->layers.blur, wlr_output->width, wlr_output->height);
+	arrange_layers(server);
+}
+
+/* ------------------------------------------------------------------ signals */
+
+static int handle_sigusr1(int sig, void *data) {
+	close_focused(data);
+	return 0;
+}
+
+static int handle_sigterm(int sig, void *data) {
+	struct gs_server *server = data;
+	wl_display_terminate(server->display);
+	return 0;
+}
+
+static void write_socket_file(const char *socket) {
+	const char *runtime = getenv("XDG_RUNTIME_DIR");
+	if (runtime == NULL) {
+		return;
+	}
+	char path[512];
+	snprintf(path, sizeof(path), "%s/gosaab-wm.socket", runtime);
+	FILE *f = fopen(path, "w");
+	if (f) {
+		fprintf(f, "%s\n", socket);
+		fclose(f);
+	}
+}
+
+/* ------------------------------------------------------------------ main */
+
+int main(int argc, char *argv[]) {
+	wlr_log_init(getenv("GOSAAB_WM_DEBUG") ? WLR_DEBUG : WLR_INFO, NULL);
+	char *startup_cmd = NULL;
+	int c;
+	while ((c = getopt(argc, argv, "s:hv")) != -1) {
+		switch (c) {
+		case 's':
+			startup_cmd = optarg;
+			break;
+		case 'v':
+			printf("gosaab-wm %s\n", GOSAAB_WM_VERSION);
+			return 0;
+		default:
+			printf("Usage: %s [-s startup command]\n", argv[0]);
+			return 0;
+		}
+	}
+
+	struct gs_server server = {0};
+	g_server = &server;
+	server.display = wl_display_create();
+	struct wl_event_loop *loop = wl_display_get_event_loop(server.display);
+	server.backend = wlr_backend_autocreate(loop, NULL);
+	if (server.backend == NULL) {
+		wlr_log(WLR_ERROR, "failed to create backend");
+		return 1;
+	}
+	server.renderer = fx_renderer_create(server.backend);
+	if (server.renderer == NULL) {
+		wlr_log(WLR_ERROR, "failed to create renderer");
+		return 1;
+	}
+	wlr_renderer_init_wl_display(server.renderer, server.display);
+	server.allocator = wlr_allocator_autocreate(server.backend, server.renderer);
+	if (server.allocator == NULL) {
+		wlr_log(WLR_ERROR, "failed to create allocator");
+		return 1;
+	}
+
+	wlr_compositor_create(server.display, 6, server.renderer);
+	wlr_subcompositor_create(server.display);
+	wlr_data_device_manager_create(server.display);
+	wlr_primary_selection_v1_device_manager_create(server.display);
+	wlr_data_control_manager_v1_create(server.display);
+	wlr_viewporter_create(server.display);
+	wlr_single_pixel_buffer_manager_v1_create(server.display);
+	wlr_fractional_scale_manager_v1_create(server.display, 1);
+	wlr_presentation_create(server.display, server.backend, 2);
+	wlr_export_dmabuf_manager_v1_create(server.display);
+	wlr_screencopy_manager_v1_create(server.display);
+	wlr_gamma_control_manager_v1_create(server.display);
+	wlr_idle_notifier_v1_create(server.display);
+	wlr_idle_inhibit_v1_create(server.display);
+
+	server.output_layout = wlr_output_layout_create(server.display);
+	wlr_xdg_output_manager_v1_create(server.display, server.output_layout);
+	wl_list_init(&server.outputs);
+	server.new_output.notify = server_new_output;
+	wl_signal_add(&server.backend->events.new_output, &server.new_output);
+
+	/* Scene layers, bottom to top */
+	server.scene = wlr_scene_create();
+	server.scene_layout = wlr_scene_attach_output_layout(server.scene, server.output_layout);
+	server.layers.background = wlr_scene_tree_create(&server.scene->tree);
+	server.layers.backdrop = wlr_scene_rect_create(server.layers.background, 0, 0,
+		(float[4]){ 0.04f, 0.05f, 0.10f, 1.0f });
+	server.layers.bottom = wlr_scene_tree_create(&server.scene->tree);
+	server.layers.blur = wlr_scene_optimized_blur_create(&server.scene->tree, 0, 0);
+	server.layers.toplevels = wlr_scene_tree_create(&server.scene->tree);
+	server.layers.closing = wlr_scene_tree_create(&server.scene->tree);
+	server.layers.top = wlr_scene_tree_create(&server.scene->tree);
+	server.layers.overlay = wlr_scene_tree_create(&server.scene->tree);
+
+	wl_list_init(&server.toplevels);
+	wl_list_init(&server.closing);
+	server.xdg_shell = wlr_xdg_shell_create(server.display, 6);
+	server.new_xdg_toplevel.notify = server_new_xdg_toplevel;
+	wl_signal_add(&server.xdg_shell->events.new_toplevel, &server.new_xdg_toplevel);
+	server.new_xdg_popup.notify = server_new_xdg_popup;
+	wl_signal_add(&server.xdg_shell->events.new_popup, &server.new_xdg_popup);
+
+	wl_list_init(&server.layer_surfaces);
+	server.layer_shell = wlr_layer_shell_v1_create(server.display, 4);
+	server.new_layer_surface.notify = server_new_layer_surface;
+	wl_signal_add(&server.layer_shell->events.new_surface, &server.new_layer_surface);
+
+	server.decoration_mgr = wlr_xdg_decoration_manager_v1_create(server.display);
+	server.new_decoration.notify = handle_new_decoration;
+	wl_signal_add(&server.decoration_mgr->events.new_toplevel_decoration, &server.new_decoration);
+
+	server.cursor = wlr_cursor_create();
+	wlr_cursor_attach_output_layout(server.cursor, server.output_layout);
+	server.cursor_mgr = wlr_xcursor_manager_create(getenv("XCURSOR_THEME"), 24);
+	server.cursor_shape_mgr = wlr_cursor_shape_manager_v1_create(server.display, 1);
+	server.request_cursor_shape.notify = request_cursor_shape;
+	wl_signal_add(&server.cursor_shape_mgr->events.request_set_shape, &server.request_cursor_shape);
+	server.cursor_motion.notify = cursor_motion;
+	wl_signal_add(&server.cursor->events.motion, &server.cursor_motion);
+	server.cursor_motion_absolute.notify = cursor_motion_absolute;
+	wl_signal_add(&server.cursor->events.motion_absolute, &server.cursor_motion_absolute);
+	server.cursor_button.notify = cursor_button;
+	wl_signal_add(&server.cursor->events.button, &server.cursor_button);
+	server.cursor_axis.notify = cursor_axis;
+	wl_signal_add(&server.cursor->events.axis, &server.cursor_axis);
+	server.cursor_frame.notify = cursor_frame;
+	wl_signal_add(&server.cursor->events.frame, &server.cursor_frame);
+
+	wl_list_init(&server.keyboards);
+	server.new_input.notify = server_new_input;
+	wl_signal_add(&server.backend->events.new_input, &server.new_input);
+	server.seat = wlr_seat_create(server.display, "seat0");
+	server.request_cursor.notify = seat_request_cursor;
+	wl_signal_add(&server.seat->events.request_set_cursor, &server.request_cursor);
+	server.request_set_selection.notify = seat_request_set_selection;
+	wl_signal_add(&server.seat->events.request_set_selection, &server.request_set_selection);
+	server.request_set_primary_selection.notify = seat_request_set_primary_selection;
+	wl_signal_add(&server.seat->events.request_set_primary_selection, &server.request_set_primary_selection);
+
+	wl_event_loop_add_signal(loop, SIGUSR1, handle_sigusr1, &server);
+	wl_event_loop_add_signal(loop, SIGTERM, handle_sigterm, &server);
+	wl_event_loop_add_signal(loop, SIGINT, handle_sigterm, &server);
+	signal(SIGCHLD, SIG_IGN);
+
+	const char *socket = wl_display_add_socket_auto(server.display);
+	if (!socket) {
+		wlr_backend_destroy(server.backend);
+		return 1;
+	}
+	if (!wlr_backend_start(server.backend)) {
+		wlr_backend_destroy(server.backend);
+		wl_display_destroy(server.display);
+		return 1;
+	}
+	setenv("WAYLAND_DISPLAY", socket, true);
+	setenv("XDG_CURRENT_DESKTOP", "Gill-OSaab", true);
+	write_socket_file(socket);
+	spawn(startup_cmd);
+	wlr_log(WLR_INFO, "gosaab-wm %s running on WAYLAND_DISPLAY=%s", GOSAAB_WM_VERSION, socket);
+	wl_display_run(server.display);
+
+	wl_display_destroy_clients(server.display);
+	wlr_scene_node_destroy(&server.scene->tree.node);
+	wlr_xcursor_manager_destroy(server.cursor_mgr);
+	wlr_cursor_destroy(server.cursor);
+	wlr_allocator_destroy(server.allocator);
+	wlr_renderer_destroy(server.renderer);
+	wlr_backend_destroy(server.backend);
+	wl_display_destroy(server.display);
+	return 0;
+}
