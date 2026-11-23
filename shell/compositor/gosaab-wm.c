@@ -2189,8 +2189,26 @@ static int test_click_tick(void *data) {
 
 /* X11 apps (Steam, Wine, older games) run through xwayland-satellite, which turns each X11
  * window into a normal Wayland window, so they get Gill-OSaab title bars and animations too. */
+static bool in_path(const char *program) {
+	const char *path = getenv("PATH");
+	if (path == NULL) {
+		path = "/usr/local/bin:/usr/bin:/bin";
+	}
+	char dirs[4096];
+	snprintf(dirs, sizeof(dirs), "%s", path);
+	for (char *save = NULL, *dir = strtok_r(dirs, ":", &save); dir; dir = strtok_r(NULL, ":", &save)) {
+		char full[4352];
+		snprintf(full, sizeof(full), "%s/%s", dir, program);
+		if (access(full, X_OK) == 0) {
+			return true;
+		}
+	}
+	return false;
+}
+
 static void start_xwayland(void) {
-	if (getenv("GOSAAB_NO_XWAYLAND") || system("command -v xwayland-satellite >/dev/null 2>&1") != 0) {
+	/* (not system(): SIGCHLD is ignored, so system() can't report the result) */
+	if (getenv("GOSAAB_NO_XWAYLAND") || !in_path("xwayland-satellite")) {
 		return;
 	}
 	for (int n = 0; n < 32; n++) {

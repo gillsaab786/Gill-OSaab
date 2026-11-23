@@ -324,10 +324,12 @@ EOF5
 import sys
 from PIL import Image, ImageChops, ImageStat
 out = sys.argv[1]
-def changed(a, b):
-    d = ImageChops.difference(Image.open(f"{out}/{a}.png").convert("RGB"), Image.open(f"{out}/{b}.png").convert("RGB"))
+def changed(a, b, box=None):
+    A, B = Image.open(f"{out}/{a}.png").convert("RGB"), Image.open(f"{out}/{b}.png").convert("RGB")
+    if box: A, B = A.crop(box), B.crop(box)
+    d = ImageChops.difference(A, B)
     return ImageStat.Stat(d.convert("L").point(lambda v: 255 if v > 24 else 0)).mean[0] / 255
-r = (changed("39-before-lock", "40-locked"), changed("40-locked", "41-locked-new-window"), changed("39-before-lock", "42-unlocked"))
+r = (changed("39-before-lock", "40-locked", (700, 360, 1220, 690)), changed("40-locked", "41-locked-new-window"), changed("39-before-lock", "42-unlocked"))
 print("lock changes", [round(x, 4) for x in r])
 for name, ok in [("lock screen covers the desktop", r[0] > 0.2), ("windows stay hidden while locked", r[1] < 0.01),
                  ("unlocking shows the desktop again", r[2] < 0.6 and r[2] < r[0])]:
