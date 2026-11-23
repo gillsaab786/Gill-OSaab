@@ -1,5 +1,5 @@
 project('gosaab-wm', 'c',
-  version: '0.2.0',
+  version: '0.3.0',
   license: 'MIT',
   default_options: ['c_std=c11', 'warning_level=2', 'werror=false', 'buildtype=release'])
 
@@ -29,6 +29,10 @@ protocols = [
   wl_protocol_dir / 'staging/cursor-shape/cursor-shape-v1.xml',
   wl_protocol_dir / 'unstable/xdg-output/xdg-output-unstable-v1.xml',
   wl_protocol_dir / 'unstable/xdg-decoration/xdg-decoration-unstable-v1.xml',
+  wl_protocol_dir / 'unstable/pointer-constraints/pointer-constraints-unstable-v1.xml',
+  wl_protocol_dir / 'unstable/relative-pointer/relative-pointer-unstable-v1.xml',
+  wl_protocol_dir / 'staging/ext-session-lock/ext-session-lock-v1.xml',
+  wl_protocol_dir / 'staging/xdg-activation/xdg-activation-v1.xml',
   'protocols/wlr-layer-shell-unstable-v1.xml',
 ]
 protocol_headers = []

@@ -32,6 +32,6 @@ Popup {
     Item_ { label: "Restart…"; command: "systemctl reboot" }
     Item_ { label: "Shut Down…"; command: "systemctl poweroff" }
     Separator {}
-    Item_ { label: "Lock Screen"; command: "loginctl lock-session" }
+    Item_ { label: "Lock Screen"; command: "qs -c gill-osaab ipc call lock lock" }
     Item_ { label: "Log Out"; command: "loginctl terminate-session \"$XDG_SESSION_ID\"" }
 }

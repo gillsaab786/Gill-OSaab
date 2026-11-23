@@ -59,6 +59,10 @@
 #include <wlr/types/wlr_output.h>
 #include <wlr/types/wlr_output_layout.h>
 #include <wlr/types/wlr_pointer.h>
+#include <wlr/types/wlr_pointer_constraints_v1.h>
+#include <wlr/types/wlr_relative_pointer_v1.h>
+#include <wlr/types/wlr_session_lock_v1.h>
+#include <wlr/types/wlr_xdg_activation_v1.h>
 #include <wlr/types/wlr_presentation_time.h>
 #include <wlr/types/wlr_primary_selection.h>
 #include <wlr/types/wlr_primary_selection_v1.h>
@@ -131,6 +135,23 @@ struct gs_server {
 	struct wl_listener new_decoration;
 
 	struct wlr_foreign_toplevel_manager_v1 *foreign_mgr; /* lets the dock list and control windows */
+
+	/* games: pointer lock + raw mouse motion */
+	struct wlr_relative_pointer_manager_v1 *relative_pointer_mgr;
+	struct wlr_pointer_constraints_v1 *pointer_constraints;
+	struct wlr_pointer_constraint_v1 *active_constraint;
+	struct wl_listener new_constraint, constraint_destroy;
+
+	struct wlr_xdg_activation_v1 *xdg_activation;
+	struct wl_listener request_activate;
+
+	/* lock screen (ext-session-lock-v1) */
+	struct wlr_session_lock_manager_v1 *lock_mgr;
+	struct wl_listener new_lock, lock_new_surface, lock_unlock, lock_destroy;
+	struct wlr_session_lock_v1 *lock;
+	bool locked;
+	struct wlr_scene_tree *lock_tree;
+	struct wlr_scene_rect *lock_bg;
 
 	struct wlr_cursor *cursor;
 	struct wlr_xcursor_manager *cursor_mgr;
@@ -620,6 +641,9 @@ static bool tick_animations(struct gs_server *server) {
 static void focus_surface(struct gs_server *server, struct wlr_surface *surface) {
 	if (surface == NULL) {
 		return;
+	}
+	if (server->locked && wlr_session_lock_surface_v1_try_from_wlr_surface(surface) == NULL) {
+		return; /* while locked, only the lock screen gets the keyboard */
 	}
 	struct wlr_keyboard *keyboard = wlr_seat_get_keyboard(server->seat);
 	if (keyboard) {
@@ -1451,6 +1475,153 @@ static void handle_new_decoration(struct wl_listener *listener, void *data) {
 	decoration_apply(d);
 }
 
+/* ------------------------------------------------------------------ lock screen */
+
+struct gs_lock_surface {
+	struct gs_server *server;
+	struct wlr_session_lock_surface_v1 *lock_surface;
+	struct wlr_scene_tree *tree;
+	struct wl_listener map, destroy;
+};
+
+static void lock_surface_map(struct wl_listener *listener, void *data) {
+	struct gs_lock_surface *ls = wl_container_of(listener, ls, map);
+	focus_surface(ls->server, ls->lock_surface->surface);
+	schedule_frames(ls->server);
+}
+
+static void lock_surface_destroy(struct wl_listener *listener, void *data) {
+	struct gs_lock_surface *ls = wl_container_of(listener, ls, destroy);
+	wl_list_remove(&ls->map.link);
+	wl_list_remove(&ls->destroy.link);
+	free(ls);
+}
+
+static void lock_new_surface(struct wl_listener *listener, void *data) {
+	struct gs_server *server = wl_container_of(listener, server, lock_new_surface);
+	struct wlr_session_lock_surface_v1 *lock_surface = data;
+	struct gs_lock_surface *ls = calloc(1, sizeof(*ls));
+	ls->server = server;
+	ls->lock_surface = lock_surface;
+	ls->tree = wlr_scene_subsurface_tree_create(server->lock_tree, lock_surface->surface);
+	struct wlr_box box;
+	wlr_output_layout_get_box(server->output_layout, lock_surface->output, &box);
+	wlr_scene_node_set_position(&ls->tree->node, box.x, box.y);
+	wlr_session_lock_surface_v1_configure(lock_surface, box.width, box.height);
+	ls->map.notify = lock_surface_map;
+	wl_signal_add(&lock_surface->surface->events.map, &ls->map);
+	ls->destroy.notify = lock_surface_destroy;
+	wl_signal_add(&lock_surface->events.destroy, &ls->destroy);
+}
+
+static void lock_release(struct gs_server *server) {
+	wl_list_remove(&server->lock_new_surface.link);
+	wl_list_remove(&server->lock_unlock.link);
+	wl_list_remove(&server->lock_destroy.link);
+	server->lock = NULL;
+}
+
+static void lock_unlock(struct wl_listener *listener, void *data) {
+	struct gs_server *server = wl_container_of(listener, server, lock_unlock);
+	lock_release(server);
+	server->locked = false;
+	wlr_scene_node_set_enabled(&server->lock_tree->node, false);
+	wlr_seat_keyboard_clear_focus(server->seat);
+	struct gs_toplevel *t = focused_toplevel(server);
+	if (t) {
+		focus_surface(server, t->xdg_toplevel->base->surface);
+	}
+	schedule_frames(server);
+}
+
+/* The lock screen app quit without unlocking: stay locked (blank) until a new one locks. */
+static void lock_destroy(struct wl_listener *listener, void *data) {
+	struct gs_server *server = wl_container_of(listener, server, lock_destroy);
+	lock_release(server);
+}
+
+static void handle_new_lock(struct wl_listener *listener, void *data) {
+	struct gs_server *server = wl_container_of(listener, server, new_lock);
+	struct wlr_session_lock_v1 *lock = data;
+	if (server->lock != NULL) {
+		wlr_session_lock_v1_destroy(lock); /* already locked by someone else */
+		return;
+	}
+	overview_set(server, false, NULL);
+	server->lock = lock;
+	server->locked = true;
+	struct wlr_box full = output_full_area(server);
+	wlr_scene_rect_set_size(server->lock_bg, full.width, full.height);
+	wlr_scene_node_set_position(&server->lock_bg->node, full.x, full.y);
+	wlr_scene_node_set_enabled(&server->lock_tree->node, true);
+	wlr_scene_node_raise_to_top(&server->lock_tree->node);
+	wlr_seat_keyboard_clear_focus(server->seat);
+	wlr_seat_pointer_clear_focus(server->seat);
+	server->lock_new_surface.notify = lock_new_surface;
+	wl_signal_add(&lock->events.new_surface, &server->lock_new_surface);
+	server->lock_unlock.notify = lock_unlock;
+	wl_signal_add(&lock->events.unlock, &server->lock_unlock);
+	server->lock_destroy.notify = lock_destroy;
+	wl_signal_add(&lock->events.destroy, &server->lock_destroy);
+	wlr_session_lock_v1_send_locked(lock);
+	schedule_frames(server);
+}
+
+/* ------------------------------------------------------------------ pointer lock for games */
+
+struct gs_constraint {
+	struct gs_server *server;
+	struct wlr_pointer_constraint_v1 *constraint;
+	struct wl_listener destroy;
+};
+
+static void check_constraint(struct gs_server *server, struct wlr_surface *surface) {
+	struct wlr_pointer_constraint_v1 *c = surface ?
+		wlr_pointer_constraints_v1_constraint_for_surface(server->pointer_constraints, surface, server->seat) : NULL;
+	if (c == server->active_constraint) {
+		return;
+	}
+	if (server->active_constraint) {
+		wlr_pointer_constraint_v1_send_deactivated(server->active_constraint);
+	}
+	server->active_constraint = c;
+	if (c) {
+		wlr_pointer_constraint_v1_send_activated(c);
+	}
+}
+
+static void constraint_destroy(struct wl_listener *listener, void *data) {
+	struct gs_constraint *gc = wl_container_of(listener, gc, destroy);
+	if (gc->server->active_constraint == gc->constraint) {
+		gc->server->active_constraint = NULL;
+	}
+	wl_list_remove(&gc->destroy.link);
+	free(gc);
+}
+
+static void handle_new_constraint(struct wl_listener *listener, void *data) {
+	struct gs_server *server = wl_container_of(listener, server, new_constraint);
+	struct wlr_pointer_constraint_v1 *constraint = data;
+	struct gs_constraint *gc = calloc(1, sizeof(*gc));
+	gc->server = server;
+	gc->constraint = constraint;
+	gc->destroy.notify = constraint_destroy;
+	wl_signal_add(&constraint->events.destroy, &gc->destroy);
+	if (server->seat->pointer_state.focused_surface == constraint->surface) {
+		check_constraint(server, constraint->surface);
+	}
+}
+
+static void handle_request_activate(struct wl_listener *listener, void *data) {
+	struct gs_server *server = wl_container_of(listener, server, request_activate);
+	struct wlr_xdg_activation_v1_request_activate_event *event = data;
+	struct wlr_xdg_toplevel *xdg = wlr_xdg_toplevel_try_from_wlr_surface(event->surface);
+	struct gs_toplevel *t = xdg ? toplevel_from_xdg(xdg) : NULL;
+	if (t && t->mapped && !server->locked) {
+		focus_toplevel(t);
+	}
+}
+
 /* ------------------------------------------------------------------ input */
 
 static void spawn(const char *cmd) {
@@ -1479,6 +1650,9 @@ static void shell_ipc(const char *call) {
 }
 
 static bool handle_keybinding(struct gs_server *server, uint32_t mods, xkb_keysym_t sym) {
+	if (server->locked) {
+		return false; /* every key goes to the lock screen */
+	}
 	bool super = mods & WLR_MODIFIER_LOGO;
 	bool alt = mods & WLR_MODIFIER_ALT;
 	if ((super || alt) && sym == XKB_KEY_Tab) {
@@ -1515,6 +1689,9 @@ static bool handle_keybinding(struct gs_server *server, uint32_t mods, xkb_keysy
 		return true;
 	case XKB_KEY_space:
 		shell_ipc("spotlight toggle");
+		return true;
+	case XKB_KEY_l:
+		shell_ipc("lock lock");
 		return true;
 	case XKB_KEY_g:
 		shell_ipc("launchpad toggle");
@@ -1756,22 +1933,42 @@ static void process_cursor_motion(struct gs_server *server, uint32_t time) {
 	if (server->overview) {
 		wlr_cursor_set_xcursor(server->cursor, server->cursor_mgr, "default");
 		wlr_seat_pointer_clear_focus(server->seat);
+		check_constraint(server, NULL);
 		return;
 	}
 	struct gs_hit hit = hit_test(server, server->cursor->x, server->cursor->y);
+	if (server->locked && hit.surface && wlr_session_lock_surface_v1_try_from_wlr_surface(hit.surface) == NULL) {
+		hit.surface = NULL; /* nothing but the lock screen is reachable while locked */
+	}
 	if (hit.surface == NULL) {
 		wlr_cursor_set_xcursor(server->cursor, server->cursor_mgr,
-			hit.part == GS_PART_RESIZE ? resize_cursor(hit.edges) : "default");
+			hit.part == GS_PART_RESIZE && !server->locked ? resize_cursor(hit.edges) : "default");
 		wlr_seat_pointer_clear_focus(server->seat);
+		check_constraint(server, NULL);
 		return;
 	}
 	wlr_seat_pointer_notify_enter(server->seat, hit.surface, hit.sx, hit.sy);
+	check_constraint(server, hit.surface);
 	wlr_seat_pointer_notify_motion(server->seat, time, hit.sx, hit.sy);
 }
 
 static void cursor_motion(struct wl_listener *listener, void *data) {
 	struct gs_server *server = wl_container_of(listener, server, cursor_motion);
 	struct wlr_pointer_motion_event *event = data;
+	/* games read raw mouse movement, even when the pointer is locked */
+	wlr_relative_pointer_manager_v1_send_relative_motion(server->relative_pointer_mgr, server->seat,
+		(uint64_t)event->time_msec * 1000, event->delta_x, event->delta_y, event->unaccel_dx, event->unaccel_dy);
+	struct wlr_pointer_constraint_v1 *c = server->active_constraint;
+	if (c && !server->locked && server->cursor_mode == CURSOR_PASSTHROUGH) {
+		if (c->type == WLR_POINTER_CONSTRAINT_V1_LOCKED) {
+			return; /* pointer stays put (mouse-look in games) */
+		}
+		/* confined: only move while staying on the game's surface */
+		struct gs_hit hit = hit_test(server, server->cursor->x + event->delta_x, server->cursor->y + event->delta_y);
+		if (hit.surface != c->surface) {
+			return;
+		}
+	}
 	wlr_cursor_move(server->cursor, &event->pointer->base, event->delta_x, event->delta_y);
 	process_cursor_motion(server, event->time_msec);
 }
@@ -1785,6 +1982,9 @@ static void cursor_motion_absolute(struct wl_listener *listener, void *data) {
 
 /* Handle a press at a layout point (also used by the test hook). */
 static void press_at(struct gs_server *server, double lx, double ly) {
+	if (server->locked) {
+		return;
+	}
 	struct gs_hit hit = hit_test(server, lx, ly);
 	if (server->overview) { /* pick a window, or click the desktop to go back */
 		overview_set(server, false, (hit.toplevel && !hit.toplevel->minimized) ? hit.toplevel : NULL);
@@ -1987,6 +2187,39 @@ static int test_click_tick(void *data) {
 	return 0;
 }
 
+/* X11 apps (Steam, Wine, older games) run through xwayland-satellite, which turns each X11
+ * window into a normal Wayland window, so they get Gill-OSaab title bars and animations too. */
+static void start_xwayland(void) {
+	if (getenv("GOSAAB_NO_XWAYLAND") || system("command -v xwayland-satellite >/dev/null 2>&1") != 0) {
+		return;
+	}
+	for (int n = 0; n < 32; n++) {
+		char sock[64], lock[64];
+		snprintf(sock, sizeof(sock), "/tmp/.X11-unix/X%d", n);
+		snprintf(lock, sizeof(lock), "/tmp/.X%d-lock", n);
+		if (access(sock, F_OK) == 0 || access(lock, F_OK) == 0) {
+			continue;
+		}
+		char display[16], cmd[64];
+		snprintf(display, sizeof(display), ":%d", n);
+		snprintf(cmd, sizeof(cmd), "exec xwayland-satellite %s", display);
+		setenv("DISPLAY", display, true);
+		spawn(cmd);
+		const char *runtime = getenv("XDG_RUNTIME_DIR");
+		if (runtime) { /* lets tests and helper scripts find the X11 display */
+			char path[512];
+			snprintf(path, sizeof(path), "%s/gosaab-wm.display", runtime);
+			FILE *f = fopen(path, "w");
+			if (f) {
+				fprintf(f, "%s\n", display);
+				fclose(f);
+			}
+		}
+		wlr_log(WLR_INFO, "X11 apps: xwayland-satellite on DISPLAY=%s", display);
+		return;
+	}
+}
+
 static void write_socket_file(const char *socket) {
 	const char *runtime = getenv("XDG_RUNTIME_DIR");
 	if (runtime == NULL) {
@@ -2087,6 +2320,9 @@ int main(int argc, char *argv[]) {
 	server.layers.closing = wlr_scene_tree_create(&server.scene->tree);
 	server.layers.top = wlr_scene_tree_create(&server.scene->tree);
 	server.layers.overlay = wlr_scene_tree_create(&server.scene->tree);
+	server.lock_tree = wlr_scene_tree_create(&server.scene->tree);
+	server.lock_bg = wlr_scene_rect_create(server.lock_tree, 0, 0, (float[4]){ 0.02f, 0.02f, 0.04f, 1.0f });
+	wlr_scene_node_set_enabled(&server.lock_tree->node, false);
 
 	wl_list_init(&server.toplevels);
 	wl_list_init(&server.closing);
@@ -2102,6 +2338,16 @@ int main(int argc, char *argv[]) {
 	wl_signal_add(&server.layer_shell->events.new_surface, &server.new_layer_surface);
 
 	server.foreign_mgr = wlr_foreign_toplevel_manager_v1_create(server.display);
+	server.relative_pointer_mgr = wlr_relative_pointer_manager_v1_create(server.display);
+	server.pointer_constraints = wlr_pointer_constraints_v1_create(server.display);
+	server.new_constraint.notify = handle_new_constraint;
+	wl_signal_add(&server.pointer_constraints->events.new_constraint, &server.new_constraint);
+	server.xdg_activation = wlr_xdg_activation_v1_create(server.display);
+	server.request_activate.notify = handle_request_activate;
+	wl_signal_add(&server.xdg_activation->events.request_activate, &server.request_activate);
+	server.lock_mgr = wlr_session_lock_manager_v1_create(server.display);
+	server.new_lock.notify = handle_new_lock;
+	wl_signal_add(&server.lock_mgr->events.new_lock, &server.new_lock);
 	server.decoration_mgr = wlr_xdg_decoration_manager_v1_create(server.display);
 	server.new_decoration.notify = handle_new_decoration;
 	wl_signal_add(&server.decoration_mgr->events.new_toplevel_decoration, &server.new_decoration);
@@ -2157,6 +2403,7 @@ int main(int argc, char *argv[]) {
 	}
 	setenv("WAYLAND_DISPLAY", socket, true);
 	setenv("XDG_CURRENT_DESKTOP", "Gill-OSaab", true);
+	start_xwayland();
 	write_socket_file(socket);
 	spawn(startup_cmd);
 	wlr_log(WLR_INFO, "gosaab-wm %s running on WAYLAND_DISPLAY=%s", GOSAAB_WM_VERSION, socket);
@@ -2171,6 +2418,7 @@ int main(int argc, char *argv[]) {
 		&server.cursor_motion, &server.cursor_motion_absolute, &server.cursor_button, &server.cursor_axis,
 		&server.cursor_frame, &server.request_cursor_shape, &server.new_input, &server.request_cursor,
 		&server.request_set_selection, &server.request_set_primary_selection, &server.new_output,
+		&server.new_constraint, &server.request_activate, &server.new_lock,
 	};
 	for (size_t i = 0; i < sizeof(server_listeners) / sizeof(server_listeners[0]); i++) {
 		wl_list_remove(&server_listeners[i]->link);

@@ -21,6 +21,9 @@ Singleton {
     readonly property color subtext: dark ? Qt.rgba(0.92, 0.92, 0.96, 0.60) : Qt.rgba(0.1, 0.1, 0.12, 0.60)
     readonly property color dock: dark ? Qt.rgba(0.16, 0.16, 0.19, 0.48) : Qt.rgba(1, 1, 1, 0.45)
 
+    readonly property string wallpaper: Quickshell.env("GOSAAB_WALLPAPER")
+        || "/usr/share/wallpapers/GillOSaab/contents/images_dark/3840x2160.png"
+
     readonly property int radius: 14
     readonly property int barHeight: 30
     readonly property int dockIcon: 52

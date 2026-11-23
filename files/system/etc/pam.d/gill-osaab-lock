@@ -1,0 +1,4 @@
+#%PAM-1.0
+# Gill-OSaab lock screen: check the user's normal password.
+auth       include      system-auth
+account    include      system-auth

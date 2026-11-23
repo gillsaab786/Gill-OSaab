@@ -31,6 +31,7 @@ ShellRoot {
     Notifications {}
     Spotlight {}
     Launchpad {}
+    LockScreen {}
 
     IpcHandler {
         target: "shell"

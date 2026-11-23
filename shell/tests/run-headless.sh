@@ -255,7 +255,7 @@ pkill foot 2>/dev/null
 # ---- M3: the Gill-OSaab shell (menu bar, Dock, notifications, Control Centre, Spotlight)
 if command -v qs >/dev/null; then
   SHELLDIR=$(pwd)/shell/quickshell
-  export QT_QUICK_BACKEND=software QT_QPA_PLATFORM=wayland
+  export QT_QUICK_BACKEND=software QT_QPA_PLATFORM=wayland GOSAAB_TEST=1 GOSAAB_WALLPAPER=$(pwd)/$WALL
   export GOSAAB_SHELL_IPC="qs -p $SHELLDIR ipc call"
   # a session bus, for notifications
   DBUS_SESSION_BUS_ADDRESS=$(dbus-daemon --session --fork --print-address 2>/dev/null) && export DBUS_SESSION_BUS_ADDRESS
@@ -313,6 +313,35 @@ for name, ok in checks:
     print(("PASS: " if ok else "FAIL: ") + name); bad += not ok
 sys.exit(1 if bad else 0)
 EOF5
+  # lock screen: covers everything, new windows stay hidden, unlock brings the desktop back
+  shot 39-before-lock
+  qs -p "$SHELLDIR" ipc call lock lock; sleep 1.5; shot 40-locked
+  check "lock screen engages" "[ \"\$(qs -p $SHELLDIR ipc call lock isLocked)\" = true ]"
+  foot -W 60x10 -T "Sneaky" -e sh -c 'sleep 300' & sleep 1.2; shot 41-locked-new-window
+  qs -p "$SHELLDIR" ipc call lock unlockForTest; sleep 1.2; shot 42-unlocked
+  pkill -f Sneaky; sleep 0.8
+  python3 - "$OUT" <<'EOF8' || fail=1
+import sys
+from PIL import Image, ImageChops, ImageStat
+out = sys.argv[1]
+def changed(a, b):
+    d = ImageChops.difference(Image.open(f"{out}/{a}.png").convert("RGB"), Image.open(f"{out}/{b}.png").convert("RGB"))
+    return ImageStat.Stat(d.convert("L").point(lambda v: 255 if v > 24 else 0)).mean[0] / 255
+r = (changed("39-before-lock", "40-locked"), changed("40-locked", "41-locked-new-window"), changed("39-before-lock", "42-unlocked"))
+print("lock changes", [round(x, 4) for x in r])
+for name, ok in [("lock screen covers the desktop", r[0] > 0.2), ("windows stay hidden while locked", r[1] < 0.01),
+                 ("unlocking shows the desktop again", r[2] < 0.6 and r[2] < r[0])]:
+    print(("PASS: " if ok else "FAIL: ") + name)
+sys.exit(0 if r[0] > 0.2 and r[1] < 0.01 and r[2] < r[0] else 1)
+EOF8
+  # X11 apps through xwayland-satellite get the same title bars
+  if [ -s "$XDG_RUNTIME_DIR/gosaab-wm.display" ] && command -v xclock >/dev/null; then
+    DISPLAY=$(cat "$XDG_RUNTIME_DIR/gosaab-wm.display") xclock -geometry 300x300 &
+    sleep 3; shot 43-x11-app
+    check "X11 app opens with a Gill-OSaab title bar" "[ -n \"\$(lights 43-x11-app)\" ]"
+  else
+    echo "FAIL: X11 support (xwayland-satellite) not available"; fail=1
+  fi
   check "shell has no QML errors" "! grep -v pipewire $OUT/quickshell.log | grep -E 'ERROR|TypeError|ReferenceError|is not a type|is not defined|Cannot assign|Could not load icon'"
   grep -E "WARN|ERROR|TypeError|ReferenceError|is not|Cannot" "$OUT/quickshell.log" | sort | uniq -c | sort -rn | head -15
   check "compositor survived the shell" "kill -0 $WM"
