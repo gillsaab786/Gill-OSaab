@@ -10,6 +10,11 @@ swaybg -i "$WALL" -m fill &
 for agent in /usr/libexec/lxqt-policykit-agent /usr/bin/lxqt-policykit-agent /usr/libexec/polkit-gnome-authentication-agent-1; do
   [ -x "$agent" ] && { "$agent" & break; }
 done
+# dim after 4 min, lock after 5 (games/videos that ask to stay awake are respected)
+swayidle -w \
+  timeout 240 'brightnessctl -s -q set 30%' resume 'brightnessctl -r -q' \
+  timeout 300 'qs -c gill-osaab ipc call lock lock' \
+  before-sleep 'qs -c gill-osaab ipc call lock lock' &
 # the menu bar, Dock, notifications, Control Centre, Spotlight, Launchpad, lock screen
 while :; do
   qs -c gill-osaab

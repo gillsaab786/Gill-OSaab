@@ -43,6 +43,7 @@ modules:
         - sddm-wayland-generic
         - quickshell
         - swaybg
+        - swayidle
         - xwayland-satellite
         - xorg-x11-server-Xwayland
         - qt6-qtwayland

@@ -143,6 +143,12 @@ struct gs_server {
 	struct wlr_pointer_constraint_v1 *active_constraint;
 	struct wl_listener new_constraint, constraint_destroy;
 
+	/* idle: screen dim/lock after inactivity, but never while a game or video says it's busy */
+	struct wlr_idle_notifier_v1 *idle_notifier;
+	struct wlr_idle_inhibit_manager_v1 *idle_inhibit;
+	struct wl_listener new_inhibitor;
+	int inhibitors;
+
 	struct wlr_xdg_activation_v1 *xdg_activation;
 	struct wl_listener request_activate;
 
@@ -1627,6 +1633,37 @@ static void handle_request_activate(struct wl_listener *listener, void *data) {
 	}
 }
 
+/* ------------------------------------------------------------------ idle */
+
+struct gs_inhibitor {
+	struct gs_server *server;
+	struct wl_listener destroy;
+};
+
+static void inhibitor_destroy(struct wl_listener *listener, void *data) {
+	struct gs_inhibitor *in = wl_container_of(listener, in, destroy);
+	struct gs_server *server = in->server;
+	server->inhibitors--;
+	wlr_idle_notifier_v1_set_inhibited(server->idle_notifier, server->inhibitors > 0);
+	wl_list_remove(&in->destroy.link);
+	free(in);
+}
+
+static void handle_new_inhibitor(struct wl_listener *listener, void *data) {
+	struct gs_server *server = wl_container_of(listener, server, new_inhibitor);
+	struct wlr_idle_inhibitor_v1 *inhibitor = data;
+	struct gs_inhibitor *in = calloc(1, sizeof(*in));
+	in->server = server;
+	in->destroy.notify = inhibitor_destroy;
+	wl_signal_add(&inhibitor->events.destroy, &in->destroy);
+	server->inhibitors++;
+	wlr_idle_notifier_v1_set_inhibited(server->idle_notifier, true);
+}
+
+static void user_activity(struct gs_server *server) {
+	wlr_idle_notifier_v1_notify_activity(server->idle_notifier, server->seat);
+}
+
 /* ------------------------------------------------------------------ input */
 
 static pid_t spawn(const char *cmd) {
@@ -1744,6 +1781,7 @@ static void keyboard_key(struct wl_listener *listener, void *data) {
 	struct gs_keyboard *kb = wl_container_of(listener, kb, key);
 	struct gs_server *server = kb->server;
 	struct wlr_keyboard_key_event *event = data;
+	user_activity(server);
 	uint32_t keycode = event->keycode + 8;
 	const xkb_keysym_t *syms;
 	int nsyms = xkb_state_key_get_syms(kb->wlr_keyboard->xkb_state, keycode, &syms);
@@ -1971,6 +2009,7 @@ static void process_cursor_motion(struct gs_server *server, uint32_t time) {
 static void cursor_motion(struct wl_listener *listener, void *data) {
 	struct gs_server *server = wl_container_of(listener, server, cursor_motion);
 	struct wlr_pointer_motion_event *event = data;
+	user_activity(server);
 	/* games read raw mouse movement, even when the pointer is locked */
 	wlr_relative_pointer_manager_v1_send_relative_motion(server->relative_pointer_mgr, server->seat,
 		(uint64_t)event->time_msec * 1000, event->delta_x, event->delta_y, event->unaccel_dx, event->unaccel_dy);
@@ -1992,6 +2031,7 @@ static void cursor_motion(struct wl_listener *listener, void *data) {
 static void cursor_motion_absolute(struct wl_listener *listener, void *data) {
 	struct gs_server *server = wl_container_of(listener, server, cursor_motion_absolute);
 	struct wlr_pointer_motion_absolute_event *event = data;
+	user_activity(server);
 	wlr_cursor_warp_absolute(server->cursor, &event->pointer->base, event->x, event->y);
 	process_cursor_motion(server, event->time_msec);
 }
@@ -2049,6 +2089,7 @@ static void press_at(struct gs_server *server, double lx, double ly) {
 static void cursor_button(struct wl_listener *listener, void *data) {
 	struct gs_server *server = wl_container_of(listener, server, cursor_button);
 	struct wlr_pointer_button_event *event = data;
+	user_activity(server);
 	if (event->state == WL_POINTER_BUTTON_STATE_RELEASED) {
 		wlr_seat_pointer_notify_button(server->seat, event->time_msec, event->button, event->state);
 		server->cursor_mode = CURSOR_PASSTHROUGH;
@@ -2065,6 +2106,7 @@ static void cursor_button(struct wl_listener *listener, void *data) {
 static void cursor_axis(struct wl_listener *listener, void *data) {
 	struct gs_server *server = wl_container_of(listener, server, cursor_axis);
 	struct wlr_pointer_axis_event *event = data;
+	user_activity(server);
 	wlr_seat_pointer_notify_axis(server->seat, event->time_msec, event->orientation, event->delta,
 		event->delta_discrete, event->source, event->relative_direction);
 }
@@ -2339,8 +2381,10 @@ int main(int argc, char *argv[]) {
 	wlr_export_dmabuf_manager_v1_create(server.display);
 	wlr_screencopy_manager_v1_create(server.display);
 	wlr_gamma_control_manager_v1_create(server.display);
-	wlr_idle_notifier_v1_create(server.display);
-	wlr_idle_inhibit_v1_create(server.display);
+	server.idle_notifier = wlr_idle_notifier_v1_create(server.display);
+	server.idle_inhibit = wlr_idle_inhibit_v1_create(server.display);
+	server.new_inhibitor.notify = handle_new_inhibitor;
+	wl_signal_add(&server.idle_inhibit->events.new_inhibitor, &server.new_inhibitor);
 
 	server.output_layout = wlr_output_layout_create(server.display);
 	wlr_xdg_output_manager_v1_create(server.display, server.output_layout);
@@ -2470,7 +2514,7 @@ int main(int argc, char *argv[]) {
 		&server.cursor_motion, &server.cursor_motion_absolute, &server.cursor_button, &server.cursor_axis,
 		&server.cursor_frame, &server.request_cursor_shape, &server.new_input, &server.request_cursor,
 		&server.request_set_selection, &server.request_set_primary_selection, &server.new_output,
-		&server.new_constraint, &server.request_activate, &server.new_lock,
+		&server.new_constraint, &server.request_activate, &server.new_lock, &server.new_inhibitor,
 	};
 	for (size_t i = 0; i < sizeof(server_listeners) / sizeof(server_listeners[0]); i++) {
 		wl_list_remove(&server_listeners[i]->link);
