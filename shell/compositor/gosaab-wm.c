@@ -1635,6 +1635,7 @@ static void spawn(const char *cmd) {
 		sigemptyset(&all);
 		sigprocmask(SIG_SETMASK, &all, NULL);
 		signal(SIGCHLD, SIG_DFL);
+		signal(SIGPIPE, SIG_DFL);
 		setsid();
 		execl("/bin/sh", "/bin/sh", "-c", cmd, (void *)NULL);
 		_exit(127);
@@ -2410,6 +2411,7 @@ int main(int argc, char *argv[]) {
 	wl_event_loop_add_signal(loop, SIGTERM, handle_sigterm, &server);
 	wl_event_loop_add_signal(loop, SIGINT, handle_sigterm, &server);
 	signal(SIGCHLD, SIG_IGN);
+	signal(SIGPIPE, SIG_IGN); /* a client vanishing mid-write must never take the desktop down */
 	if (getenv("GOSAAB_TEST_CLICKS")) {
 		test_click_timer = wl_event_loop_add_timer(loop, test_click_tick, &server);
 		wl_event_source_timer_update(test_click_timer, 100);

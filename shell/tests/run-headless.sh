@@ -105,6 +105,7 @@ EOF
 
 kill -TERM $WM 2>/dev/null
 wait $WM; rc=$?
+echo "compositor exit code: $rc"; tail -3 "$OUT/gosaab-wm.log"
 check "clean shutdown" "[ $rc -eq 0 ]"
 
 # Slow-motion run (animations 10x slower) to capture frames mid-animation
