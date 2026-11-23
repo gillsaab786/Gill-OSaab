@@ -45,8 +45,10 @@ jobs:
         uses: blue-build/github-action@v1.14
         with:
           recipe: ${{ matrix.recipe }}
-          # no key: BlueBuild signs keyless through GitHub's OIDC identity
           cosign_private_key: ${{ secrets.SIGNING_SECRET }}
+          # Unsigned for now. To sign: add cosign.pub to the repo and the private key as the
+          # SIGNING_SECRET repo secret, then remove this line.
+          build_opts: "--no-sign"
           registry_token: ${{ github.token }}
           pr_event_number: ${{ github.event.number }}
           maximize_build_space: true

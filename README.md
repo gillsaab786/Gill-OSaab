@@ -98,7 +98,7 @@ Going back is one command: `rpm-ostree rollback` (or pick the previous entry at 
 ## Building
 
 GitHub Actions builds both editions daily and on every push (`.github/workflows/build.yml`),
-after the unit tests pass. Images are signed keyless through GitHub. To run the tests locally:
+after the unit tests pass. Images are unsigned for now (see the note in the workflow to turn signing on). To run the tests locally:
 `python3 -m unittest discover -s tests`.
 
 ## Roadmap
