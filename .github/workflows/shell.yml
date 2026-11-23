@@ -32,10 +32,14 @@ jobs:
               dnf -y -q install quickshell >/dev/null 2>&1 || { dnf -y -q install dnf-plugins-core >/dev/null; \
                 dnf -y -q copr enable errornointernet/quickshell >/dev/null; dnf -y -q install quickshell >/dev/null; }
               qs --version || true
-              meson setup shell/compositor/build shell/compositor
+              meson setup shell/compositor/build shell/compositor --buildtype=debugoptimized
               meson compile -C shell/compositor/build
               meson test -C shell/compositor/build --print-errorlogs
-              bash shell/tests/run-headless.sh shell/compositor/build artifacts
+              bash shell/tests/run-headless.sh shell/compositor/build artifacts || headless_failed=1
+              # turn any crash backtrace into file:line
+              grep -ho "gosaab-wm(+0x[0-9a-f]*)" artifacts/gosaab-wm*.log 2>/dev/null | sed "s/.*(+\\(0x[0-9a-f]*\\))/\\1/" | \
+                xargs -r addr2line -f -C -p -e shell/compositor/build/gosaab-wm | head -40
+              [ -z "${headless_failed:-}" ] || exit 1
               echo "== install into the system, as the Core image build does"
               bash shell/install.sh "$PWD/shell" >/tmp/install.log 2>&1 || { tail -30 /tmp/install.log; exit 1; }
               test -x /usr/bin/gosaab-wm && test -f /etc/xdg/quickshell/gill-osaab/shell.qml && test -f /usr/share/sddm/themes/gill-osaab/Main.qml

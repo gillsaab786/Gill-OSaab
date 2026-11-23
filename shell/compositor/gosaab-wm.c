@@ -26,6 +26,7 @@
 #include <fcntl.h>
 #include <getopt.h>
 #include <math.h>
+#include <execinfo.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -171,6 +172,8 @@ struct gs_server {
 	double last_click_ms;
 	float scale; /* output scale, for crisp title text */
 
+	bool shutting_down;         /* quitting: no animations or refocusing while clients go */
+	pid_t xwayland_pid;
 	bool overview;              /* Mission Control is showing */
 	bool overview_entering;
 	struct gs_anim overview_anim;
@@ -1235,7 +1238,9 @@ static void toplevel_unmap(struct wl_listener *listener, void *data) {
 	struct gs_toplevel *t = wl_container_of(listener, t, unmap);
 	struct gs_server *server = t->server;
 	overview_set(server, false, NULL);
-	start_close_animation(t);
+	if (!server->shutting_down) {
+		start_close_animation(t);
+	}
 	ftl_destroy(t);
 	t->min_anim.active = false;
 	t->mapped = false;
@@ -1253,7 +1258,7 @@ static void toplevel_unmap(struct wl_listener *listener, void *data) {
 	}
 	bool was_focused = server->seat->keyboard_state.focused_surface == t->xdg_toplevel->base->surface;
 	wl_list_remove(&t->link);
-	if (was_focused) {
+	if (was_focused && !server->shutting_down) {
 		wlr_seat_keyboard_clear_focus(server->seat);
 		focus_toplevel(focused_toplevel(server));
 	}
@@ -1624,11 +1629,12 @@ static void handle_request_activate(struct wl_listener *listener, void *data) {
 
 /* ------------------------------------------------------------------ input */
 
-static void spawn(const char *cmd) {
+static pid_t spawn(const char *cmd) {
 	if (cmd == NULL || cmd[0] == '\0') {
-		return;
+		return -1;
 	}
-	if (fork() == 0) {
+	pid_t pid = fork();
+	if (pid == 0) {
 		/* apps must not inherit our signal setup: the event loop blocks signals and we ignore
 		 * SIGCHLD, and both survive exec (apps would then fail to wait for their own children) */
 		sigset_t all;
@@ -1636,10 +1642,13 @@ static void spawn(const char *cmd) {
 		sigprocmask(SIG_SETMASK, &all, NULL);
 		signal(SIGCHLD, SIG_DFL);
 		signal(SIGPIPE, SIG_DFL);
+		signal(SIGSEGV, SIG_DFL);
+		signal(SIGABRT, SIG_DFL);
 		setsid();
 		execl("/bin/sh", "/bin/sh", "-c", cmd, (void *)NULL);
 		_exit(127);
 	}
+	return pid;
 }
 
 static void close_toplevel(struct gs_toplevel *t) {
@@ -2159,6 +2168,16 @@ static int handle_sigoverview(int sig, void *data) {
 	return 0;
 }
 
+/* On a crash, write where it happened to the log (helps fix bugs reported from real devices). */
+static void crash_handler(int sig) {
+	void *frames[48];
+	int n = backtrace(frames, 48);
+	dprintf(2, "gosaab-wm crashed (signal %d). Backtrace:\n", sig);
+	backtrace_symbols_fd(frames, n, 2);
+	signal(sig, SIG_DFL);
+	raise(sig);
+}
+
 static int handle_sigterm(int sig, void *data) {
 	struct gs_server *server = data;
 	wl_display_terminate(server->display);
@@ -2213,10 +2232,10 @@ static bool in_path(const char *program) {
 	return false;
 }
 
-static void start_xwayland(void) {
+static pid_t start_xwayland(void) {
 	/* (not system(): SIGCHLD is ignored, so system() can't report the result) */
 	if (getenv("GOSAAB_NO_XWAYLAND") || !in_path("xwayland-satellite")) {
-		return;
+		return -1;
 	}
 	for (int n = 0; n < 32; n++) {
 		char sock[64], lock[64];
@@ -2229,7 +2248,7 @@ static void start_xwayland(void) {
 		snprintf(display, sizeof(display), ":%d", n);
 		snprintf(cmd, sizeof(cmd), "exec xwayland-satellite %s", display);
 		setenv("DISPLAY", display, true);
-		spawn(cmd);
+		pid_t pid = spawn(cmd);
 		const char *runtime = getenv("XDG_RUNTIME_DIR");
 		if (runtime) { /* lets tests and helper scripts find the X11 display */
 			char path[512];
@@ -2241,8 +2260,9 @@ static void start_xwayland(void) {
 			}
 		}
 		wlr_log(WLR_INFO, "X11 apps: xwayland-satellite on DISPLAY=%s", display);
-		return;
+		return pid;
 	}
+	return -1;
 }
 
 static void write_socket_file(const char *socket) {
@@ -2412,6 +2432,8 @@ int main(int argc, char *argv[]) {
 	wl_event_loop_add_signal(loop, SIGINT, handle_sigterm, &server);
 	signal(SIGCHLD, SIG_IGN);
 	signal(SIGPIPE, SIG_IGN); /* a client vanishing mid-write must never take the desktop down */
+	signal(SIGSEGV, crash_handler);
+	signal(SIGABRT, crash_handler);
 	if (getenv("GOSAAB_TEST_CLICKS")) {
 		test_click_timer = wl_event_loop_add_timer(loop, test_click_tick, &server);
 		wl_event_source_timer_update(test_click_timer, 100);
@@ -2429,7 +2451,7 @@ int main(int argc, char *argv[]) {
 	}
 	setenv("WAYLAND_DISPLAY", socket, true);
 	setenv("XDG_CURRENT_DESKTOP", "Gill-OSaab", true);
-	start_xwayland();
+	server.xwayland_pid = start_xwayland();
 	write_socket_file(socket);
 	spawn(startup_cmd);
 	wlr_log(WLR_INFO, "gosaab-wm %s running on WAYLAND_DISPLAY=%s", GOSAAB_WM_VERSION, socket);
@@ -2437,6 +2459,10 @@ int main(int argc, char *argv[]) {
 
 	if (test_click_timer) {
 		wl_event_source_remove(test_click_timer);
+	}
+	server.shutting_down = true;
+	if (server.xwayland_pid > 0) {
+		kill(server.xwayland_pid, SIGTERM);
 	}
 	wl_display_destroy_clients(server.display);
 	struct wl_listener *server_listeners[] = {
