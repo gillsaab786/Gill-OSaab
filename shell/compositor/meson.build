@@ -39,7 +39,8 @@ endforeach
 
 executable('gosaab-wm',
   ['gosaab-wm.c'] + protocol_headers,
-  dependencies: [wayland_server, wlroots, scenefx, xkbcommon, math],
+  # scenefx must come before wlroots: both export wlr_scene_*, and scenefx's must win
+  dependencies: [scenefx, wayland_server, wlroots, xkbcommon, math],
   install: true)
 
 test_anim = executable('test-anim', 'tests/test_anim.c', dependencies: [math])
