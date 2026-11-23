@@ -34,6 +34,7 @@
 #include <wlr/backend/headless.h>
 #include <wlr/render/allocator.h>
 #include <wlr/render/wlr_renderer.h>
+#include <wlr/types/wlr_buffer.h>
 #include <wlr/types/wlr_compositor.h>
 #include <wlr/types/wlr_cursor.h>
 #include <wlr/types/wlr_cursor_shape_v1.h>
@@ -141,6 +142,8 @@ struct gs_toplevel {
 	bool mapped, placed, maximized;
 	struct wlr_box saved; /* geometry before maximise */
 	struct wlr_xdg_toplevel_decoration_v1 *decoration;
+	struct wlr_buffer *last_buffer; /* latest frame, kept for the close animation */
+	int last_w, last_h;
 	struct gs_anim open;
 };
 
@@ -554,6 +557,17 @@ static void toplevel_commit(struct wl_listener *listener, void *data) {
 			WLR_XDG_TOPLEVEL_WM_CAPABILITIES_MAXIMIZE | WLR_XDG_TOPLEVEL_WM_CAPABILITIES_FULLSCREEN);
 		return;
 	}
+	struct wlr_surface *surface = t->xdg_toplevel->base->surface;
+	if (surface->buffer != NULL && t->last_buffer != &surface->buffer->base) {
+		if (t->last_buffer) {
+			wlr_buffer_unlock(t->last_buffer);
+		}
+		t->last_buffer = wlr_buffer_lock(&surface->buffer->base);
+	}
+	if (surface->buffer != NULL) {
+		t->last_w = surface->current.width;
+		t->last_h = surface->current.height;
+	}
 	update_decor_geometry(t);
 	if (t->mapped && !t->placed && t->xdg_toplevel->base->geometry.width > 0) {
 		place_centered(t);
@@ -580,29 +594,6 @@ static void toplevel_map(struct wl_listener *listener, void *data) {
 	schedule_frames(t->server);
 }
 
-struct snapshot_args {
-	struct gs_closing *closing;
-	int base_x, base_y;
-};
-
-static void snapshot_buffer(struct wlr_scene_buffer *buffer, int sx, int sy, void *data) {
-	struct snapshot_args *args = data;
-	struct gs_closing *c = args->closing;
-	if (buffer->buffer == NULL || c->nbufs >= (int)(sizeof(c->bufs) / sizeof(c->bufs[0]))) {
-		return;
-	}
-	struct wlr_scene_buffer *copy = wlr_scene_buffer_create(c->tree, buffer->buffer);
-	if (copy == NULL) {
-		return;
-	}
-	int w = buffer->dst_width > 0 ? buffer->dst_width : buffer->buffer->width;
-	int h = buffer->dst_height > 0 ? buffer->dst_height : buffer->buffer->height;
-	wlr_scene_buffer_set_dest_size(copy, w, h);
-	wlr_scene_buffer_set_corner_radii(copy, buffer->corners);
-	wlr_scene_node_set_position(&copy->node, sx - args->base_x, sy - args->base_y);
-	c->bufs[c->nbufs++] = (struct gs_closing_buffer){ copy, sx - args->base_x, sy - args->base_y, w, h };
-}
-
 /* Keep a picture of the window and let it fade/shrink away (macOS-style close). */
 static void start_close_animation(struct gs_toplevel *t) {
 	struct gs_server *server = t->server;
@@ -622,8 +613,15 @@ static void start_close_animation(struct gs_toplevel *t) {
 	c->shadow = wlr_scene_shadow_create(c->tree, geo->width + sigma * 2, geo->height + sigma * 2,
 		CORNER_RADIUS, SHADOW_SIGMA, (float[4]){ 0.0f, 0.0f, 0.0f, 0.55f });
 	wlr_scene_node_set_position(&c->shadow->node, -sigma, -sigma + SHADOW_OFFSET_Y);
-	struct snapshot_args args = { c, lx + geo->x, ly + geo->y };
-	wlr_scene_node_for_each_buffer(&t->xdg_tree->node, snapshot_buffer, &args);
+	if (t->last_buffer != NULL && t->last_w > 0 && t->last_h > 0) {
+		struct wlr_scene_buffer *copy = wlr_scene_buffer_create(c->tree, t->last_buffer);
+		if (copy != NULL) {
+			wlr_scene_buffer_set_dest_size(copy, t->last_w, t->last_h);
+			wlr_scene_buffer_set_corner_radii(copy, corner_radii_all(t->maximized ? 0 : CORNER_RADIUS));
+			wlr_scene_node_set_position(&copy->node, -geo->x, -geo->y);
+			c->bufs[c->nbufs++] = (struct gs_closing_buffer){ copy, -geo->x, -geo->y, t->last_w, t->last_h };
+		}
+	}
 	if (c->nbufs == 0) {
 		wlr_scene_node_destroy(&c->tree->node);
 		free(c);
@@ -664,6 +662,9 @@ static void toplevel_destroy(struct wl_listener *listener, void *data) {
 	wl_list_remove(&t->request_resize.link);
 	wl_list_remove(&t->request_maximize.link);
 	wl_list_remove(&t->request_fullscreen.link);
+	if (t->last_buffer) {
+		wlr_buffer_unlock(t->last_buffer);
+	}
 	wlr_scene_node_destroy(&t->tree->node);
 	free(t);
 }
@@ -809,6 +810,8 @@ static void server_new_xdg_popup(struct wl_listener *listener, void *data) {
 
 struct gs_decoration {
 	struct wlr_xdg_toplevel_decoration_v1 *decoration;
+	struct wlr_buffer *last_buffer; /* latest frame, kept for the close animation */
+	int last_w, last_h;
 	struct gs_toplevel *toplevel;
 	struct wl_listener request_mode, destroy;
 };
