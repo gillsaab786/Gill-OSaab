@@ -1524,6 +1524,9 @@ static void toplevel_destroy(struct wl_listener *listener, void *data) {
 	if (t->last_buffer) {
 		wlr_buffer_unlock(t->last_buffer);
 	}
+	/* the decoration object can outlive us by a moment (it is destroyed right after the
+	 * toplevel): make sure it can't find this freed window through the xdg surface */
+	t->xdg_toplevel->base->data = NULL;
 	wlr_scene_node_destroy(&t->tree->node);
 	if (t->tb.title_buffer) {
 		wlr_buffer_drop(t->tb.title_buffer);
