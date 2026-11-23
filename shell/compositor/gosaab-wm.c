@@ -190,6 +190,19 @@ static double now_ms(void) {
 	return ts.tv_sec * 1000.0 + ts.tv_nsec / 1e6;
 }
 
+/* GOSAAB_ANIM_SLOWDOWN=10 plays animations 10x slower (for tests and tuning). */
+static double anim_ms(double ms) {
+	static double factor = -1;
+	if (factor < 0) {
+		const char *env = getenv("GOSAAB_ANIM_SLOWDOWN");
+		factor = env ? atof(env) : 1.0;
+		if (factor <= 0) {
+			factor = 1.0;
+		}
+	}
+	return ms * factor;
+}
+
 static void schedule_frames(struct gs_server *server) {
 	struct gs_output *output;
 	wl_list_for_each(output, &server->outputs, link) {
@@ -262,7 +275,7 @@ static void apply_toplevel_visual(struct gs_toplevel *t, float scale, float alph
 	wlr_scene_node_set_position(&t->xdg_tree->node, dx, dy);
 	struct visual_args args = { t, scale, alpha };
 	wlr_scene_node_for_each_buffer(&t->xdg_tree->node, style_buffer, &args);
-	float shadow_color[4] = { 0.0f, 0.0f, 0.0f, 0.42f * alpha };
+	float shadow_color[4] = { 0.0f, 0.0f, 0.0f, 0.55f * alpha };
 	wlr_scene_shadow_set_color(t->shadow, shadow_color);
 	wlr_scene_node_set_enabled(&t->shadow->node, !t->maximized);
 }
@@ -313,7 +326,7 @@ static bool tick_animations(struct gs_server *server) {
 			wlr_scene_buffer_set_dest_size(b->buffer, (int)lroundf(b->w * scale), (int)lroundf(b->h * scale));
 			wlr_scene_buffer_set_opacity(b->buffer, alpha);
 		}
-		float shadow_color[4] = { 0.0f, 0.0f, 0.0f, 0.42f * alpha };
+		float shadow_color[4] = { 0.0f, 0.0f, 0.0f, 0.55f * alpha };
 		wlr_scene_shadow_set_color(c->shadow, shadow_color);
 		if (p >= 1.0) {
 			wlr_scene_node_destroy(&c->tree->node);
@@ -561,7 +574,7 @@ static void toplevel_map(struct wl_listener *listener, void *data) {
 		t->placed = true;
 	}
 	wl_list_insert(&t->server->toplevels, &t->link);
-	gs_anim_start(&t->open, now_ms(), OPEN_MS);
+	gs_anim_start(&t->open, now_ms(), anim_ms(OPEN_MS));
 	apply_toplevel_visual(t, 0.94f, 0.0f);
 	focus_toplevel(t);
 	schedule_frames(t->server);
@@ -607,7 +620,7 @@ static void start_close_animation(struct gs_toplevel *t) {
 	c->height = geo->height;
 	int sigma = (int)SHADOW_SIGMA;
 	c->shadow = wlr_scene_shadow_create(c->tree, geo->width + sigma * 2, geo->height + sigma * 2,
-		CORNER_RADIUS, SHADOW_SIGMA, (float[4]){ 0.0f, 0.0f, 0.0f, 0.42f });
+		CORNER_RADIUS, SHADOW_SIGMA, (float[4]){ 0.0f, 0.0f, 0.0f, 0.55f });
 	wlr_scene_node_set_position(&c->shadow->node, -sigma, -sigma + SHADOW_OFFSET_Y);
 	struct snapshot_args args = { c, lx + geo->x, ly + geo->y };
 	wlr_scene_node_for_each_buffer(&t->xdg_tree->node, snapshot_buffer, &args);
@@ -616,7 +629,7 @@ static void start_close_animation(struct gs_toplevel *t) {
 		free(c);
 		return;
 	}
-	gs_anim_start(&c->anim, now_ms(), CLOSE_MS);
+	gs_anim_start(&c->anim, now_ms(), anim_ms(CLOSE_MS));
 	wl_list_insert(&server->closing, &c->link);
 	schedule_frames(server);
 }
@@ -732,7 +745,7 @@ static void server_new_xdg_toplevel(struct wl_listener *listener, void *data) {
 	t->blur = wlr_scene_blur_create(t->tree, 0, 0);
 	wlr_scene_blur_set_should_only_blur_bottom_layer(t->blur, true);
 	t->shadow = wlr_scene_shadow_create(t->tree, 0, 0, CORNER_RADIUS, SHADOW_SIGMA,
-		(float[4]){ 0.0f, 0.0f, 0.0f, 0.42f });
+		(float[4]){ 0.0f, 0.0f, 0.0f, 0.55f });
 	t->xdg_tree = wlr_scene_xdg_surface_create(t->tree, xdg_toplevel->base);
 	xdg_toplevel->base->data = t->xdg_tree;
 	wlr_scene_node_lower_to_bottom(&t->shadow->node);
@@ -1374,6 +1387,15 @@ int main(int argc, char *argv[]) {
 	wl_display_run(server.display);
 
 	wl_display_destroy_clients(server.display);
+	struct wl_listener *server_listeners[] = {
+		&server.new_xdg_toplevel, &server.new_xdg_popup, &server.new_layer_surface, &server.new_decoration,
+		&server.cursor_motion, &server.cursor_motion_absolute, &server.cursor_button, &server.cursor_axis,
+		&server.cursor_frame, &server.request_cursor_shape, &server.new_input, &server.request_cursor,
+		&server.request_set_selection, &server.request_set_primary_selection, &server.new_output,
+	};
+	for (size_t i = 0; i < sizeof(server_listeners) / sizeof(server_listeners[0]); i++) {
+		wl_list_remove(&server_listeners[i]->link);
+	}
 	wlr_scene_node_destroy(&server.scene->tree.node);
 	wlr_xcursor_manager_destroy(server.cursor_mgr);
 	wlr_cursor_destroy(server.cursor);

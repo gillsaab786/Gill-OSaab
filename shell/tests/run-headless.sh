@@ -100,7 +100,41 @@ print("diffs:", {k: round(diff(*k.split("|")), 2) for k in ["01-wallpaper|03-one
 sys.exit(1 if bad else 0)
 EOF
 
-kill $WM 2>/dev/null
-wait $WM 2>/dev/null
-tail -20 "$OUT/gosaab-wm.log"
+kill -TERM $WM 2>/dev/null
+wait $WM; rc=$?
+check "clean shutdown" "[ $rc -eq 0 ]"
+
+# Slow-motion run (animations 10x slower) to capture frames mid-animation
+pkill foot 2>/dev/null
+rm -f "$XDG_RUNTIME_DIR/gosaab-wm.socket"
+GOSAAB_ANIM_SLOWDOWN=10 "$BUILD/gosaab-wm" -s "swaybg -i $WALL -m fill" >"$OUT/gosaab-wm-slow.log" 2>&1 &
+WM=$!
+for _ in $(seq 1 50); do [ -s "$XDG_RUNTIME_DIR/gosaab-wm.socket" ] && break; sleep 0.1; done
+WAYLAND_DISPLAY=$(cat "$XDG_RUNTIME_DIR/gosaab-wm.socket")
+export WAYLAND_DISPLAY
+sleep 1
+foot -W 100x30 -e sh -c 'echo "opening in slow motion"; sleep 120' &
+sleep 0.6; shot 07-slow-opening
+sleep 3.5; shot 08-slow-open-done
+kill -USR1 $WM
+sleep 0.9; shot 09-slow-closing
+sleep 2.5; shot 10-slow-closed
+python3 - "$OUT" <<'EOF2' || fail=1
+import sys
+from PIL import Image, ImageChops, ImageStat
+out = sys.argv[1]
+d = lambda a, b: sum(ImageStat.Stat(ImageChops.difference(
+    Image.open(f"{out}/{a}.png").convert("RGB"), Image.open(f"{out}/{b}.png").convert("RGB"))).mean) / 3
+res = {"opening vs open": d("07-slow-opening", "08-slow-open-done"),
+       "closing vs closed": d("09-slow-closing", "10-slow-closed"),
+       "closing vs open": d("09-slow-closing", "08-slow-open-done")}
+print("animation diffs:", {k: round(v, 2) for k, v in res.items()})
+ok = [("open animation shows an in-between frame", res["opening vs open"] > 0.3),
+      ("close animation shows an in-between frame", res["closing vs closed"] > 0.3 and res["closing vs open"] > 0.3)]
+for name, good in ok:
+    print(("PASS: " if good else "FAIL: ") + name)
+sys.exit(0 if all(g for _, g in ok) else 1)
+EOF2
+kill -TERM $WM 2>/dev/null; wait $WM 2>/dev/null
+grep -E "\[ERROR\]|Assertion" "$OUT"/gosaab-wm*.log | head -5
 exit $fail
