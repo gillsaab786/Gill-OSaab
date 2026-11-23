@@ -21,6 +21,7 @@ if [ -f /src/core-test/hello64.exe ]; then
 fi
 check "TDP/fans/buttons: Handheld Daemon installed" "command -v hhd >/dev/null"
 check "frame generation layer installed (lsfg-vk)" "ls /usr/share/vulkan/implicit_layer.d/ 2>/dev/null | grep -qi lsfg"
+check "VPN, cloud drives and Android bridge tools" "command -v nmcli >/dev/null && command -v rclone >/dev/null && command -v adb >/dev/null && [ -f /usr/lib/systemd/user/gosaab-cloud@.service ]"
 check "Android folders service ready" "command -v bindfs >/dev/null && systemctl is-enabled gosaab-android-folders.service >/dev/null 2>&1"
 check "start-up choice applied at boot" "systemctl is-enabled gosaab-boot-mode.service >/dev/null 2>&1"
 /usr/libexec/gill-osaab/gosaab-session-select-root --boot root game

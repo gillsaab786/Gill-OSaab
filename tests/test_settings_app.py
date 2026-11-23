@@ -44,6 +44,27 @@ class FakeBackend:
     def kde_night_light(self):
         return False
 
+    def vpn_connections(self):
+        return [("Home WG", "wireguard", False)]
+
+    def vpn_import(self, path):
+        return True
+
+    def vpn_set(self, name, up):
+        return True
+
+    def cloud_remotes(self):
+        return ["gdrive-personal", "onedrive-work"]
+
+    def cloud_mounted(self, remote):
+        return False
+
+    def cloud_mount(self, remote, on):
+        return True
+
+    def cloud_add(self):
+        return True
+
     def sandboxed_apps(self):
         return [("firefox", "Firefox"), ("vlc", "VLC")]
 
@@ -133,15 +154,18 @@ class SettingsApp(unittest.TestCase):
 
     def test_optional_features_are_off_and_locked(self):
         w = self.gs.Settings(FakeBackend())
-        for key in ("vpn", "cloud_drives", "phone_link"):
+        sw = w.switches[("features.conf", "phone_link")][0]
+        self.assertFalse(sw.isChecked())
+        self.assertFalse(sw.isEnabled())
+        for key in ("vpn", "cloud_drives"):  # real switches now, but off by default
             sw = w.switches[("features.conf", key)][0]
             self.assertFalse(sw.isChecked())
-            self.assertFalse(sw.isEnabled())
+            self.assertTrue(sw.isEnabled())
 
     def test_every_page_builds(self):
         w = self.gs.Settings(FakeBackend())
-        self.assertEqual(w.stack.count(), 10)
-        for i in range(10):
+        self.assertEqual(w.stack.count(), 11)
+        for i in range(11):
             w.nav.setCurrentRow(i)
             self.assertEqual(w.stack.currentIndex(), i)
 

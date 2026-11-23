@@ -1,0 +1,89 @@
+#!/usr/bin/python3
+"""Android (Waydroid) notifications -> Gill-OSaab notifications, with download progress.
+
+Waydroid doesn't pass Android notifications to Linux, so this reads them over Android's own
+debug bridge (adb, no root needed) every few seconds while Android is running, and shows new or
+changed ones in the shell. Progress (downloads, installs) updates the same notification.
+"""
+import re
+import subprocess
+import sys
+import time
+
+POLL = 3
+RECORD = re.compile(r"NotificationRecord\(0x[0-9a-f]+: pkg=(?P<pkg>\S+) .*?key=(?P<key>\S+?):", re.S)
+EXTRA = re.compile(r"^\s*android\.(title|text|progress|progressMax|progressIndeterminate)=\w+ \((.*)\)\s*$", re.M)
+NAMES = {"com.android.vending": "Play Store", "com.google.android.youtube": "YouTube",
+         "com.android.chrome": "Chrome", "com.whatsapp": "WhatsApp", "com.instagram.android": "Instagram"}
+
+
+def parse(dump):
+    """dumpsys notification --noredact -> {key: {app, title, text, percent}} for posted notifications."""
+    section = dump.split("Notification List:", 1)[-1]
+    for end in ("\n  Snoozed notifications", "\n  Enqueued Notification List", "\n\n  mArchive"):
+        section = section.split(end, 1)[0]
+    found = {}
+    matches = list(RECORD.finditer(section))
+    for i, m in enumerate(matches):
+        body = section[m.end(): matches[i + 1].start() if i + 1 < len(matches) else len(section)]
+        extras = {k: v for k, v in EXTRA.findall(body)}
+        title = extras.get("title", "")
+        if not title or title == "null":
+            continue
+        percent = None
+        try:
+            pmax = int(extras.get("progressMax", "0"))
+            if pmax > 0 and extras.get("progressIndeterminate", "false") != "true":
+                percent = max(0, min(100, round(int(extras.get("progress", "0")) * 100 / pmax)))
+        except ValueError:
+            pass
+        pkg = m.group("pkg")
+        text = extras.get("text", "")
+        found[m.group("key")] = {"app": NAMES.get(pkg, pkg.rsplit(".", 1)[-1].capitalize()),
+                                 "title": title, "text": "" if text == "null" else text, "percent": percent}
+    return found
+
+
+def notify(item, replaces):
+    hints = [] if item["percent"] is None else ["--hint", f"int:value:{item['percent']}"]
+    cmd = ["notify-send", "--print-id", "-a", item["app"], "-i", "waydroid", *hints]
+    if replaces:
+        cmd += ["--replace-id", str(replaces)]
+    out = subprocess.run(cmd + [item["title"], item["text"]], capture_output=True, text=True, check=False)
+    try:
+        return int(out.stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        return replaces
+
+
+def android_address():
+    out = subprocess.run(["waydroid", "status"], capture_output=True, text=True, check=False).stdout
+    if "RUNNING" not in out.upper():
+        return None
+    m = re.search(r"IP address:\s*(\d+\.\d+\.\d+\.\d+)", out)
+    return f"{m.group(1)}:5555" if m else None
+
+
+def main():
+    seen = {}  # key -> (notification id, last item)
+    while True:
+        address = android_address()
+        if not address:
+            seen.clear()
+            time.sleep(15)
+            continue
+        subprocess.run(["adb", "connect", address], capture_output=True, check=False, timeout=10)
+        dump = subprocess.run(["adb", "-s", address, "shell", "dumpsys", "notification", "--noredact"],
+                              capture_output=True, text=True, check=False, timeout=20).stdout
+        current = parse(dump)
+        for key, item in current.items():
+            nid, last = seen.get(key, (0, None))
+            if item != last:
+                seen[key] = (notify(item, nid), item)
+        for key in set(seen) - set(current):
+            del seen[key]
+        time.sleep(POLL)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

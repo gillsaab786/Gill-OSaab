@@ -17,6 +17,8 @@ swayidle -w \
   before-sleep 'qs -c gill-osaab ipc call lock lock' &
 # download/copy/install progress from any app -> notifications with progress bars
 /usr/libexec/gill-osaab/gosaab-notify-hub --desktop &
+# Android app notifications (incl. Play Store download progress) while Android is running
+command -v waydroid >/dev/null && /usr/libexec/gill-osaab/gosaab-android-notify &
 # the menu bar, Dock, notifications, Control Centre, Spotlight, Launchpad, lock screen
 while :; do
   qs -c gill-osaab

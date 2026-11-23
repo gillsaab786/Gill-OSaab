@@ -88,6 +88,9 @@ modules:
         - wine
         - wine-dxvk
         - bindfs
+        - rclone
+        - fuse3
+        - android-tools
         - git-core
         - python3-pip
         - waydroid

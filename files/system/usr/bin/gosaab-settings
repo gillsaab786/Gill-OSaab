@@ -138,6 +138,43 @@ class Backend:
         subprocess.run(["pkill", "-RTMIN+2", "-x", "gosaab-wm"], check=False)  # apply now
         return 0
 
+    # ---- VPN (NetworkManager: WireGuard, OpenVPN...)
+    def vpn_connections(self):
+        """[(name, type, active)] of VPN connections."""
+        out = subprocess.run(["nmcli", "-t", "-f", "NAME,TYPE,ACTIVE", "connection", "show"],
+                             capture_output=True, text=True, check=False).stdout
+        conns = []
+        for line in out.splitlines():
+            parts = line.replace("\\:", "\0").split(":")
+            if len(parts) >= 3 and parts[1] in ("wireguard", "vpn"):
+                conns.append((parts[0].replace("\0", ":"), parts[1], parts[2] == "yes"))
+        return conns
+
+    def vpn_import(self, path):
+        kind = "wireguard" if path.endswith(".conf") else "openvpn"
+        return self.run(["nmcli", "connection", "import", "type", kind, "file", path])
+
+    def vpn_set(self, name, up):
+        return self.run(["nmcli", "connection", "up" if up else "down", "id", name])
+
+    # ---- cloud drives (rclone: Google Drive, OneDrive, Dropbox, ... several accounts each)
+    def cloud_remotes(self):
+        out = subprocess.run(["rclone", "listremotes"], capture_output=True, text=True, check=False).stdout
+        return [r.rstrip(":") for r in out.split() if r.endswith(":")]
+
+    def cloud_mounted(self, remote):
+        return subprocess.run(["systemctl", "--user", "is-active", "--quiet", f"gosaab-cloud@{remote}.service"],
+                              check=False).returncode == 0
+
+    def cloud_mount(self, remote, on):
+        return self.run(["systemctl", "--user", "enable" if on else "disable", "--now",
+                         f"gosaab-cloud@{remote}.service"])
+
+    def cloud_add(self):
+        return self.run(["foot", "-T", "Add a cloud drive", "-e", "sh", "-c",
+                         "echo 'Choose n (new), give it a name, pick Google Drive / OneDrive / Dropbox...';"
+                         " rclone config; echo; read -p 'Done. Press Enter to close.' x"], wait=False)
+
     APP_FOLDERS = Path.home() / ".config/gill-osaab/app-folders"
 
     def sandboxed_apps(self):
@@ -360,22 +397,29 @@ class Page(QScrollArea):
         self.setWidget(body)
 
     def section(self, label, rows, note=""):
+        """Add a titled card of rows; returns its container (hide it to hide the whole section)."""
+        box = QWidget()
+        bl = QVBoxLayout(box)
+        bl.setContentsMargins(0, 0, 0, 0)
+        bl.setSpacing(10)
         if label:
             lab = QLabel(label.upper())
             lab.setObjectName("sectionLabel")
-            self.lay.addSpacing(10)
-            self.lay.addWidget(lab)
+            bl.addSpacing(10)
+            bl.addWidget(lab)
             self.keywords.append(label.lower())
         for r in rows:
             self.keywords.append(r.title_text.lower())
             if r.subtitle is not None:
                 self.keywords.append(r.subtitle.text().lower())
-        self.lay.addWidget(Card(rows))
+        bl.addWidget(Card(rows))
         if note:
             n = QLabel(note)
             n.setObjectName("note")
             n.setWordWrap(True)
-            self.lay.addWidget(n)
+            bl.addWidget(n)
+        self.lay.addWidget(box)
+        return box
 
     def button(self, text, primary=False):
         b = QPushButton(text)
@@ -397,6 +441,7 @@ PAGES = [
     ("Device & Drivers", "#30D158", "computer-symbolic", "D"),
     ("Apps & Security", "#5E5CE6", "security-high-symbolic", "S"),
     ("App Folders", "#64D2FF", "folder-symbolic", "F"),
+    ("VPN & Cloud", "#0A84FF", "network-vpn-symbolic", "V"),
     ("Notifications", "#FF453A", "preferences-system-notifications-symbolic", "N"),
     ("Screen Off", "#FF9F0A", "video-display-symbolic", "O"),
     ("Appearance", "#1FB6C9", "preferences-desktop-appearance-symbolic", "A"),
@@ -447,7 +492,7 @@ class Settings(QMainWindow):
         layout.addWidget(self.stack, 1)
         self.setCentralWidget(root)
 
-        builders = [self.page_updates, self.page_device, self.page_security, self.page_folders, self.page_notifications,
+        builders = [self.page_updates, self.page_device, self.page_security, self.page_folders, self.page_vpn_cloud, self.page_notifications,
                     self.page_screen, self.page_appearance, self.page_gamemode, self.page_optional, self.page_about]
         self.pages = []
         for (name, color, glyph, letter), builder in zip(PAGES, builders):
@@ -728,6 +773,55 @@ class Settings(QMainWindow):
         self.backend.set_app_folders(app, folders)
         self.folder_labels[app].setText("  ·  ".join(Path(f).name for f in folders) or "Only its own files")
 
+    def page_vpn_cloud(self):
+        p = Page("VPN & Cloud")
+        b = self.backend
+        vpn_on = self.switch("features.conf", "vpn", default=False)
+        p.section("VPN", [Row("VPN", "Off by default. Turn on to add and use VPN connections.", vpn_on)])
+        rows = []
+        for name, kind, active in b.vpn_connections():
+            sw = Switch()
+            sw.set_quiet(active)
+            sw.toggled.connect(lambda on, n=name: b.vpn_set(n, on))
+            rows.append(Row(name, "WireGuard" if kind == "wireguard" else "OpenVPN / other", sw))
+        if not rows:
+            rows.append(Row("No VPN yet", "Import a file from your VPN provider below.", QLabel("")))
+        vpn_box = p.section("Connections", rows, "WireGuard is fastest; if it is blocked on a network, "
+                            "import your provider's OpenVPN file and switch to that one.")
+        imp = QPushButton("Import VPN file (WireGuard .conf or OpenVPN .ovpn)…")
+        imp.clicked.connect(self.import_vpn)
+        vpn_box.layout().addWidget(imp)
+        vpn_box.setVisible(self.backend.features().get("vpn", "off") == "on")
+        vpn_on.toggled.connect(vpn_box.setVisible)
+
+        cloud_on = self.switch("features.conf", "cloud_drives", default=False)
+        p.section("Cloud drives", [Row("Cloud drives", "Off by default. Nothing appears in Files until you "
+                                       "turn this on and add an account.", cloud_on)])
+        rows = []
+        for remote in b.cloud_remotes():
+            sw = Switch()
+            sw.set_quiet(b.cloud_mounted(remote))
+            sw.toggled.connect(lambda on, r=remote: b.cloud_mount(r, on))
+            rows.append(Row(remote, f"Shows in Files as Cloud/{remote}", sw))
+        if not rows:
+            rows.append(Row("No accounts yet", "Add Google Drive, OneDrive, Dropbox... as many as you like.",
+                            QLabel("")))
+        cloud_box = p.section("Accounts", rows)
+        add = QPushButton("Add an account…")
+        add.clicked.connect(lambda: b.cloud_add())
+        cloud_box.layout().addWidget(add)
+        cloud_box.setVisible(self.backend.features().get("cloud_drives", "off") == "on")
+        cloud_on.toggled.connect(cloud_box.setVisible)
+        p.finish()
+        return p
+
+    def import_vpn(self):
+        from PySide6.QtWidgets import QFileDialog
+        path, _ = QFileDialog.getOpenFileName(self, "VPN file from your provider", str(Path.home()),
+                                              "VPN files (*.conf *.ovpn)")
+        if path:
+            self.backend.vpn_import(path)
+
     def page_gamemode(self):
         p = Page("Game Mode")
         b = self.backend
@@ -776,7 +870,7 @@ class Settings(QMainWindow):
         p = Page("Optional Features")
         rows = []
         for key, title in [("phone_link", "Phone link"), ("shared_game_library", "Shared game library"),
-                           ("vpn", "VPN"), ("cloud_drives", "Cloud drives"), ("vrr", "VRR (FreeSync)"),
+                           ("vrr", "VRR (FreeSync)"),
                            ("suspend_then_hibernate", "Suspend, then hibernate"), ("undervolt", "Undervolting"),
                            ("smart_updates", "Smart updates"),
                            ("pause_downloads_while_gaming", "Pause downloads while gaming")]:
@@ -886,6 +980,13 @@ def main():
     app.setDesktopFileName("gosaab-settings")
     app.setStyleSheet(STYLE)
     w = Settings()
+    # open a page directly: gosaab-settings vpn | about | game | folders | glasses ...
+    want = (sys.argv[1] if len(sys.argv) > 1 else "").lower()
+    if want:
+        for i, page in enumerate(PAGES):
+            if want in page[0].lower() or (want == "game" and page[0] == "Game Mode"):
+                w.nav.setCurrentRow(i)
+                break
     w.show()
     return app.exec()
 

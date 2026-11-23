@@ -23,8 +23,18 @@ Popup {
         stdout: StdioCollector { onStreamFinished: cc.wifiOn = text.trim() !== "disabled" } }
     Process { id: btState; command: ["sh", "-c", "bluetoothctl show 2>/dev/null | grep -q 'Powered: yes' && echo on || echo off"]
         stdout: StdioCollector { onStreamFinished: cc.btOn = text.trim() === "on" } }
-    Process { id: vpnState; command: ["sh", "-c", "grep -qx 'vpn=on' /etc/gill-osaab/features.conf 2>/dev/null && echo on || echo off"]
-        stdout: StdioCollector { onStreamFinished: cc.vpnOn = text.trim() === "on" } }
+    // VPN tile only when VPN is turned on in Settings; it connects your first VPN
+    property bool vpnEnabled: false
+    property string vpnName: ""
+    Process { id: vpnState; command: ["sh", "-c", "grep -qx 'vpn=on' /etc/gill-osaab/features.conf 2>/dev/null || exit 0; " +
+            "echo enabled; nmcli -t -f NAME,TYPE,ACTIVE connection show 2>/dev/null | grep -E ':(wireguard|vpn):' | head -1"]
+        stdout: StdioCollector { onStreamFinished: {
+            const lines = text.trim().split("\n")
+            cc.vpnEnabled = lines[0] === "enabled"
+            const f = (lines[1] || "").split(":")
+            cc.vpnName = f[0] || ""
+            cc.vpnOn = f[2] === "yes"
+        } } }
     Process { id: lightState; command: ["sh", "-c", "brightnessctl -m 2>/dev/null | cut -d, -f4 | tr -d %"]
         stdout: StdioCollector { onStreamFinished: { const v = parseInt(text); if (!isNaN(v)) cc.brightness = v / 100 } } }
 
@@ -42,8 +52,13 @@ Popup {
             onToggled: { Theme.dark = !Theme.dark; ShellState.run("gsettings set org.gnome.desktop.interface color-scheme " + (Theme.dark ? "prefer-dark" : "default")) } }
         Tile { width: (parent.width - 10) / 2; icon: "gamepad"; label: "Game Mode"; detail: "Switch now"
             onToggled: { ShellState.closeAll(); ShellState.run("gosaab-game-mode || steamos-session-select gamescope") } }
-        Tile { width: (parent.width - 10) / 2; icon: "shield"; label: "VPN"; detail: cc.vpnOn ? "On" : "Off"; on: cc.vpnOn
-            onToggled: { cc.vpnOn = !cc.vpnOn; ShellState.run("pkexec gosaab-config set features.conf vpn " + (cc.vpnOn ? "on" : "off")) } }
+        Tile { width: (parent.width - 10) / 2; icon: "shield"; label: "VPN"; visible: cc.vpnEnabled
+            detail: cc.vpnName === "" ? "Add one in Settings" : (cc.vpnOn ? cc.vpnName : "Off"); on: cc.vpnOn
+            onToggled: {
+                if (cc.vpnName === "") { ShellState.closeAll(); ShellState.run("gosaab-settings vpn"); return }
+                cc.vpnOn = !cc.vpnOn
+                ShellState.run("nmcli connection " + (cc.vpnOn ? "up" : "down") + " id '" + cc.vpnName + "'")
+            } }
         Tile { width: (parent.width - 10) / 2; icon: "screenoff"; label: "Screen Off"; detail: "Wakes when done"
             onToggled: { ShellState.closeAll(); ShellState.run("gosaab-screen-off") } }
         Tile { width: (parent.width - 10) / 2; icon: "glasses"; label: "Glasses"; detail: "XREAL mode"
