@@ -1,5 +1,5 @@
 project('gosaab-wm', 'c',
-  version: '0.3.0',
+  version: '0.4.0',
   license: 'MIT',
   default_options: ['c_std=c11', 'warning_level=2', 'werror=false', 'buildtype=release'])
 
@@ -19,6 +19,7 @@ math = cc.find_library('m')
 pangocairo = dependency('pangocairo')
 cairo = dependency('cairo')
 libdrm = dependency('libdrm')
+libinput = dependency('libinput')
 
 # Protocol headers that wlroots' public headers include
 wayland_scanner = find_program('wayland-scanner')
@@ -31,6 +32,7 @@ protocols = [
   wl_protocol_dir / 'unstable/xdg-decoration/xdg-decoration-unstable-v1.xml',
   wl_protocol_dir / 'unstable/pointer-constraints/pointer-constraints-unstable-v1.xml',
   wl_protocol_dir / 'unstable/relative-pointer/relative-pointer-unstable-v1.xml',
+  wl_protocol_dir / 'unstable/pointer-gestures/pointer-gestures-unstable-v1.xml',
   wl_protocol_dir / 'staging/ext-session-lock/ext-session-lock-v1.xml',
   wl_protocol_dir / 'staging/xdg-activation/xdg-activation-v1.xml',
   'protocols/wlr-layer-shell-unstable-v1.xml',
@@ -47,7 +49,7 @@ endforeach
 executable('gosaab-wm',
   ['gosaab-wm.c', 'text.c'] + protocol_headers,
   # scenefx must come before wlroots: both export wlr_scene_*, and scenefx's must win
-  dependencies: [scenefx, wayland_server, wlroots, xkbcommon, pangocairo, cairo, libdrm, math],
+  dependencies: [scenefx, wayland_server, wlroots, xkbcommon, pangocairo, cairo, libdrm, libinput, math],
   install: true)
 
 test_anim = executable('test-anim', 'tests/test_anim.c', dependencies: [math])

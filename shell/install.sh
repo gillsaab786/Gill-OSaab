@@ -4,7 +4,7 @@
 set -euo pipefail
 SRC=${1:-$(dirname "$(readlink -f "$0")")}
 BUILD_DEPS="gcc meson ninja-build pkgconf wayland-devel wayland-protocols-devel wlroots-devel scenefx-devel
-  libxkbcommon-devel pixman-devel pango-devel cairo-devel libdrm-devel"
+  libxkbcommon-devel pixman-devel pango-devel cairo-devel libdrm-devel libinput-devel"
 dnf -y install $BUILD_DEPS
 meson setup /tmp/gosaab-wm-build "$SRC/compositor" --prefix=/usr --buildtype=release
 meson compile -C /tmp/gosaab-wm-build

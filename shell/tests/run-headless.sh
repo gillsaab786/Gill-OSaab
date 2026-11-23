@@ -271,6 +271,20 @@ for name, ok in checks:
     print(("PASS: " if ok else "FAIL: ") + name)
 sys.exit(0 if all(ok for _, ok in checks) else 1)
 EOF9
+  # Split screen: drag the front window's title bar to the left edge -> left half
+  shot 38-before-snap
+  S=($(lights 38-before-snap)); echo "front window lights: ${S[*]:-none}"
+  if [ ${#S[@]} -eq 6 ]; then
+    echo "drag $((S[4] + 60)) ${S[5]} 1 500" >>"$CLICKS"; sleep 1.5; shot 39-snapped-left
+    T=($(lights 39-snapped-left)); echo "after snap: ${T[*]:-none}"
+    check "dragging to the left edge snaps the window to the left half" "[ \${#T[@]} -eq 6 ] && [ \${T[0]} -lt 40 ] && [ \${T[1]} -lt 40 ]"
+    # touchscreen: a finger tap on the red button closes the window
+    before=$(pgrep -c -x foot)
+    echo "tap ${T[0]} ${T[1]}" >>"$CLICKS"; sleep 1.5; shot 40-touch-closed
+    check "touchscreen tap on the close button closes the app" "[ \$(pgrep -c -x foot) -lt $before ]"
+  else
+    echo "FAIL: no front window found for the snap test"; fail=1
+  fi
 fi
 check "compositor survived the clicks" "kill -0 $WM"
 kill -TERM $WM 2>/dev/null; wait $WM; rc=$?

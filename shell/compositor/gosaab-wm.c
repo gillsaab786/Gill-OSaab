@@ -40,6 +40,8 @@
 #include <wayland-server-core.h>
 #include <wlr/backend.h>
 #include <wlr/backend/headless.h>
+#include <wlr/backend/libinput.h>
+#include <libinput.h>
 #include <wlr/render/allocator.h>
 #include <wlr/render/wlr_renderer.h>
 #include <wlr/types/wlr_buffer.h>
@@ -61,6 +63,8 @@
 #include <wlr/types/wlr_output_layout.h>
 #include <wlr/types/wlr_pointer.h>
 #include <wlr/types/wlr_pointer_constraints_v1.h>
+#include <wlr/types/wlr_pointer_gestures_v1.h>
+#include <wlr/types/wlr_touch.h>
 #include <wlr/types/wlr_relative_pointer_v1.h>
 #include <wlr/types/wlr_session_lock_v1.h>
 #include <wlr/types/wlr_xdg_activation_v1.h>
@@ -167,6 +171,13 @@ struct gs_server {
 	struct wlr_cursor_shape_manager_v1 *cursor_shape_mgr;
 	struct wl_listener cursor_motion, cursor_motion_absolute, cursor_button, cursor_axis, cursor_frame;
 	struct wl_listener swipe_begin, swipe_update, swipe_end;
+	struct wl_listener pinch_begin, pinch_update, pinch_end, hold_begin, hold_end;
+	struct wl_listener touch_down, touch_up, touch_motion, touch_cancel, touch_frame;
+	struct wlr_pointer_gestures_v1 *gestures; /* pinch-zoom etc. passed on to apps */
+	bool has_touch;
+	int touch_grab_id;          /* finger dragging a title bar / resize edge, or -1 */
+	struct wlr_scene_rect *snap_preview; /* where a dragged window will snap */
+	int snap_zone;              /* 0 none, 1 left half, 2 right half, 3 full */
 	struct wl_listener request_cursor_shape;
 
 	struct wlr_seat *seat;
@@ -235,7 +246,7 @@ struct gs_toplevel {
 	struct gs_slot ov;          /* place in Mission Control */
 	int ws;                     /* which space this window lives on */
 	struct wl_listener request_move, request_resize, request_maximize, request_minimize, request_fullscreen;
-	bool mapped, placed, maximized, minimized, fullscreen, ssd, activated;
+	bool mapped, placed, maximized, minimized, fullscreen, ssd, activated, tiled;
 	struct wlr_box saved; /* frame box before zoom/fullscreen */
 	struct wlr_xdg_toplevel_decoration_v1 *decoration;
 	struct wlr_buffer *last_buffer; /* latest frame, kept for the close animation */
@@ -296,6 +307,7 @@ struct gs_decoration {
 static void focus_toplevel(struct gs_toplevel *t);
 static void set_maximized(struct gs_toplevel *t, bool maximized);
 static void set_fullscreen(struct gs_toplevel *t, bool fullscreen);
+static void request_frame_size(struct gs_toplevel *t, int w, int h);
 static void close_toplevel(struct gs_toplevel *t);
 
 /* ------------------------------------------------------------------ helpers */
@@ -785,6 +797,77 @@ static void minimize_toplevel(struct gs_toplevel *t) {
 	if (next) {
 		focus_toplevel(next);
 	}
+}
+
+/* ------------------------------------------------------------------ snapping (split screen) */
+
+static struct wlr_box snap_box(struct gs_server *server, int zone) {
+	struct wlr_box a = output_usable_area(server);
+	int gap = 6;
+	switch (zone) {
+	case 1: return (struct wlr_box){ a.x + gap, a.y + gap, a.width / 2 - gap * 3 / 2, a.height - gap * 2 };
+	case 2: return (struct wlr_box){ a.x + a.width / 2 + gap / 2, a.y + gap, a.width / 2 - gap * 3 / 2, a.height - gap * 2 };
+	default: return a;
+	}
+}
+
+/* Put a window on the left/right half (1/2) or back to its own size (0). */
+static void tile_toplevel(struct gs_toplevel *t, int zone) {
+	if (t->maximized) {
+		set_maximized(t, false);
+	}
+	if (zone == 0) {
+		if (t->tiled) {
+			t->tiled = false;
+			wlr_scene_node_set_position(&t->tree->node, t->saved.x, t->saved.y);
+			request_frame_size(t, t->saved.width, t->saved.height);
+		}
+		return;
+	}
+	if (!t->tiled) {
+		t->saved = (struct wlr_box){ t->tree->node.x, t->tree->node.y, frame_w(t), frame_h(t) };
+	}
+	t->tiled = true;
+	struct wlr_box b = snap_box(t->server, zone);
+	wlr_scene_node_set_position(&t->tree->node, b.x, b.y);
+	request_frame_size(t, b.width, b.height);
+	refresh_toplevel(t);
+}
+
+/* While dragging a window: which edge is the pointer at? Shows a glass preview there. */
+static void snap_track(struct gs_server *server) {
+	struct wlr_box a = output_full_area(server);
+	double x = server->cursor->x, y = server->cursor->y;
+	int zone = x <= a.x + 4 ? 1 : x >= a.x + a.width - 5 ? 2 : y <= a.y + 4 ? 3 : 0;
+	if (zone == server->snap_zone) {
+		return;
+	}
+	server->snap_zone = zone;
+	wlr_scene_node_set_enabled(&server->snap_preview->node, zone != 0);
+	if (zone) {
+		struct wlr_box b = snap_box(server, zone);
+		wlr_scene_node_set_position(&server->snap_preview->node, b.x, b.y);
+		wlr_scene_rect_set_size(server->snap_preview, b.width, b.height);
+		wlr_scene_node_raise_to_top(&server->snap_preview->node);
+	}
+}
+
+/* End of a mouse/finger drag: drop into a snap zone if over one. */
+static void release_grab(struct gs_server *server) {
+	if (server->cursor_mode == CURSOR_MOVE && server->grabbed && server->snap_zone) {
+		struct gs_toplevel *t = server->grabbed;
+		if (server->snap_zone == 3) {
+			t->tiled = false;
+			set_maximized(t, true);
+			wlr_xdg_surface_schedule_configure(t->xdg_toplevel->base);
+		} else {
+			tile_toplevel(t, server->snap_zone);
+		}
+	}
+	server->snap_zone = 0;
+	wlr_scene_node_set_enabled(&server->snap_preview->node, false);
+	server->cursor_mode = CURSOR_PASSTHROUGH;
+	server->grabbed = NULL;
 }
 
 /* ------------------------------------------------------------------ spaces (workspaces) */
@@ -1367,6 +1450,13 @@ static void toplevel_destroy(struct wl_listener *listener, void *data) {
 
 static void begin_interactive(struct gs_toplevel *t, enum gs_cursor_mode mode, uint32_t edges) {
 	struct gs_server *server = t->server;
+	if (t->tiled && mode == CURSOR_MOVE) { /* pull a split-screen window out: back to its own size */
+		double rel = (server->cursor->x - t->tree->node.x) / (frame_w(t) > 0 ? frame_w(t) : 1);
+		t->tiled = false;
+		request_frame_size(t, t->saved.width, t->saved.height);
+		wlr_scene_node_set_position(&t->tree->node, (int)(server->cursor->x - rel * t->saved.width),
+			(int)server->cursor->y - GS_TITLE_H / 2);
+	}
 	if (t->maximized) {
 		/* un-zoom under the cursor, keeping it at the same relative spot */
 		double rel = (server->cursor->x - t->tree->node.x) / (frame_w(t) > 0 ? frame_w(t) : 1);
@@ -1796,6 +1886,13 @@ static bool handle_keybinding(struct gs_server *server, uint32_t mods, xkb_keysy
 		workspace_switch(server, server->ws + (sym == XKB_KEY_Right ? 1 : -1));
 		return true;
 	}
+	if (super && !(mods & WLR_MODIFIER_CTRL) && (sym == XKB_KEY_Left || sym == XKB_KEY_Right || sym == XKB_KEY_Down)) {
+		struct gs_toplevel *t = focused_toplevel(server);
+		if (t) {
+			tile_toplevel(t, sym == XKB_KEY_Left ? 1 : sym == XKB_KEY_Right ? 2 : 0);
+		}
+		return true;
+	}
 	if (super && sym >= XKB_KEY_1 && sym <= XKB_KEY_1 + WORKSPACES - 1) {
 		workspace_switch(server, sym - XKB_KEY_1);
 		return true;
@@ -1921,6 +2018,42 @@ static void new_keyboard(struct gs_server *server, struct wlr_input_device *devi
 	wl_list_insert(&server->keyboards, &kb->link);
 }
 
+/* Touchpad feel, from ~/.config/gill-osaab/input.conf (Settings > Touchpad):
+ * tap-to-click and natural (Mac-style) scrolling on by default, ignore the touchpad while typing. */
+static bool input_setting(const char *key, bool fallback) {
+	const char *home = getenv("HOME");
+	char path[512], line[128];
+	snprintf(path, sizeof(path), "%s/.config/gill-osaab/input.conf", home ? home : "/");
+	FILE *f = fopen(path, "r");
+	bool value = fallback;
+	if (f) {
+		size_t n = strlen(key);
+		while (fgets(line, sizeof(line), f)) {
+			if (strncmp(line, key, n) == 0 && line[n] == '=') {
+				value = strncmp(line + n + 1, "on", 2) == 0;
+			}
+		}
+		fclose(f);
+	}
+	return value;
+}
+
+static void configure_pointer(struct wlr_input_device *device) {
+	if (!wlr_input_device_is_libinput(device)) {
+		return;
+	}
+	struct libinput_device *li = wlr_libinput_get_device_handle(device);
+	if (libinput_device_config_tap_get_finger_count(li) > 0) {
+		libinput_device_config_tap_set_enabled(li, input_setting("tap_to_click", true) ?
+			LIBINPUT_CONFIG_TAP_ENABLED : LIBINPUT_CONFIG_TAP_DISABLED);
+		libinput_device_config_tap_set_drag_enabled(li, LIBINPUT_CONFIG_DRAG_ENABLED);
+		libinput_device_config_dwt_set_enabled(li, LIBINPUT_CONFIG_DWT_ENABLED);
+	}
+	if (libinput_device_config_scroll_has_natural_scroll(li)) {
+		libinput_device_config_scroll_set_natural_scroll_enabled(li, input_setting("natural_scroll", true));
+	}
+}
+
 static void server_new_input(struct wl_listener *listener, void *data) {
 	struct gs_server *server = wl_container_of(listener, server, new_input);
 	struct wlr_input_device *device = data;
@@ -1929,7 +2062,12 @@ static void server_new_input(struct wl_listener *listener, void *data) {
 		new_keyboard(server, device);
 		break;
 	case WLR_INPUT_DEVICE_POINTER:
+		configure_pointer(device);
 		wlr_cursor_attach_input_device(server->cursor, device);
+		break;
+	case WLR_INPUT_DEVICE_TOUCH:
+		wlr_cursor_attach_input_device(server->cursor, device);
+		server->has_touch = true;
 		break;
 	default:
 		break;
@@ -1937,6 +2075,9 @@ static void server_new_input(struct wl_listener *listener, void *data) {
 	uint32_t caps = WL_SEAT_CAPABILITY_POINTER;
 	if (!wl_list_empty(&server->keyboards)) {
 		caps |= WL_SEAT_CAPABILITY_KEYBOARD;
+	}
+	if (server->has_touch) {
+		caps |= WL_SEAT_CAPABILITY_TOUCH;
 	}
 	wlr_seat_set_capabilities(server->seat, caps);
 }
@@ -2071,6 +2212,7 @@ static void process_cursor_motion(struct gs_server *server, uint32_t time) {
 		struct gs_toplevel *t = server->grabbed;
 		wlr_scene_node_set_position(&t->tree->node, server->cursor->x - server->grab_x,
 			server->cursor->y - server->grab_y);
+		snap_track(server);
 		return;
 	}
 	if (server->cursor_mode == CURSOR_RESIZE) {
@@ -2185,8 +2327,7 @@ static void cursor_button(struct wl_listener *listener, void *data) {
 	user_activity(server);
 	if (event->state == WL_POINTER_BUTTON_STATE_RELEASED) {
 		wlr_seat_pointer_notify_button(server->seat, event->time_msec, event->button, event->state);
-		server->cursor_mode = CURSOR_PASSTHROUGH;
-		server->grabbed = NULL;
+		release_grab(server);
 		return;
 	}
 	struct gs_hit hit = hit_test(server, server->cursor->x, server->cursor->y);
@@ -2234,6 +2375,112 @@ static void swipe_end(struct wl_listener *listener, void *data) {
 	} else if (dy > 80) {
 		overview_set(server, false, NULL);
 	}
+}
+
+/* Pinch (zoom) and hold go to the app under the pointer: pinch-zoom in browsers, maps, photos */
+static void pinch_begin(struct wl_listener *listener, void *data) {
+	struct gs_server *server = wl_container_of(listener, server, pinch_begin);
+	struct wlr_pointer_pinch_begin_event *e = data;
+	wlr_pointer_gestures_v1_send_pinch_begin(server->gestures, server->seat, e->time_msec, e->fingers);
+}
+static void pinch_update(struct wl_listener *listener, void *data) {
+	struct gs_server *server = wl_container_of(listener, server, pinch_update);
+	struct wlr_pointer_pinch_update_event *e = data;
+	wlr_pointer_gestures_v1_send_pinch_update(server->gestures, server->seat, e->time_msec, e->dx, e->dy,
+		e->scale, e->rotation);
+}
+static void pinch_end(struct wl_listener *listener, void *data) {
+	struct gs_server *server = wl_container_of(listener, server, pinch_end);
+	struct wlr_pointer_pinch_end_event *e = data;
+	wlr_pointer_gestures_v1_send_pinch_end(server->gestures, server->seat, e->time_msec, e->cancelled);
+}
+static void hold_begin(struct wl_listener *listener, void *data) {
+	struct gs_server *server = wl_container_of(listener, server, hold_begin);
+	struct wlr_pointer_hold_begin_event *e = data;
+	wlr_pointer_gestures_v1_send_hold_begin(server->gestures, server->seat, e->time_msec, e->fingers);
+}
+static void hold_end(struct wl_listener *listener, void *data) {
+	struct gs_server *server = wl_container_of(listener, server, hold_end);
+	struct wlr_pointer_hold_end_event *e = data;
+	wlr_pointer_gestures_v1_send_hold_end(server->gestures, server->seat, e->time_msec, e->cancelled);
+}
+
+/* ---- touchscreen: fingers go to apps; on title bars and buttons a finger acts like the mouse */
+static void touch_press(struct gs_server *server, int32_t id, uint32_t time, double lx, double ly) {
+	user_activity(server);
+	struct gs_hit hit = hit_test(server, lx, ly);
+	if (hit.surface && !server->overview &&
+			(!server->locked || wlr_session_lock_surface_v1_try_from_wlr_surface(hit.surface))) {
+		if (hit.toplevel) {
+			focus_toplevel(hit.toplevel);
+		}
+		wlr_seat_touch_notify_down(server->seat, hit.surface, time, id, hit.sx, hit.sy);
+		return;
+	}
+	if (server->touch_grab_id < 0) { /* title bar, traffic lights, edges, desktop */
+		server->touch_grab_id = id;
+		wlr_cursor_warp(server->cursor, NULL, lx, ly);
+		press_at(server, lx, ly);
+	}
+}
+
+static void touch_move(struct gs_server *server, int32_t id, uint32_t time, double lx, double ly) {
+	user_activity(server);
+	if (id == server->touch_grab_id) {
+		wlr_cursor_warp(server->cursor, NULL, lx, ly);
+		process_cursor_motion(server, time);
+		return;
+	}
+	struct wlr_touch_point *point = wlr_seat_touch_get_point(server->seat, id);
+	if (point && point->surface) {
+		struct gs_hit hit = hit_test(server, lx, ly);
+		double sx = hit.surface == point->surface ? hit.sx : lx, sy = hit.surface == point->surface ? hit.sy : ly;
+		wlr_seat_touch_notify_motion(server->seat, time, id, sx, sy);
+	}
+}
+
+static void touch_release(struct gs_server *server, int32_t id, uint32_t time) {
+	if (id == server->touch_grab_id) {
+		server->touch_grab_id = -1;
+		release_grab(server);
+		return;
+	}
+	if (wlr_seat_touch_get_point(server->seat, id)) {
+		wlr_seat_touch_notify_up(server->seat, time, id);
+	}
+}
+
+static void touch_down(struct wl_listener *listener, void *data) {
+	struct gs_server *server = wl_container_of(listener, server, touch_down);
+	struct wlr_touch_down_event *e = data;
+	double lx, ly;
+	wlr_cursor_absolute_to_layout_coords(server->cursor, &e->touch->base, e->x, e->y, &lx, &ly);
+	touch_press(server, e->touch_id, e->time_msec, lx, ly);
+}
+
+static void touch_motion(struct wl_listener *listener, void *data) {
+	struct gs_server *server = wl_container_of(listener, server, touch_motion);
+	struct wlr_touch_motion_event *e = data;
+	double lx, ly;
+	wlr_cursor_absolute_to_layout_coords(server->cursor, &e->touch->base, e->x, e->y, &lx, &ly);
+	touch_move(server, e->touch_id, e->time_msec, lx, ly);
+}
+
+static void touch_up(struct wl_listener *listener, void *data) {
+	struct gs_server *server = wl_container_of(listener, server, touch_up);
+	struct wlr_touch_up_event *e = data;
+	touch_release(server, e->touch_id, e->time_msec);
+}
+
+static void touch_cancel(struct wl_listener *listener, void *data) {
+	struct gs_server *server = wl_container_of(listener, server, touch_cancel);
+	struct wlr_touch_cancel_event *e = data;
+	touch_release(server, e->touch_id, e->time_msec);
+}
+
+static void touch_frame(struct wl_listener *listener, void *data) {
+	struct gs_server *server = wl_container_of(listener, server, touch_frame);
+	wlr_seat_touch_notify_frame(server->seat);
 }
 
 static void cursor_frame(struct wl_listener *listener, void *data) {
@@ -2362,7 +2609,7 @@ static int test_click_tick(void *data) {
 		fseek(f, test_click_offset, SEEK_SET);
 		char line[128];
 		while (fgets(line, sizeof(line), f) != NULL && strchr(line, '\n') != NULL) {
-			double x, y;
+			double x, y, x2, y2;
 			int n;
 			if (strncmp(line, "overview", 8) == 0) {
 				overview_set(server, !server->overview, NULL);
@@ -2370,6 +2617,17 @@ static int test_click_tick(void *data) {
 				workspace_switch(server, n - 1);
 			} else if (sscanf(line, "movews %d", &n) == 1) {
 				move_to_workspace(focused_toplevel(server), n - 1);
+			} else if (sscanf(line, "tap %lf %lf", &x, &y) == 2) { /* a finger tap on the touchscreen */
+				touch_press(server, 7, 0, x, y);
+				touch_release(server, 7, 0);
+			} else if (sscanf(line, "drag %lf %lf %lf %lf", &x, &y, &x2, &y2) == 4) { /* mouse drag */
+				wlr_cursor_warp(server->cursor, NULL, x, y);
+				press_at(server, x, y);
+				for (int i = 1; i <= 10; i++) {
+					wlr_cursor_warp(server->cursor, NULL, x + (x2 - x) * i / 10, y + (y2 - y) * i / 10);
+					process_cursor_motion(server, 0);
+				}
+				release_grab(server);
 			} else if (sscanf(line, "%lf %lf", &x, &y) == 2) {
 				wlr_cursor_warp(server->cursor, NULL, x, y);
 				press_at(server, x, y);
@@ -2537,6 +2795,9 @@ int main(int argc, char *argv[]) {
 	server.layers.blur = wlr_scene_optimized_blur_create(&server.scene->tree, 0, 0);
 	server.layers.toplevels = wlr_scene_tree_create(&server.scene->tree);
 	server.layers.closing = wlr_scene_tree_create(&server.scene->tree);
+	server.snap_preview = wlr_scene_rect_create(server.layers.closing, 0, 0, (float[4]){ 0.10f, 0.10f, 0.12f, 0.18f });
+	wlr_scene_rect_set_corner_radii(server.snap_preview, corner_radii_all(CORNER_RADIUS));
+	wlr_scene_node_set_enabled(&server.snap_preview->node, false);
 	server.layers.top = wlr_scene_tree_create(&server.scene->tree);
 	server.layers.overlay = wlr_scene_tree_create(&server.scene->tree);
 	server.lock_tree = wlr_scene_tree_create(&server.scene->tree);
@@ -2593,6 +2854,28 @@ int main(int argc, char *argv[]) {
 	wl_signal_add(&server.cursor->events.swipe_update, &server.swipe_update);
 	server.swipe_end.notify = swipe_end;
 	wl_signal_add(&server.cursor->events.swipe_end, &server.swipe_end);
+	server.gestures = wlr_pointer_gestures_v1_create(server.display);
+	server.pinch_begin.notify = pinch_begin;
+	wl_signal_add(&server.cursor->events.pinch_begin, &server.pinch_begin);
+	server.pinch_update.notify = pinch_update;
+	wl_signal_add(&server.cursor->events.pinch_update, &server.pinch_update);
+	server.pinch_end.notify = pinch_end;
+	wl_signal_add(&server.cursor->events.pinch_end, &server.pinch_end);
+	server.hold_begin.notify = hold_begin;
+	wl_signal_add(&server.cursor->events.hold_begin, &server.hold_begin);
+	server.hold_end.notify = hold_end;
+	wl_signal_add(&server.cursor->events.hold_end, &server.hold_end);
+	server.touch_grab_id = -1;
+	server.touch_down.notify = touch_down;
+	wl_signal_add(&server.cursor->events.touch_down, &server.touch_down);
+	server.touch_up.notify = touch_up;
+	wl_signal_add(&server.cursor->events.touch_up, &server.touch_up);
+	server.touch_motion.notify = touch_motion;
+	wl_signal_add(&server.cursor->events.touch_motion, &server.touch_motion);
+	server.touch_cancel.notify = touch_cancel;
+	wl_signal_add(&server.cursor->events.touch_cancel, &server.touch_cancel);
+	server.touch_frame.notify = touch_frame;
+	wl_signal_add(&server.cursor->events.touch_frame, &server.touch_frame);
 
 	wl_list_init(&server.keyboards);
 	server.new_input.notify = server_new_input;
@@ -2651,7 +2934,9 @@ int main(int argc, char *argv[]) {
 		&server.cursor_frame, &server.request_cursor_shape, &server.new_input, &server.request_cursor,
 		&server.request_set_selection, &server.request_set_primary_selection, &server.new_output,
 		&server.new_constraint, &server.request_activate, &server.new_lock, &server.new_inhibitor,
-		&server.swipe_begin, &server.swipe_update, &server.swipe_end,
+		&server.swipe_begin, &server.swipe_update, &server.swipe_end, &server.pinch_begin, &server.pinch_update,
+		&server.pinch_end, &server.hold_begin, &server.hold_end, &server.touch_down, &server.touch_up,
+		&server.touch_motion, &server.touch_cancel, &server.touch_frame,
 	};
 	for (size_t i = 0; i < sizeof(server_listeners) / sizeof(server_listeners[0]); i++) {
 		wl_list_remove(&server_listeners[i]->link);
