@@ -55,7 +55,7 @@ jobs:
           img=$(sudo find output -name '*.raw' | head -1)
           [ -n "$img" ] || img=$(sudo find . -name '*.raw' -not -path './proc/*' | head -1)
           echo "image: $img"
-          sudo xz -T0 -6 -k "$img"
+          sudo xz -T0 -2 -k "$img"
           mkdir -p release
           sudo split -b 1900M -d -a 2 "$img.xz" release/gill-osaab-core-usb.img.xz.part-
           sudo sha256sum "$img.xz" | sed 's|  .*|  gill-osaab-core-usb.img.xz|' | sudo tee release/SHA256SUMS
