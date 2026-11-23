@@ -43,7 +43,7 @@ jobs:
               echo "== install into the system, as the Core image build does"
               bash shell/install.sh "$PWD/shell" >/tmp/install.log 2>&1 || { tail -30 /tmp/install.log; exit 1; }
               test -x /usr/bin/gosaab-wm && test -f /etc/xdg/quickshell/gill-osaab/shell.qml && test -f /usr/share/sddm/themes/gill-osaab/Main.qml
-              for f in files/core-system/usr/bin/* files/core-system/usr/libexec/gill-osaab/*; do sh -n "$f" || exit 1; done
+              for f in files/core-system/usr/bin/* files/core-system/usr/libexec/gill-osaab/*; do if head -1 "$f" | grep -q python; then python3 -m py_compile "$f" || exit 1; else sh -n "$f" || exit 1; fi; done
               echo "PASS: install.sh installs the desktop; session scripts parse"'
       - name: Upload screenshots and logs
         if: always()
