@@ -13,7 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Virtual GPU (vkms)
-        run: sudo modprobe vkms && ls -la /dev/dri
+        run: sudo modprobe vgem && sudo modprobe vkms && ls -la /dev/dri
       - name: Build, unit tests, headless run with screenshots
         run: |
           docker run --rm --privileged -v /dev/dri:/dev/dri -v "$PWD":/src -w /src \

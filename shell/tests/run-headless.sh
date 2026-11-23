@@ -12,16 +12,15 @@ rm -rf "$XDG_RUNTIME_DIR" && mkdir -p -m 700 "$XDG_RUNTIME_DIR"
 export WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 GOSAAB_HEADLESS_SIZE=1920x1080
 unset WAYLAND_DISPLAY
 
-# Use the virtual KMS card (vkms) for rendering
-for card in /sys/class/drm/card[0-9]*; do
-  drv=$(basename "$(readlink -f "$card/device/driver" 2>/dev/null)")
-  echo "$(basename "$card"): $drv"
-  # vkms shows up as "vkms" or, on newer kernels, "faux_driver"
-  if [ "$drv" = vkms ] || [ "$drv" = faux_driver ]; then
-    WLR_RENDER_DRM_DEVICE=/dev/dri/$(basename "$card")
-    export WLR_RENDER_DRM_DEVICE
-  fi
+# Render on the virtual GEM device (vgem render node) with Mesa's software rasteriser
+for node in /dev/dri/renderD*; do
+  [ -e "$node" ] || continue
+  drv=$(basename "$(readlink -f /sys/class/drm/"$(basename "$node")"/device/driver 2>/dev/null)")
+  echo "$(basename "$node"): $drv"
+  WLR_RENDER_DRM_DEVICE=$node
+  export WLR_RENDER_DRM_DEVICE
 done
+export MESA_LOADER_DRIVER_OVERRIDE=${MESA_LOADER_DRIVER_OVERRIDE:-kms_swrast}
 echo "render device: ${WLR_RENDER_DRM_DEVICE:-auto}"
 
 fail=0
