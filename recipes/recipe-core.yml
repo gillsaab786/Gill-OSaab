@@ -1,0 +1,90 @@
+# yaml-language-server: $schema=https://schema.blue-build.org/recipe-v1.json
+# Gill-OSaab Core: built directly on minimal Fedora bootc (no Bazzite, no extras).
+# Only what Gill-OSaab uses is installed, so only that runs.
+# Milestone 1: desktop + Steam + Windows/Android/Linux apps + drivers.
+# Published to ghcr.io/<owner>/gill-osaab-core
+name: gill-osaab-core
+description: Gill-OSaab Core, a minimal gaming OS on Fedora bootc.
+
+base-image: quay.io/fedora/fedora-bootc
+image-version: "45"
+
+modules:
+  - type: dnf
+    repos:
+      nonfree: rpmfusion
+    install:
+      skip-unavailable: true
+      packages:
+        # --- hardware, network, sound
+        - linux-firmware
+        - alsa-sof-firmware
+        - NetworkManager-wifi
+        - NetworkManager-bluetooth
+        - bluez
+        - pipewire
+        - pipewire-pulseaudio
+        - pipewire-alsa
+        - wireplumber
+        - tuned-ppd
+        - upower
+        - fwupd
+        - pciutils
+        # --- graphics (newest Mesa from Fedora, video decoding from RPM Fusion)
+        - mesa-dri-drivers
+        - mesa-vulkan-drivers
+        - mesa-va-drivers-freeworld
+        - vulkan-loader
+        # --- desktop: KDE Plasma, minimal set
+        - sddm
+        - sddm-wayland-plasma
+        - plasma-desktop
+        - plasma-workspace
+        - kwin
+        - plasma-nm
+        - plasma-pa
+        - bluedevil
+        - powerdevil
+        - kscreen
+        - plasma-systemsettings
+        - polkit-kde
+        - kde-gtk-config
+        - breeze-gtk
+        - xdg-desktop-portal-kde
+        - plasma-browser-integration
+        - pam-kwallet
+        - dolphin
+        - kio-extras
+        - konsole
+        - ark
+        - xdg-user-dirs
+        - glibc-langpack-en
+        - google-noto-sans-fonts
+        - google-noto-color-emoji-fonts
+        - rsms-inter-fonts
+        - papirus-icon-theme
+        # --- gaming
+        - repo: rpmfusion-nonfree-steam
+          packages:
+            - steam
+        - steam-devices
+        - gamescope
+        - mangohud
+        - scx-scheds
+        # --- Windows, Android and Linux apps
+        - wine
+        - waydroid
+        - distrobox
+        - flatpak
+        - bubblewrap
+        # --- Gill-OSaab tools
+        - python3-pyside6
+        - python3-gobject
+        - libnotify
+        - brightnessctl
+
+  - from-file: common.yml
+
+  - type: script
+    scripts:
+      - gosaab-core-setup.sh

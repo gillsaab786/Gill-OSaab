@@ -41,6 +41,7 @@ jobs:
           - recipe-handheld.yml
           - recipe-desktop.yml
           - recipe-desktop-nvidia.yml
+          - recipe-core.yml
     steps:
       - name: Build custom image
         uses: blue-build/github-action@v1.14
