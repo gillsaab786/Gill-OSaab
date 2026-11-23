@@ -42,7 +42,8 @@ echo top-secret > /tmp/sbhome/secret/file; echo film > /tmp/sbhome/Movies/film
 echo /tmp/sbhome/Movies > /tmp/sbhome/.config/gill-osaab/app-folders/testapp.conf
 check "sandboxed app cannot see your other files" "! HOME=/tmp/sbhome gosaab-sandbox testapp cat /tmp/sbhome/secret/file 2>/dev/null"
 check "sandboxed app can use its allowed folder" "HOME=/tmp/sbhome gosaab-sandbox testapp cat /tmp/sbhome/Movies/film | grep -q film"
-check "Firefox and VLC open sandboxed" "grep -q '^Exec=gosaab-sandbox firefox' /usr/share/applications/firefox.desktop"
+check "Firefox opens sandboxed" "grep -qs '^Exec=gosaab-sandbox firefox' /usr/share/applications/*firefox*.desktop"
+check "VLC opens sandboxed" "grep -qs '^Exec=gosaab-sandbox vlc' /usr/share/applications/*vlc*.desktop /usr/share/applications/*VLC*.desktop"
 
 # start the real session the way the login screen does (headless, software GPU)
 VKMS=

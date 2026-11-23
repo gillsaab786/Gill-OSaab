@@ -40,7 +40,7 @@ systemctl enable gosaab-boot-mode.service || log "warning: gosaab-boot-mode not 
 ls /usr/share/vulkan/implicit_layer.d/ 2>/dev/null | grep -qi lsfg || log "warning: lsfg-vk layer not installed"
 
 # Firefox and VLC run sandboxed: each sees only its own data plus up to two folders you allow
-for pair in firefox:firefox vlc:vlc org.videolan.VLC:vlc; do
+for pair in firefox:firefox org.mozilla.firefox:firefox vlc:vlc org.videolan.VLC:vlc; do
     desktop=/usr/share/applications/${pair%%:*}.desktop
     [ -f "$desktop" ] && sed -i "s#^Exec=\(gosaab-sandbox [^ ]* \)\?#Exec=gosaab-sandbox ${pair##*:} #" "$desktop" &&
         log "sandboxed ${pair%%:*}" || true
