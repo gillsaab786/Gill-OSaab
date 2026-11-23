@@ -7,6 +7,7 @@ Gill-OSaab features below.
 
 | Edition | Image | For |
 | --- | --- | --- |
+| **Core (new)** | `ghcr.io/gillsaab786/gill-osaab-core` | Built directly on minimal Fedora bootc, no Bazzite: only what Gill-OSaab uses. Milestone 1: desktop, Steam, Windows/Android/Linux apps, drivers. Game Mode and handheld controls come next |
 | Handheld | `ghcr.io/gillsaab786/gill-osaab` | ROG Ally, GPD Win Max 2, Steam Deck. Boots into Game Mode |
 | Desktop | `ghcr.io/gillsaab786/gill-osaab-desktop` | Intel/AMD desktops and laptops. Boots to the desktop |
 | Desktop Nvidia | `ghcr.io/gillsaab786/gill-osaab-desktop-nvidia` | PCs with Nvidia GTX 16 / RTX 20 or newer (Settings offers the switch) |

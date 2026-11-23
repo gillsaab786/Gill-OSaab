@@ -1,5 +1,12 @@
 # Changelog
 
+## Core milestone 1 (2026-11-23)
+
+- New `gill-osaab-core` edition on minimal Fedora bootc 45: Plasma desktop (minimal set), Steam,
+  newest Mesa + video decoding, Wine, Waydroid, distrobox, Flatpak, firmware, scx gaming
+  schedulers, all Gill-OSaab tools. Boots to the desktop.
+- Bazzite-based editions kept as the fallback until Core is tested on hardware.
+
 ## 1.2.0 (2026-11-23)
 
 - Settings redesign: reorganised Updates page, new Device & Drivers page, iOS-style HD icon
