@@ -42,6 +42,25 @@ for unit in cups.socket ipp-usb.service fwupd-refresh.timer; do systemctl enable
 # Settings > Game Mode or with the launch option LSFG_PROCESS=gosaab %command%
 ls /usr/share/vulkan/implicit_layer.d/ 2>/dev/null | grep -qi lsfg || log "warning: lsfg-vk layer not installed"
 
+# Brave installs into /opt, which on this kind of system is per-machine state (/var/opt) and is
+# not shipped in the image: keep Brave in /usr/lib and point /opt/brave.com at it on every boot.
+if [ ! -x /usr/lib/brave.com/brave/brave ]; then
+    if [ ! -e /opt/brave.com/brave/brave ]; then
+        opt_link=$(readlink /opt || true)
+        [ -L /opt ] && rm /opt && mkdir /opt
+        dnf -y reinstall brave-browser >/dev/null 2>&1 || dnf -y install brave-browser >/dev/null 2>&1 || true
+    fi
+    if [ -d /opt/brave.com ]; then
+        mv /opt/brave.com /usr/lib/brave.com
+        log "Brave kept in /usr/lib/brave.com"
+    fi
+    if [ -n "${opt_link:-}" ] && [ -d /opt ] && [ ! -L /opt ]; then
+        rmdir /opt 2>/dev/null && ln -s "$opt_link" /opt
+    fi
+fi
+mkdir -p /usr/lib/tmpfiles.d
+printf 'd /var/opt 0755 root root -\nL+ /var/opt/brave.com - - - - /usr/lib/brave.com\n' > /usr/lib/tmpfiles.d/gill-osaab-brave.conf
+
 # Brave and VLC run sandboxed: each sees only its own data plus up to two folders you allow
 for pair in brave-browser:brave com.brave.Browser:brave vlc:vlc org.videolan.VLC:vlc; do
     desktop=/usr/share/applications/${pair%%:*}.desktop
