@@ -508,7 +508,8 @@ static void titlebar_layout(struct gs_toplevel *t, int ox, int oy, float scale, 
 	int px0 = (int)lroundf((gs_button_cx(0) - GS_BUTTON_D / 2.0) * scale) - pad;
 	int px1 = (int)lroundf((gs_button_cx(2) + GS_BUTTON_D / 2.0) * scale) + pad;
 	int ph = d + pad * 2;
-	scale_color((float[4]){ 1.0f, 1.0f, 1.0f, t->activated ? 0.13f : 0.07f }, alpha, c);
+	float glass = t->activated ? 0.13f : 0.07f; /* colours are premultiplied: white at 13% */
+	scale_color((float[4]){ glass, glass, glass, glass }, alpha, c);
 	wlr_scene_rect_set_size(tb->pill, px1 - px0, ph);
 	wlr_scene_rect_set_color(tb->pill, c);
 	wlr_scene_rect_set_corner_radii(tb->pill, corner_radii_all(ph / 2));
