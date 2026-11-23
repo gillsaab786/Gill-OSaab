@@ -20,7 +20,7 @@ PanelWindow {
     readonly property string appName: {
         if (!active) return "Desktop"
         const e = DesktopEntries.heuristicLookup(active.appId)
-        return e ? e.name : (active.appId || active.title || "")
+        return e ? Theme.displayName(e) : (active.appId || active.title || "")
     }
 
     SystemClock { id: clock; precision: SystemClock.Minutes }

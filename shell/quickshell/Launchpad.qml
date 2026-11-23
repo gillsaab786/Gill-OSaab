@@ -114,7 +114,7 @@ PanelWindow {
                                         Text {
                                             anchors.horizontalCenter: parent.horizontalCenter
                                             width: Math.min(implicitWidth, parent.parent.width - 12)
-                                            text: modelData.name; color: "white"; elide: Text.ElideRight
+                                            text: Theme.displayName(modelData); color: "white"; elide: Text.ElideRight
                                             horizontalAlignment: Text.AlignHCenter
                                             font { family: Theme.font; pixelSize: 13 }
                                             style: Text.Raised; styleColor: Qt.rgba(0, 0, 0, 0.35)

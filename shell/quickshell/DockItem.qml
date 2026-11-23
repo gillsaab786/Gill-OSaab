@@ -11,7 +11,7 @@ Item {
     property real pointerX: -1000
     readonly property bool isRunning: windows.length > 0
     readonly property bool isActive: windows.some(w => w.activated)
-    property string label: entry ? entry.name : appId
+    property string label: entry ? Theme.displayName(entry) : appId
     property string builtinIcon: "" // Gill-OSaab's own items (Launchpad, Trash) draw their own icon
     signal activated()
     property var dockWindow: null

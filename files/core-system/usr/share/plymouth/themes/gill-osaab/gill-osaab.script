@@ -1,0 +1,62 @@
+# Gill-OSaab boot screen: a Liquid Glass ring that fills up, with the percentage in the middle.
+Window.SetBackgroundTopColor(0, 0, 0);
+Window.SetBackgroundBottomColor(0, 0, 0);
+cx = Window.GetX() + Window.GetWidth() / 2;
+cy = Window.GetY() + Window.GetHeight() / 2;
+
+for (i = 0; i <= 100; i += 2)
+  frames[i] = Image("ring-" + i + ".png");
+
+ring = Sprite(frames[0]);
+ring.SetPosition(cx - frames[0].GetWidth() / 2, cy - frames[0].GetHeight() / 2, 1);
+
+number = Sprite();
+percent = Sprite();
+caption = Sprite(Image.Text("Starting Gill-OSaab", 0.62, 0.62, 0.65, 1, "Inter 18"));
+caption.SetPosition(cx - caption.GetImage().GetWidth() / 2, cy + frames[0].GetHeight() / 2 + 40, 2);
+
+shown = -1;
+fun show(p) {
+  p = Math.Int(p);
+  if (p < 0) p = 0;
+  if (p > 100) p = 100;
+  if (p == global.shown) return;
+  global.shown = p;
+  even = Math.Int(p / 2) * 2;
+  ring.SetImage(frames[even]);
+  big = Image.Text(p, 1, 1, 1, 1, "Inter Bold 64");
+  small = Image.Text("%", 0.37, 0.88, 0.66, 1, "Inter Bold 28");
+  total = big.GetWidth() + 6 + small.GetWidth();
+  number.SetImage(big);
+  number.SetPosition(cx - total / 2, cy - big.GetHeight() / 2, 3);
+  percent.SetImage(small);
+  percent.SetPosition(cx - total / 2 + big.GetWidth() + 6, cy + big.GetHeight() / 2 - small.GetHeight() - 8, 3);
+}
+show(0);
+
+fun boot_progress(duration, progress) { show(progress * 100); }
+Plymouth.SetBootProgressFunction(boot_progress);
+
+fun message(text) {
+  caption.SetImage(Image.Text(text, 0.62, 0.62, 0.65, 1, "Inter 18"));
+  caption.SetPosition(cx - caption.GetImage().GetWidth() / 2, cy + frames[0].GetHeight() / 2 + 40, 2);
+}
+Plymouth.SetMessageFunction(message);
+
+# disk password prompt (if the drive is encrypted)
+prompt = Sprite();
+dots = Sprite();
+fun display_password(text, bullets) {
+  prompt.SetImage(Image.Text(text, 1, 1, 1, 1, "Inter 16"));
+  prompt.SetPosition(cx - prompt.GetImage().GetWidth() / 2, cy + frames[0].GetHeight() / 2 + 80, 4);
+  s = "";
+  for (i = 0; i < bullets; i++) s += "●";
+  dots.SetImage(Image.Text(s, 1, 1, 1, 1, "Inter 20"));
+  dots.SetPosition(cx - dots.GetImage().GetWidth() / 2, cy + frames[0].GetHeight() / 2 + 110, 4);
+}
+fun display_normal() { prompt.SetOpacity(0); dots.SetOpacity(0); }
+Plymouth.SetDisplayPasswordFunction(display_password);
+Plymouth.SetDisplayNormalFunction(display_normal);
+
+fun quit() { show(100); message("Welcome"); }
+Plymouth.SetQuitFunction(quit);

@@ -49,6 +49,16 @@ for pair in brave-browser:brave com.brave.Browser:brave vlc:vlc org.videolan.VLC
         log "sandboxed ${pair%%:*}" || true
 done
 
+# Boot screen: Liquid Glass progress ring with percentage (needs the initramfs rebuilt with it)
+if command -v plymouth-set-default-theme >/dev/null; then
+    plymouth-set-default-theme gill-osaab || log "warning: could not set boot theme"
+    KVER=$(ls /usr/lib/modules | head -1)
+    if [ -n "$KVER" ] && command -v dracut >/dev/null; then
+        dracut --no-hostonly --kver "$KVER" --reproducible --add ostree -f "/usr/lib/modules/$KVER/initramfs.img" \
+            >/dev/null 2>&1 && log "boot screen in initramfs ($KVER)" || log "warning: initramfs not rebuilt"
+    fi
+fi
+
 # Wine: make sure the plain "wine" command exists (Fedora may only ship it via alternatives)
 if [ ! -e /usr/bin/wine ]; then
     for c in /etc/alternatives/wine /usr/bin/wine64 /usr/bin/wine-stable /usr/lib64/wine/x86_64-unix/wine /usr/lib/wine/wine64; do

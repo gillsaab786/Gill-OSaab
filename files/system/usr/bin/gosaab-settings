@@ -53,6 +53,12 @@ class Backend:
     def run_async(self, cmd, parent, done):
         """Run without freezing the window; done(exit_code) is called at the end."""
         proc = QProcess(parent)
+        env = proc.processEnvironment()
+        if env.isEmpty():
+            from PySide6.QtCore import QProcessEnvironment
+            env = QProcessEnvironment.systemEnvironment()
+        env.insert("GOSAAB_PROGRESS_STDOUT", "1")
+        proc.setProcessEnvironment(env)
         proc.finished.connect(lambda code, _status: done(code))
         proc.errorOccurred.connect(lambda _err: done(1) if proc.state() == QProcess.NotRunning else None)
         proc.start(cmd[0], cmd[1:])
@@ -332,6 +338,28 @@ class Switch(QAbstractButton):
         p.drawEllipse(QRectF(x, 3, 24, 24))
 
 
+def progress_ring_pixmap(percent, size):
+    """Track + mint arc with round ends (the same ring the shell and boot screen use)."""
+    ratio = 2
+    pm = QPixmap(size * ratio, size * ratio)
+    pm.fill(Qt.transparent)
+    pm.setDevicePixelRatio(ratio)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+    from PySide6.QtGui import QPen
+    width = max(3, size * 0.14)
+    rect = QRectF(width / 2 + 0.5, width / 2 + 0.5, size - width - 1, size - width - 1)
+    p.setPen(QPen(QColor("#2c2c2e"), width))
+    p.drawEllipse(rect)
+    if percent > 0:
+        pen = QPen(QColor("#6fe3b0"), width)
+        pen.setCapStyle(Qt.RoundCap)
+        p.setPen(pen)
+        p.drawArc(rect, 90 * 16, -int(360 * 16 * min(100, percent) / 100))
+    p.end()
+    return pm
+
+
 class UpdateButton(QPushButton):
     """Runs one updater part in the background and shows the result."""
 
@@ -346,10 +374,27 @@ class UpdateButton(QPushButton):
 
     def start(self):
         self.setEnabled(False)
-        self.setText("Updating…")
+        self.show_progress(0)
         self.proc = self.window.backend.run_async([UPDATER, self.part], self, self.finished)
+        if hasattr(self.proc, "readyReadStandardOutput"):
+            self.proc.readyReadStandardOutput.connect(self.read_progress)
+
+    def read_progress(self):
+        for line in bytes(self.proc.readAllStandardOutput()).decode(errors="ignore").splitlines():
+            if line.startswith("GOSAAB_PROGRESS "):
+                try:
+                    self.show_progress(int(line.split()[1]))
+                except ValueError:
+                    pass
+
+    def show_progress(self, percent):
+        """Liquid Glass ring with the percentage, instead of a spinner."""
+        self.setIcon(QIcon(progress_ring_pixmap(percent, 26)))
+        self.setIconSize(QSize(26, 26))
+        self.setText(f"{percent}%")
 
     def finished(self, code):
+        self.setIcon(QIcon())
         self.last_code = code
         self.setEnabled(True)
         self.setText(RESULT_TEXT.get(code, RESULT_TEXT[1]))

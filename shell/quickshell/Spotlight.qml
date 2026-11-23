@@ -117,7 +117,7 @@ PanelWindow {
                         IconImage { width: 30; height: 30; source: Theme.icon(modelData.icon, "application-x-executable") }
                         Column {
                             anchors.verticalCenter: parent.verticalCenter
-                            Text { text: modelData.name; color: index === spot.selected ? "white" : Theme.text; font { family: Theme.font; pixelSize: 14 } }
+                            Text { text: Theme.displayName(modelData); color: index === spot.selected ? "white" : Theme.text; font { family: Theme.font; pixelSize: 14 } }
                             Text { visible: text !== ""; text: modelData.genericName || modelData.comment || ""
                                 color: index === spot.selected ? Qt.rgba(1, 1, 1, 0.8) : Theme.subtext; font { family: Theme.font; pixelSize: 11 } }
                         }
@@ -132,5 +132,6 @@ PanelWindow {
         target: "spotlight"
         function toggle(): void { ShellState.toggle("spotlight") }
         function search(text: string): void { ShellState.spotlight = true; input.text = text }
+        function results(): string { return spot.apps.map(e => Theme.displayName(e)).join(",") }
     }
 }

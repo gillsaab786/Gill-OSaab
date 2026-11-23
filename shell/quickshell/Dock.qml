@@ -20,7 +20,7 @@ PanelWindow {
 
     // Pinned apps (shown if installed); everything running is added after a divider.
     readonly property var pinnedIds: ["org.gnome.Nautilus", "org.kde.dolphin", "brave-browser", "com.brave.Browser",
-        "steam", "gosaab-emudeck", "gosaab-settings", "org.kde.konsole", "foot", "vlc", "org.videolan.VLC"]
+        "io.github.kolunmi.Bazaar", "waydroid.com.android.vending", "steam", "gosaab-emudeck", "gosaab-settings", "org.kde.konsole", "foot", "vlc", "org.videolan.VLC"]
     readonly property var pinned: {
         const apps = DesktopEntries.applications.values // re-evaluates once app scanning finishes
         return pinnedIds.map(id => apps.find(e => e.id === id)).filter(e => e)

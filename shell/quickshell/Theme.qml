@@ -52,6 +52,35 @@ Singleton {
         return !e.noDisplay && hiddenApps.indexOf(e.id) < 0
     }
 
+    // Which system an app comes from: Android (Waydroid), Windows (Wine) or Linux
+    function platformOf(e) {
+        if (!e) return "Linux"
+        if (e.id.startsWith("waydroid.") || (e.execString || "").includes("waydroid app launch")) return "Android"
+        if ((e.execString || "").match(/\bwine(64)?\b|--wine-run|\.exe\b/i) || (e.categories || []).indexOf("Wine") >= 0) return "Windows"
+        return "Linux"
+    }
+    function baseName(name) { return (name || "").trim().toLowerCase() }
+    // names that exist for more than one system, e.g. YouTube for Android and for Windows
+    readonly property var sharedNames: {
+        const seen = {}
+        for (const e of DesktopEntries.applications.values) {
+            if (e.noDisplay) continue
+            const key = baseName(e.name)
+            const p = platformOf(e)
+            seen[key] = seen[key] || {}
+            seen[key][p] = true
+        }
+        const shared = {}
+        for (const k in seen) if (Object.keys(seen[k]).length > 1) shared[k] = true
+        return shared
+    }
+    // "YouTube" normally; "Android-YouTube" / "Windows-YouTube" / "Linux-YouTube" only when you have
+    // the same app from two systems
+    function displayName(e) {
+        if (!e) return ""
+        return sharedNames[baseName(e.name)] ? platformOf(e) + "-" + e.name : e.name
+    }
+
     // Motion: quick, springy, never sluggish
     readonly property int fast: 140
     readonly property int normal: 240

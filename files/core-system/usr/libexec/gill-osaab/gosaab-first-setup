@@ -17,7 +17,9 @@ nm-online -q -t 5 2>/dev/null || exit 0
 progress 5 "Setting up your apps" "Adding the Flathub app store"
 flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo || true
 
-progress 15 "Setting up your apps" "Installing Bottles (Windows app installers)"
+progress 10 "Setting up your apps" "Installing Bazaar, the Linux app store (Flathub)"
+flatpak install --user --noninteractive -y flathub io.github.kolunmi.Bazaar >/dev/null 2>&1 || true
+progress 20 "Setting up your apps" "Installing Bottles (Windows app installers)"
 flatpak install --user --noninteractive -y flathub com.usebottles.bottles >/dev/null 2>&1 || true
 
 android=$(sed -n 's/^android=//p' /etc/gill-osaab/features.conf 2>/dev/null)
@@ -32,5 +34,5 @@ if [ "${android:-on}" = on ] && ! waydroid status 2>/dev/null | grep -qi "initia
     esac
   done
 fi
-progress 100 "Your apps are ready" "Android with Play Store, Brave, VLC, Steam and Bottles are set up."
+progress 100 "Your apps are ready" "Play Store (Android), Bazaar (Linux apps), Bottles (Windows apps), Brave, VLC and Steam are set up."
 touch "$DONE"

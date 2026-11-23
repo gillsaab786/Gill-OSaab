@@ -51,6 +51,8 @@ modules:
         - swaybg
         - swayidle
         - wlr-randr
+        - plymouth-plugin-script
+        - plymouth-plugin-label
         # --- drivers and helpers for whatever gets plugged in (no setup needed)
         - cups
         - cups-filters

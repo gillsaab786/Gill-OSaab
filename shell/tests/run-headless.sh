@@ -311,6 +311,11 @@ if command -v qs >/dev/null; then
   WM=$!
   for _ in $(seq 1 50); do [ -s "$XDG_RUNTIME_DIR/gosaab-wm.socket" ] && break; sleep 0.1; done
   export WAYLAND_DISPLAY=$(cat "$XDG_RUNTIME_DIR/gosaab-wm.socket")
+  # apps from several systems: YouTube for Android and Windows, Netflix only for Android
+  APPS=$HOME/.local/share/applications; mkdir -p "$APPS"
+  printf '[Desktop Entry]\nType=Application\nName=YouTube\nExec=waydroid app launch com.google.android.youtube\nIcon=youtube\n' > "$APPS/waydroid.com.google.android.youtube.desktop"
+  printf '[Desktop Entry]\nType=Application\nName=YouTube\nExec=gosaab-open --wine-run "/x" "C:/YouTube.exe"\nIcon=youtube\n' > "$APPS/wine-youtube.desktop"
+  printf '[Desktop Entry]\nType=Application\nName=Netflix\nExec=waydroid app launch com.netflix.mediaclient\nIcon=netflix\n' > "$APPS/waydroid.com.netflix.mediaclient.desktop"
   qs -p "$SHELLDIR" >"$OUT/quickshell.log" 2>&1 &
   QS=$!
   for _ in $(seq 1 40); do qs -p "$SHELLDIR" ipc call shell ping 2>/dev/null | grep -q ok && break; sleep 0.5; done
@@ -340,6 +345,11 @@ if command -v qs >/dev/null; then
   qs -p "$SHELLDIR" ipc call notifications toggle; sleep 1.2; shot 24-notification-center
   qs -p "$SHELLDIR" ipc call notifications toggle; sleep 0.8
   qs -p "$SHELLDIR" ipc call spotlight search "foo"; sleep 1.2; shot 25-spotlight
+  qs -p "$SHELLDIR" ipc call spotlight search "youtube"; sleep 1; R=$(qs -p "$SHELLDIR" ipc call spotlight results); echo "youtube -> $R"
+  shot 25b-spotlight-two-youtubes
+  check "same app on two systems: shown as Android-YouTube and Windows-YouTube" "echo '$R' | grep -q 'Android-YouTube' && echo '$R' | grep -q 'Windows-YouTube'"
+  qs -p "$SHELLDIR" ipc call spotlight search "netflix"; sleep 1; R=$(qs -p "$SHELLDIR" ipc call spotlight results); echo "netflix -> $R"
+  check "app on only one system: just its name (Netflix)" "[ '$R' = Netflix ]"
   qs -p "$SHELLDIR" ipc call spotlight search "12*(3+4)"; sleep 0.8; shot 26-spotlight-maths
   qs -p "$SHELLDIR" ipc call spotlight toggle; sleep 0.8; shot 27-after-spotlight
   qs -p "$SHELLDIR" ipc call launchpad toggle; sleep 1.2; shot 28-launchpad

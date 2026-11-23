@@ -10,7 +10,7 @@ Rectangle {
     property bool banner: false
     signal timedOut()
 
-    implicitHeight: body.implicitHeight + 24
+    implicitHeight: Math.max(body.implicitHeight, card.progress >= 0 ? 56 : 0) + 24
     radius: 24
     color: Theme.panel
     border { color: Theme.panelBorder; width: 1 }
@@ -44,6 +44,14 @@ Rectangle {
         }
     }
 
+    ProgressRing { // downloads, installs, updates: Liquid Glass ring with the percentage
+        visible: card.progress >= 0
+        value: Math.max(0, card.progress)
+        width: 56; height: 56
+        anchors { right: parent.right; rightMargin: 12; verticalCenter: parent.verticalCenter }
+        z: 2
+    }
+
     Row {
         id: body
         anchors { left: parent.left; right: parent.right; top: parent.top; margins: 12 }
@@ -60,7 +68,7 @@ Rectangle {
             }
         }
         Column {
-            width: parent.width - 46
+            width: parent.width - 46 - (card.progress >= 0 ? 66 : 0)
             spacing: 2
             Row {
                 width: parent.width
@@ -86,26 +94,6 @@ Rectangle {
                 wrapMode: Text.Wrap; maximumLineCount: 3; elide: Text.ElideRight
                 textFormat: Text.StyledText
                 font { family: Theme.font; pixelSize: 13 }
-            }
-            Item { // progress bar (downloads, installs, updates)
-                visible: card.progress >= 0
-                width: parent.width; height: 18
-                Rectangle {
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: parent.width - pct.width - 8; height: 5; radius: 2.5
-                    color: Qt.rgba(1, 1, 1, 0.15)
-                    Rectangle {
-                        width: parent.width * Math.max(0, card.progress) / 100; height: parent.height; radius: 2.5
-                        color: card.progress >= 100 ? Theme.green : Theme.accent
-                        Behavior on width { NumberAnimation { duration: Theme.normal; easing.type: Easing.OutCubic } }
-                    }
-                }
-                Text {
-                    id: pct
-                    anchors { right: parent.right; verticalCenter: parent.verticalCenter }
-                    text: Math.round(card.progress) + "%"
-                    color: Theme.subtext; font { family: Theme.font; pixelSize: 11 }
-                }
             }
             Row {
                 visible: card.notification.actions.length > 0

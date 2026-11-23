@@ -93,6 +93,9 @@ class Progress:
         return self
 
     def update(self, percent=None, message=None):
+        if percent is not None and os.environ.get("GOSAAB_PROGRESS_STDOUT"):
+            # Settings draws its own progress ring from these lines
+            print(f"GOSAAB_PROGRESS {max(0, min(100, int(percent)))}", flush=True)
         if self.path:
             from gi.repository import GLib
             props = {"title": GLib.Variant("s", self.title)}
