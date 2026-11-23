@@ -24,6 +24,15 @@ jobs:
           mkdir -p core-shots
           docker run --rm --privileged -v /dev/dri:/dev/dri -v "$PWD":/src -w /src \
             ghcr.io/${{ github.repository_owner }}/gill-osaab-core:latest bash /src/shell/tests/core-smoke.sh /src/core-shots
+      - name: Is the image public? (needed to install it)
+        if: always()
+        run: |
+          docker logout ghcr.io
+          if docker manifest inspect ghcr.io/${{ github.repository_owner }}/gill-osaab-core:latest >/dev/null 2>&1; then
+            echo "PASS: image is public"
+          else
+            echo "::warning::gill-osaab-core image is private: set the package to Public in GitHub > Packages"
+          fi
       - name: Publish screenshots to the core-shots branch
         if: always()
         run: |
