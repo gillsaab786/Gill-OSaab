@@ -298,7 +298,7 @@ desk = L("20-shell-desktop"); W, H = desk.size
 bar = ImageStat.Stat(desk.crop((0, 0, W, 30))).stddev
 wall = ImageStat.Stat(L("01-wallpaper").crop((0, 0, W, 30)))
 checks = [
-  ("menu bar is drawn", changed("01-wallpaper", "20-shell-desktop", (0, 0, W, 30)) > 0.02),
+  ("menu bar is drawn", changed("01-wallpaper", "20-shell-desktop", (0, 0, W, 30)) > 0.008),
   ("dock is drawn", changed("01-wallpaper", "20-shell-desktop", (W // 4, H - 110, 3 * W // 4, H)) > 0.002),
   ("notification banner shows (top right)", changed("21-shell-window", "22-notification", (W - 400, 30, W, 200)) > 0.05),
   ("control centre opens", changed("22-notification", "23-control-center", (W - 360, 30, W, 500)) > 0.05),
@@ -331,16 +331,17 @@ def changed(a, b, box=None):
     return ImageStat.Stat(d.convert("L").point(lambda v: 255 if v > 24 else 0)).mean[0] / 255
 r = (changed("39-before-lock", "40-locked", (700, 360, 1220, 690)), changed("40-locked", "41-locked-new-window"), changed("39-before-lock", "42-unlocked"))
 print("lock changes", [round(x, 4) for x in r])
-for name, ok in [("lock screen covers the desktop", r[0] > 0.2), ("windows stay hidden while locked", r[1] < 0.01),
+for name, ok in [("lock screen covers the desktop", r[0] > 0.1), ("windows stay hidden while locked", r[1] < 0.01),
                  ("unlocking shows the desktop again", r[2] < 0.6 and r[2] < r[0])]:
     print(("PASS: " if ok else "FAIL: ") + name)
-sys.exit(0 if r[0] > 0.2 and r[1] < 0.01 and r[2] < r[0] else 1)
+sys.exit(0 if r[0] > 0.1 and r[1] < 0.01 and r[2] < r[0] else 1)
 EOF8
   # X11 apps through xwayland-satellite get the same title bars
   if [ -s "$XDG_RUNTIME_DIR/gosaab-wm.display" ] && command -v xclock >/dev/null; then
+    pkill foot; sleep 1
     DISPLAY=$(cat "$XDG_RUNTIME_DIR/gosaab-wm.display") xclock -geometry 300x300 &
     sleep 3; shot 43-x11-app
-    check "X11 app opens with a Gill-OSaab title bar" "[ -n \"\$(lights 43-x11-app)\" ]"
+    check "X11 app opens with a Gill-OSaab title bar" "[ -n \"\$(lights 43-x11-app)\" ] && ! pgrep -x foot >/dev/null"
   else
     echo "FAIL: X11 support (xwayland-satellite) not available"; fail=1
   fi

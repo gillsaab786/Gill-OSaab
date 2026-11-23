@@ -17,7 +17,7 @@ PanelWindow {
 
     readonly property var active: ToplevelManager.activeToplevel
     readonly property string appName: {
-        if (!active) return "Finder"
+        if (!active) return "Desktop"
         const e = DesktopEntries.heuristicLookup(active.appId)
         return e ? e.name : (active.appId || active.title || "")
     }
