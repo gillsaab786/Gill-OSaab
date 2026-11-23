@@ -1,0 +1,27 @@
+name: gill-osaab-shell
+on:
+  push:
+    paths:
+      - "shell/**"
+      - ".github/workflows/shell.yml"
+  workflow_dispatch:
+
+jobs:
+  probe:
+    name: Probe toolchain
+    runs-on: ubuntu-latest
+    container: registry.fedoraproject.org/fedora:45
+    steps:
+      - name: Package versions
+        run: |
+          dnf -y -q install dnf5-plugins >/dev/null 2>&1 || true
+          for p in wlroots-devel scenefx-devel wayland-devel wayland-protocols-devel libxkbcommon-devel \
+                   pixman-devel libinput-devel libseat-devel mesa-libGLES-devel meson ninja-build gcc \
+                   grim xorg-x11-server-Xwayland quickshell layer-shell-qt-devel qt6-qtdeclarative-devel \
+                   qt6-qtwayland-devel cairo-devel pango-devel; do
+            v=$(dnf -q repoquery --latest-limit 1 --qf '%{version}-%{release}' "$p" 2>/dev/null | head -1)
+            echo "$p: ${v:-NOT FOUND}"
+          done
+          dnf -y -q copr enable errornointernet/quickshell >/dev/null 2>&1 && \
+            echo "copr quickshell: $(dnf -q repoquery --latest-limit 1 --qf '%{version}' quickshell | head -1)" || \
+            echo "copr quickshell: unavailable"
