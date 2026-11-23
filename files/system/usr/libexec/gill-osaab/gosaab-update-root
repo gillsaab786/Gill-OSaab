@@ -1,0 +1,106 @@
+#!/usr/bin/env python3
+"""Admin half of Gill-OSaab updates (run through pkexec by gosaab-update-component).
+
+  gosaab-update-root <os|firmware|bios|android|decky|nvidia>
+
+Exit codes: 0 updated, 3 not available on this device, 4 already up to date, 1 failed.
+"""
+import json
+import os
+import shutil
+import subprocess
+import sys
+
+NOT_AVAILABLE, UP_TO_DATE, FAILED = 3, 4, 1
+
+
+def run(cmd):
+    print("+ " + " ".join(cmd), flush=True)
+    return subprocess.run(cmd, check=False).returncode
+
+
+def booted_image():
+    out = subprocess.run(["rpm-ostree", "status", "--json", "--booted"], capture_output=True, text=True, check=False)
+    try:
+        dep = json.loads(out.stdout)["deployments"][0]
+        return dep.get("container-image-reference", "")
+    except (ValueError, KeyError, IndexError):
+        return ""
+
+
+def nvidia_target(image_ref):
+    """ostree-unverified-registry:ghcr.io/x/gill-osaab-desktop:latest -> ...gill-osaab-desktop-nvidia:latest"""
+    if not image_ref or "-nvidia" in image_ref:
+        return ""
+    head, _, tag = image_ref.rpartition(":")
+    if "/" in tag or not head:  # no tag present
+        head, tag = image_ref, "latest"
+    if not head.endswith("gill-osaab-desktop"):
+        return ""
+    return f"{head}-nvidia:{tag}"
+
+
+def system_firmware_ids(devices_json):
+    """fwupd device IDs for the main system firmware (the BIOS/UEFI)."""
+    try:
+        devices = json.loads(devices_json).get("Devices", [])
+    except ValueError:
+        return []
+    ids = []
+    for d in devices:
+        plugin = d.get("Plugin", "")
+        name = d.get("Name", "").lower()
+        if plugin.startswith("uefi") and ("system firmware" in name or "uefi" in name or "bios" in name):
+            ids.append(d.get("DeviceId", ""))
+    return [i for i in ids if i]
+
+
+def fwupd(args):
+    if not shutil.which("fwupdmgr"):
+        return NOT_AVAILABLE
+    run(["fwupdmgr", "refresh", "--force"])
+    rc = run(["fwupdmgr", "update", "--assume-yes", "--no-reboot-check", *args])
+    return UP_TO_DATE if rc == 2 else (0 if rc == 0 else FAILED)
+
+
+def main(argv):
+    if len(argv) != 1:
+        print(__doc__.strip(), file=sys.stderr)
+        return 2
+    action = argv[0]
+    if action == "os":
+        return 0 if run(["rpm-ostree", "upgrade"]) == 0 else FAILED
+    if action == "firmware":
+        return fwupd([])
+    if action == "bios":
+        if not shutil.which("fwupdmgr"):
+            return NOT_AVAILABLE
+        out = subprocess.run(["fwupdmgr", "get-devices", "--json"], capture_output=True, text=True, check=False)
+        ids = system_firmware_ids(out.stdout)
+        if not ids:
+            return NOT_AVAILABLE
+        result = UP_TO_DATE
+        for dev in ids:
+            rc = fwupd([dev])
+            if rc == FAILED:
+                return FAILED
+            if rc == 0:
+                result = 0
+        return result
+    if action == "android":
+        if not shutil.which("waydroid") or not os.path.exists("/var/lib/waydroid/waydroid.cfg"):
+            return NOT_AVAILABLE
+        return 0 if run(["waydroid", "upgrade"]) == 0 else FAILED
+    if action == "decky":
+        return 0 if run(["/usr/libexec/gill-osaab/gosaab-decky-sync"]) == 0 else FAILED
+    if action == "nvidia":
+        target = nvidia_target(booted_image())
+        if not target:
+            return NOT_AVAILABLE
+        return 0 if run(["rpm-ostree", "rebase", target]) == 0 else FAILED
+    print(__doc__.strip(), file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

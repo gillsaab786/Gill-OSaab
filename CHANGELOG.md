@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.2.0 (2026-11-23)
+
+- Settings redesign: reorganised Updates page, new Device & Drivers page, iOS-style HD icon
+  tiles (1x/2x/3x), search, page transitions
+- Per-part updates with versions: system, Android image, Proton-GE (latest, checksum-verified),
+  Windows app setups, apps, containers, Game Mode plugins, plus Update everything
+- Hardware detection (model, BIOS, CPU, GPUs, Wi-Fi/Ethernet and their drivers)
+- Update all drivers, device firmware and BIOS through fwupd/LVFS; maker support page when the
+  BIOS isn't published there
+- Nvidia desktop edition (on bazzite-nvidia-open) with a one-tap switch when an Nvidia GPU is found
+- macOS-style motion defaults: scale open/close, magic lamp, sheets, overview, timing, sounds
+- 81 tests
+
 ## 1.1.0 (2026-11-23)
 
 - Notifications with live progress in Game Mode: `gosaab-notify-hub` takes the standard

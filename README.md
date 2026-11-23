@@ -9,8 +9,9 @@ Gill-OSaab features below.
 | --- | --- | --- |
 | Handheld | `ghcr.io/gillsaab786/gill-osaab` | ROG Ally, GPD Win Max 2, Steam Deck. Boots into Game Mode |
 | Desktop | `ghcr.io/gillsaab786/gill-osaab-desktop` | Intel/AMD desktops and laptops. Boots to the desktop |
+| Desktop Nvidia | `ghcr.io/gillsaab786/gill-osaab-desktop-nvidia` | PCs with Nvidia GTX 16 / RTX 20 or newer (Settings offers the switch) |
 
-## What's in 1.1.0
+## What's in 1.2.0
 
 **One-click apps** (`gosaab-open`, the default for these files):
 
@@ -22,7 +23,20 @@ Gill-OSaab features below.
 | `.deb` / `.rpm` | Ubuntu / Fedora container (distrobox), added to the app menu |
 | `.flatpakref` `.flatpak` | Flatpak |
 
-**Gill-OSaab Settings** (app menu): iOS-style switches for
+**Updates, drivers and BIOS** (Settings › Updates and Settings › Device & Drivers):
+- **Update everything**, plus an Update button and version for each part: Gill-OSaab system
+  (kernel, graphics and Wi-Fi drivers, Wine, Android support), Android system image, Proton-GE
+  (latest release, checksum-verified), Windows app setups, apps and emulators, Linux containers,
+  Game Mode plugins. Progress shows in notifications, including in Game Mode.
+- **This device**: model, BIOS version, processor, graphics and Wi-Fi/Ethernet chips with the driver
+  each one uses.
+- **Update all drivers** (system bundle + device firmware), **Device firmware** (LVFS) and **BIOS**
+  (when the maker publishes it to LVFS; otherwise it opens the maker's support page). The BIOS is
+  never updated automatically.
+- Nvidia graphics found → one tap switches to the Nvidia edition.
+- Everything follows the latest Bazzite stable; the images rebuild daily.
+
+**Gill-OSaab Settings** (app menu): sharp iOS-style icons, search, and switches for
 - Updates: **All updates** master switch, plus OS, Apps and emulators, Linux containers
 - Windows app sandbox on/off
 - Screen-off mode: Overnight / Work option, wake-after-idle time
@@ -44,7 +58,9 @@ browsers). Apps that never report a percentage, like Firefox without its browser
 Windows apps, still show their normal notifications. Gill-OSaab's own installer reports progress too.
 
 **Look and feel**: dark Gill-OSaab colour scheme with a teal accent, Inter font, Papirus icons,
-a macOS-style top bar (menu, app menu, tray, clock) and a floating, centred dock that moves out of
+macOS/iOS-style motion (windows zoom open and closed, minimise into the dock like a genie,
+dialogs slide down as sheets, Mission Control-style overview, snappier animation timing,
+system sounds including the Trash), a macOS-style top bar (menu, app menu, tray, clock) and a floating, centred dock that moves out of
 the way of windows. Window buttons sit on the left, Magic Lamp minimise and blur are on, and the
 original Gill-OSaab Aurora wallpaper (dark and light) also appears on the lock and login screens.
 
@@ -77,6 +93,7 @@ Going back is one command: `rpm-ostree rollback` (or pick the previous entry at 
 | `gosaab-updates` | Show switches; `gosaab-updates all off`, `os on`, `now` |
 | `gosaab-screen-off` | Screen off until tasks finish; `--overnight` |
 | `ujust gosaab-status` | Check every component |
+| `gosaab-update-component PART` | Update one part: `all`, `os`, `drivers`, `firmware`, `bios`, `android`, `proton`, `wine`, `apps`, `containers`, `decky`, `nvidia` |
 | `ujust gosaab-setup-notifications` | Game Mode notifications and progress (Decky plugin) |
 | `ujust gosaab-install-xreal` | XREAL glasses support for games (Breezy; trial, then paid features) |
 

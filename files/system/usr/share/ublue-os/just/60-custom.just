@@ -59,3 +59,15 @@ gosaab-setup-notifications:
     fi
     sudo /usr/libexec/gill-osaab/gosaab-decky-sync
     echo "Done. Open Quick Access (Armoury Crate / ... button) > Decky > Gill-OSaab Notifications."
+
+# Update everything (system, Android, Proton-GE, Windows app setups, apps, containers, plugins)
+gosaab-update-all:
+    gosaab-update-component all
+
+# Update all drivers (kernel, graphics, Wi-Fi, audio) and device firmware
+gosaab-update-drivers:
+    gosaab-update-component drivers
+
+# Update the BIOS when the maker publishes it to LVFS
+gosaab-update-bios:
+    gosaab-update-component bios

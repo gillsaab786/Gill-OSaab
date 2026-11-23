@@ -59,7 +59,9 @@ import configparser, pathlib
 FONT = "Inter,10,-1,5,400,0,0,0,0,0,0,0,0,0,0,1"
 DEFAULTS = {
     "/etc/xdg/kdeglobals": {
-        "KDE": {"LookAndFeelPackage": "org.gillosaab.desktop", "widgetStyle": "Breeze"},
+        "KDE": {"LookAndFeelPackage": "org.gillosaab.desktop", "widgetStyle": "Breeze",
+                "AnimationDurationFactor": "0.8"},
+        "Sounds": {"Enable": "true", "Theme": "ocean"},
         "General": {"ColorScheme": "GillOSaabDark", "font": FONT, "menuFont": FONT,
                     "toolBarFont": "Inter,9,-1,5,400,0,0,0,0,0,0,0,0,0,0,1",
                     "smallestReadableFont": "Inter,8,-1,5,400,0,0,0,0,0,0,0,0,0,0,1"},
@@ -67,8 +69,14 @@ DEFAULTS = {
         "Icons": {"Theme": "Papirus-Dark"},
     },
     "/etc/xdg/kwinrc": {
+        # macOS/iOS feel: windows zoom open/closed, minimise into the dock like a genie,
+        # dialogs slide down as sheets, glass blur, Mission Control-style overview
         "Plugins": {"blurEnabled": "true", "contrastEnabled": "true", "magiclampEnabled": "true",
-                    "squashEnabled": "false", "shakecursorEnabled": "true"},
+                    "squashEnabled": "false", "scaleEnabled": "true", "glideEnabled": "false",
+                    "fadeEnabled": "false", "sheetEnabled": "true", "dimscreenEnabled": "true",
+                    "overviewEnabled": "true", "slideEnabled": "true", "shakecursorEnabled": "true",
+                    "wobblywindowsEnabled": "false"},
+        "Effect-magiclamp": {"AnimationDuration": "300"},
         "org.kde.kdecoration2": {"library": "org.kde.breeze", "theme": "Breeze",
                                  "ButtonsOnLeft": "XIA", "ButtonsOnRight": ""},
         "WindowSwitcher": {"LayoutName": "thumbnail_grid"},

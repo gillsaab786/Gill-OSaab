@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=https://schema.blue-build.org/recipe-v1.json
+# Gill-OSaab for desktops/laptops with Nvidia graphics (GTX 16 / RTX 20 series and newer).
+# Settings > Device & Drivers offers the switch automatically when an Nvidia GPU is found.
+# Published to ghcr.io/<owner>/gill-osaab-desktop-nvidia
+name: gill-osaab-desktop-nvidia
+description: Gill-OSaab desktop edition with Nvidia drivers, built on Bazzite.
+
+base-image: ghcr.io/ublue-os/bazzite-nvidia-open
+image-version: stable
+
+modules:
+  - from-file: common.yml

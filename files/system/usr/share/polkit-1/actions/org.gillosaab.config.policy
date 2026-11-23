@@ -25,4 +25,15 @@
     </defaults>
     <annotate key="org.freedesktop.policykit.exec.path">/usr/bin/gosaab-updates</annotate>
   </action>
+  <action id="org.gillosaab.update-root">
+    <description>Update Gill-OSaab system parts</description>
+    <message>Gill-OSaab needs permission to update system parts, drivers or firmware</message>
+    <icon_name>gill-osaab</icon_name>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/libexec/gill-osaab/gosaab-update-root</annotate>
+  </action>
 </policyconfig>

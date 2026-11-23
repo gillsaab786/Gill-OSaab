@@ -47,6 +47,23 @@ class FakeBackend:
     def decky_plugin_installed(self):
         return False
 
+    def run_async(self, cmd, parent, done):
+        self.calls.append(("async",) + tuple(cmd))
+        done(self.async_code)
+        return None
+
+    async_code = 0
+
+    def versions(self):
+        return {"gill_osaab": "1.2.0", "os": "45", "kernel": "6.19", "wine": "wine-11.21", "proton": "GE-Proton10-30",
+                "image": getattr(self, "image", "ostree-unverified-registry:ghcr.io/x/gill-osaab-desktop:latest")}
+
+    def hardware(self):
+        return {"model": {"name": "GPD G1619-04", "bios_version": "2.11", "bios_date": "2025"}, "cpu": "Ryzen",
+                "gpus": [{"vendor": "NVIDIA Corporation", "device": "RTX 2060", "driver": "nouveau"}],
+                "network": [{"kind": "Wi-Fi", "vendor": "MEDIATEK", "device": "MT7922", "driver": "mt7921e"}],
+                "nvidia": getattr(self, "nvidia", True), "support_page": "https://gpd.hk/"}
+
     def color_scheme(self):
         return "GillOSaabDark"
 
@@ -94,8 +111,8 @@ class SettingsApp(unittest.TestCase):
 
     def test_every_page_builds(self):
         w = self.gs.Settings(FakeBackend())
-        self.assertEqual(w.stack.count(), 6)
-        for i in range(6):
+        self.assertEqual(w.stack.count(), 8)
+        for i in range(8):
             w.nav.setCurrentRow(i)
             self.assertEqual(w.stack.currentIndex(), i)
 
@@ -105,6 +122,61 @@ class SettingsApp(unittest.TestCase):
         w.apply_scheme("GillOSaabLight")
         self.assertIn(("plasma-apply-colorscheme", "GillOSaabLight"), b.calls)
         self.assertIn(("/usr/libexec/plasma-changeicons", "Papirus-Light"), b.calls)
+
+
+@unittest.skipUnless(HAVE_QT, "PySide6 not installed")
+class SettingsUpdates(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        from PySide6.QtWidgets import QApplication, QMessageBox
+        cls.gs = load("usr/bin/gosaab-settings")
+        cls.app = QApplication.instance() or QApplication([])
+        QMessageBox.warning = staticmethod(lambda *a, **k: None)
+
+    def test_every_part_has_an_update_button(self):
+        w = self.gs.Settings(FakeBackend())
+        for part in ("all", "os", "android", "proton", "wine", "apps", "containers", "decky",
+                     "drivers", "firmware", "bios", "nvidia"):
+            self.assertIn(part, w.update_buttons, part)
+
+    def test_update_button_runs_updater_and_shows_result(self):
+        b = FakeBackend()
+        b.async_code = 4
+        w = self.gs.Settings(b)
+        btn = w.update_buttons["proton"]
+        btn.click()
+        self.assertIn(("async", "gosaab-update-component", "proton"), b.calls)
+        self.assertEqual(btn.text(), "Up to date")
+        self.assertTrue(btn.isEnabled())
+
+    def test_nvidia_switch_hidden_on_nvidia_edition(self):
+        b = FakeBackend()
+        b.image = "ostree-unverified-registry:ghcr.io/x/gill-osaab-desktop-nvidia:latest"
+        self.assertNotIn("nvidia", self.gs.Settings(b).update_buttons)
+        b2 = FakeBackend()
+        b2.nvidia = False
+        self.assertNotIn("nvidia", self.gs.Settings(b2).update_buttons)
+
+    def test_bios_not_available_offers_support_page(self):
+        from PySide6.QtWidgets import QMessageBox
+        b = FakeBackend()
+        b.async_code = 3
+        w = self.gs.Settings(b)
+        shown = []
+        w.bios_not_available = lambda: shown.append(True)
+        w.update_buttons["bios"].click()
+        self.assertEqual(shown, [True])
+        self.assertEqual(w.update_buttons["bios"].text(), "Not available")
+        del QMessageBox  # keep linters quiet
+
+    def test_search_filters_pages(self):
+        w = self.gs.Settings(FakeBackend())
+        w.search.setText("bios")
+        visible = [w.nav.item(i).text() for i in range(w.nav.count()) if not w.nav.item(i).isHidden()]
+        self.assertIn("Device & Drivers", visible)
+        self.assertNotIn("Appearance", visible)
+        w.search.setText("")
+        self.assertTrue(all(not w.nav.item(i).isHidden() for i in range(w.nav.count())))
 
 
 if __name__ == "__main__":

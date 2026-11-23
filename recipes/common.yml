@@ -20,6 +20,8 @@ modules:
         - papirus-icon-theme
         - python3-pyside6
         - python3-gobject
+        - fwupd
+        - pciutils
 
   # Enables Gill-OSaab services, disables stock updaters, refreshes app/MIME databases
   - type: script

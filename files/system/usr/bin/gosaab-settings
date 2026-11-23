@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Gill-OSaab Settings: one place for the Gill-OSaab switches."""
+"""Gill-OSaab Settings: every Gill-OSaab switch and update in one place."""
+import json
 import os
 import shutil
 import subprocess
@@ -10,14 +11,18 @@ sys.path.insert(0, "/usr/libexec/gill-osaab")
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "../libexec/gill-osaab"))
 from gosaab_common import ETC, is_on, read_conf  # noqa: E402
 
-from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QRectF, QSize, Qt, Property, Signal
-from PySide6.QtGui import QColor, QIcon, QPainter
-from PySide6.QtWidgets import (QAbstractButton, QApplication, QButtonGroup, QFrame, QHBoxLayout, QLabel,
-                               QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QPushButton,
-                               QScrollArea, QSpinBox, QStackedWidget, QVBoxLayout, QWidget)
+from PySide6.QtCore import (QEasingCurve, QProcess, QPropertyAnimation, QRectF, QSize, Qt,  # noqa: E402
+                            Property, Signal)
+from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPainterPath, QPixmap  # noqa: E402
+from PySide6.QtWidgets import (QAbstractButton, QApplication, QButtonGroup, QFrame,  # noqa: E402
+                               QGraphicsOpacityEffect, QHBoxLayout, QLabel, QLineEdit, QListWidget,
+                               QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QScrollArea, QSpinBox,
+                               QStackedWidget, QVBoxLayout, QWidget)
 
 ACCENT = QColor(31, 182, 201)
 VERSION_FILE = Path("/usr/share/gill-osaab/version")
+UPDATER = "gosaab-update-component"
+RESULT_TEXT = {0: "Updated", 4: "Up to date", 3: "Not available", 1: "Failed – retry"}
 
 
 # ------------------------------------------------------------------ backend
@@ -44,6 +49,28 @@ class Backend:
             return subprocess.run(cmd, check=False).returncode == 0
         subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return True
+
+    def run_async(self, cmd, parent, done):
+        """Run without freezing the window; done(exit_code) is called at the end."""
+        proc = QProcess(parent)
+        proc.finished.connect(lambda code, _status: done(code))
+        proc.errorOccurred.connect(lambda _err: done(1) if proc.state() == QProcess.NotRunning else None)
+        proc.start(cmd[0], cmd[1:])
+        return proc
+
+    def versions(self):
+        try:
+            out = subprocess.run([UPDATER, "--versions"], capture_output=True, text=True, timeout=10, check=False)
+            return json.loads(out.stdout)
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            return {}
+
+    def hardware(self):
+        try:
+            import gosaab_hw
+            return gosaab_hw.summary()
+        except Exception:
+            return {"model": {}, "cpu": "", "gpus": [], "network": [], "nvidia": False, "support_page": ""}
 
     def have(self, tool):
         return shutil.which(tool) is not None
@@ -75,6 +102,45 @@ class Backend:
         return out.stdout.strip() or "GillOSaabDark"
 
 
+# ------------------------------------------------------------------ HD icon tiles
+def tile_icon(color, glyph, letter):
+    """iOS-style icon: white glyph on a rounded colour square, drawn at 1x/2x/3x so it
+    stays sharp on high-resolution screens."""
+    icon = QIcon()
+    theme = QIcon.fromTheme(glyph)
+    for scale in (1, 2, 3):
+        size = 28 * scale
+        pm = QPixmap(size, size)
+        pm.fill(Qt.transparent)
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.Antialiasing)
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(0, 0, size, size), size * 0.23, size * 0.23)
+        p.fillPath(path, QColor(color))
+        inner = int(size * 0.62)
+        glyph_pm = theme.pixmap(inner, inner) if not theme.isNull() else QPixmap()
+        if not glyph_pm.isNull():
+            white = QPixmap(glyph_pm.size())
+            white.fill(Qt.transparent)
+            gp = QPainter(white)
+            gp.drawPixmap(0, 0, glyph_pm)
+            gp.setCompositionMode(QPainter.CompositionMode_SourceIn)
+            gp.fillRect(white.rect(), QColor("white"))
+            gp.end()
+            off = (size - inner) // 2
+            p.drawPixmap(QRectF(off, off, inner, inner), white, QRectF(white.rect()))
+        else:
+            font = QFont("Inter")
+            font.setPixelSize(int(size * 0.5))
+            font.setWeight(QFont.DemiBold)
+            p.setFont(font)
+            p.setPen(QColor("white"))
+            p.drawText(QRectF(0, 0, size, size), Qt.AlignCenter, letter)
+        p.end()
+        icon.addPixmap(pm)
+    return icon
+
+
 # ------------------------------------------------------------------ widgets
 class Switch(QAbstractButton):
     """iOS-style toggle switch with a sliding knob."""
@@ -86,7 +152,7 @@ class Switch(QAbstractButton):
         self.setFixedSize(52, 30)
         self._pos = 0.0
         self._anim = QPropertyAnimation(self, b"knob", self)
-        self._anim.setDuration(160)
+        self._anim.setDuration(180)
         self._anim.setEasingCurve(QEasingCurve.OutCubic)
         self.toggled.connect(self._animate)
 
@@ -119,19 +185,44 @@ class Switch(QAbstractButton):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         off = QColor(72, 72, 78)
-        track = QColor(
-            int(off.red() + (ACCENT.red() - off.red()) * self._pos),
-            int(off.green() + (ACCENT.green() - off.green()) * self._pos),
-            int(off.blue() + (ACCENT.blue() - off.blue()) * self._pos),
-        )
+        t = self._pos
+        track = QColor(int(off.red() + (ACCENT.red() - off.red()) * t),
+                       int(off.green() + (ACCENT.green() - off.green()) * t),
+                       int(off.blue() + (ACCENT.blue() - off.blue()) * t))
         if not self.isEnabled():
             track.setAlpha(90)
         p.setPen(Qt.NoPen)
         p.setBrush(track)
         p.drawRoundedRect(QRectF(0, 0, 52, 30), 15, 15)
+        p.setBrush(QColor(0, 0, 0, 40))
+        x = 3 + t * 22
+        p.drawEllipse(QRectF(x, 4, 24, 24))  # soft knob shadow
         p.setBrush(QColor(255, 255, 255, 255 if self.isEnabled() else 150))
-        x = 3 + self._pos * 22
         p.drawEllipse(QRectF(x, 3, 24, 24))
+
+
+class UpdateButton(QPushButton):
+    """Runs one updater part in the background and shows the result."""
+
+    def __init__(self, window, part, label="Update"):
+        super().__init__(label)
+        self.window, self.part, self.label = window, part, label
+        self.setObjectName("pill")
+        self.setCursor(Qt.PointingHandCursor)
+        self.clicked.connect(self.start)
+        self.proc = None
+        self.last_code = None
+
+    def start(self):
+        self.setEnabled(False)
+        self.setText("Updating…")
+        self.proc = self.window.backend.run_async([UPDATER, self.part], self, self.finished)
+
+    def finished(self, code):
+        self.last_code = code
+        self.setEnabled(True)
+        self.setText(RESULT_TEXT.get(code, RESULT_TEXT[1]))
+        self.window.on_update_finished(self.part, code)
 
 
 class Row(QWidget):
@@ -139,18 +230,20 @@ class Row(QWidget):
 
     def __init__(self, title, subtitle="", control=None):
         super().__init__()
+        self.title_text = title
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(16, 10, 16, 10)
+        lay.setContentsMargins(16, 11, 16, 11)
         text = QVBoxLayout()
         text.setSpacing(2)
         t = QLabel(title)
         t.setObjectName("rowTitle")
         text.addWidget(t)
+        self.subtitle = None
         if subtitle:
-            s = QLabel(subtitle)
-            s.setObjectName("rowSubtitle")
-            s.setWordWrap(True)
-            text.addWidget(s)
+            self.subtitle = QLabel(subtitle)
+            self.subtitle.setObjectName("rowSubtitle")
+            self.subtitle.setWordWrap(True)
+            text.addWidget(self.subtitle)
         lay.addLayout(text, 1)
         if control is not None:
             lay.addWidget(control, 0, Qt.AlignVCenter)
@@ -177,12 +270,14 @@ class Card(QFrame):
 class Page(QScrollArea):
     def __init__(self, title):
         super().__init__()
+        self.title = title
+        self.keywords = [title.lower()]
         self.setWidgetResizable(True)
         self.setFrameShape(QFrame.NoFrame)
         body = QWidget()
         body.setObjectName("page")
         self.lay = QVBoxLayout(body)
-        self.lay.setContentsMargins(28, 24, 28, 24)
+        self.lay.setContentsMargins(32, 26, 32, 26)
         self.lay.setSpacing(10)
         h = QLabel(title)
         h.setObjectName("pageTitle")
@@ -193,8 +288,13 @@ class Page(QScrollArea):
         if label:
             lab = QLabel(label.upper())
             lab.setObjectName("sectionLabel")
-            self.lay.addSpacing(8)
+            self.lay.addSpacing(10)
             self.lay.addWidget(lab)
+            self.keywords.append(label.lower())
+        for r in rows:
+            self.keywords.append(r.title_text.lower())
+            if r.subtitle is not None:
+                self.keywords.append(r.subtitle.text().lower())
         self.lay.addWidget(Card(rows))
         if note:
             n = QLabel(note)
@@ -202,11 +302,33 @@ class Page(QScrollArea):
             n.setWordWrap(True)
             self.lay.addWidget(n)
 
+    def button(self, text, primary=False):
+        b = QPushButton(text)
+        b.setCursor(Qt.PointingHandCursor)
+        if primary:
+            b.setObjectName("primary")
+        self.lay.addWidget(b, 0, Qt.AlignLeft)
+        self.keywords.append(text.lower())
+        return b
+
     def finish(self):
         self.lay.addStretch(1)
 
 
 # ------------------------------------------------------------------ window
+PAGES = [
+    # title, tile colour, symbolic glyph, letter
+    ("Updates", "#0A84FF", "system-software-update-symbolic", "U"),
+    ("Device & Drivers", "#30D158", "computer-symbolic", "D"),
+    ("Apps & Security", "#5E5CE6", "security-high-symbolic", "S"),
+    ("Notifications", "#FF453A", "preferences-system-notifications-symbolic", "N"),
+    ("Screen Off", "#FF9F0A", "video-display-symbolic", "O"),
+    ("Appearance", "#1FB6C9", "preferences-desktop-appearance-symbolic", "A"),
+    ("Optional Features", "#BF5AF2", "view-more-symbolic", "+"),
+    ("About", "#8E8E93", "help-about-symbolic", "i"),
+]
+
+
 class Settings(QMainWindow):
     changed = Signal(str, str, str)
 
@@ -215,36 +337,80 @@ class Settings(QMainWindow):
         self.backend = backend or Backend()
         self.setWindowTitle("Gill-OSaab Settings")
         self.setWindowIcon(QIcon.fromTheme("gill-osaab"))
-        self.resize(940, 640)
+        self.resize(1000, 680)
         self.switches = {}
+        self.update_buttons = {}
+        self.versions = self.backend.versions()
+        self.hw = self.backend.hardware()
 
         root = QWidget()
         layout = QHBoxLayout(root)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
+
+        side = QWidget()
+        side.setObjectName("side")
+        side.setFixedWidth(250)
+        sl = QVBoxLayout(side)
+        sl.setContentsMargins(12, 16, 12, 12)
+        sl.setSpacing(10)
+        self.search = QLineEdit()
+        self.search.setObjectName("search")
+        self.search.setPlaceholderText("Search")
+        self.search.setClearButtonEnabled(True)
+        self.search.textChanged.connect(self.filter_pages)
         self.nav = QListWidget()
         self.nav.setObjectName("nav")
-        self.nav.setFixedWidth(230)
+        self.nav.setIconSize(QSize(28, 28))
+        sl.addWidget(self.search)
+        sl.addWidget(self.nav, 1)
+
         self.stack = QStackedWidget()
-        layout.addWidget(self.nav)
+        layout.addWidget(side)
         layout.addWidget(self.stack, 1)
         self.setCentralWidget(root)
 
-        for name, icon, builder in [
-            ("Updates", "system-software-update", self.page_updates),
-            ("Apps & Security", "security-high", self.page_security),
-            ("Screen Off", "video-display", self.page_screen),
-            ("Appearance", "preferences-desktop-theme", self.page_appearance),
-            ("Optional Features", "preferences-other", self.page_optional),
-            ("About", "help-about", self.page_about),
-        ]:
-            item = QListWidgetItem(QIcon.fromTheme(icon), name)
-            item.setSizeHint(QSize(200, 40))
+        builders = [self.page_updates, self.page_device, self.page_security, self.page_notifications,
+                    self.page_screen, self.page_appearance, self.page_optional, self.page_about]
+        self.pages = []
+        for (name, color, glyph, letter), builder in zip(PAGES, builders):
+            item = QListWidgetItem(tile_icon(color, glyph, letter), name)
+            item.setSizeHint(QSize(220, 44))
             self.nav.addItem(item)
-            self.stack.addWidget(builder())
-        self.nav.currentRowChanged.connect(self.stack.setCurrentIndex)
+            page = builder()
+            self.pages.append(page)
+            self.stack.addWidget(page)
+        self.nav.currentRowChanged.connect(self.show_page)
         self.nav.setCurrentRow(0)
         self.refresh()
+
+    # -------------------------------------------------------- navigation
+    def show_page(self, index):
+        if index < 0:
+            return
+        self.stack.setCurrentIndex(index)
+        page = self.stack.currentWidget()
+        effect = QGraphicsOpacityEffect(page)
+        page.setGraphicsEffect(effect)
+        anim = QPropertyAnimation(effect, b"opacity", page)
+        anim.setDuration(160)
+        anim.setStartValue(0.0)
+        anim.setEndValue(1.0)
+        anim.setEasingCurve(QEasingCurve.OutCubic)
+        anim.finished.connect(lambda: page.setGraphicsEffect(None))
+        anim.start()
+        self._page_anim = anim
+
+    def filter_pages(self, text):
+        text = text.strip().lower()
+        first = None
+        for i, page in enumerate(self.pages):
+            match = not text or any(text in k for k in page.keywords)
+            self.nav.item(i).setHidden(not match)
+            if match and first is None:
+                first = i
+        if first is not None and self.nav.item(self.nav.currentRow()).isHidden():
+            self.nav.setCurrentRow(first)
 
     # -------------------------------------------------------- helpers
     def switch(self, filename, key, default=True, enabled=True):
@@ -253,6 +419,11 @@ class Settings(QMainWindow):
         sw.toggled.connect(lambda on, f=filename, k=key, s=sw: self.on_toggle(f, k, on, s))
         self.switches[(filename, key)] = (sw, default)
         return sw
+
+    def update_button(self, part, label="Update"):
+        b = UpdateButton(self, part, label)
+        self.update_buttons[part] = b
+        return b
 
     def on_toggle(self, filename, key, on, sw):
         value = "on" if on else "off"
@@ -263,6 +434,11 @@ class Settings(QMainWindow):
         else:
             sw.set_quiet(not on)
             QMessageBox.warning(self, "Not changed", "The setting couldn't be saved (permission was not given).")
+
+    def on_update_finished(self, part, code):
+        if part == "bios" and code == 3:
+            self.bios_not_available()
+        self.versions = self.backend.versions() or self.versions
 
     def refresh(self):
         confs = {"features.conf": self.backend.features(), "updates.conf": self.backend.updates()}
@@ -279,22 +455,75 @@ class Settings(QMainWindow):
         for key in ("os", "apps", "containers"):
             self.switches[("updates.conf", key)][0].setEnabled(on)
 
+    def v(self, key, prefix=""):
+        value = self.versions.get(key, "")
+        return f"{prefix}{value}" if value else "Not installed"
+
     # -------------------------------------------------------- pages
     def page_updates(self):
         p = Page("Updates")
-        p.section("", [Row("All updates", "Master switch. Off stops every update below.",
-                           self.switch("updates.conf", "all"))])
-        p.section("What updates", [
-            Row("OS updates", "Gill-OSaab system image", self.switch("updates.conf", "os")),
+        everything = self.update_button("all", "Update everything")
+        everything.setObjectName("primary")
+        p.section("", [Row("Everything", "System, Android, Proton-GE, Windows app setups, apps, containers "
+                                                "and Game Mode plugins. The BIOS is never updated automatically.",
+                           everything)])
+        p.section("Update now", [
+            Row("Gill-OSaab system", f"{self.v('gill_osaab', 'Gill-OSaab ')} · Bazzite {self.v('os')} · "
+                                     f"kernel {self.v('kernel')}. Includes graphics and Wi-Fi drivers and Wine.",
+                self.update_button("os")),
+            Row("Android system", f"Waydroid {self.v('waydroid')} · Android image {self.v('android_image')}",
+                self.update_button("android")),
+            Row("Proton-GE", f"{self.v('proton')} · for Steam games", self.update_button("proton")),
+            Row("Windows app setups", f"{self.v('wine')} · refreshes each Windows app's private setup",
+                self.update_button("wine")),
+            Row("Apps and emulators", "Flatpak apps", self.update_button("apps")),
+            Row("Linux containers", "Apps installed from .deb and .rpm", self.update_button("containers")),
+            Row("Game Mode plugins", "Gill-OSaab Notifications", self.update_button("decky")),
+        ], note="Drivers, device firmware and the BIOS are in Device & Drivers.")
+        p.section("Automatic updates", [
+            Row("All updates", "Master switch. Off stops every automatic update below.",
+                self.switch("updates.conf", "all")),
+            Row("OS updates", "System, drivers, Wine, Android support", self.switch("updates.conf", "os")),
             Row("Apps and emulators", "Flatpak apps", self.switch("updates.conf", "apps")),
             Row("Linux containers", "Apps installed from .deb and .rpm", self.switch("updates.conf", "containers")),
         ], note="Steam updates itself and isn't controlled here.")
-        now = QPushButton("Check for updates now")
-        now.setObjectName("primary")
-        now.clicked.connect(lambda: self.backend.run(["pkexec", "/usr/bin/gosaab-updates", "now"], wait=False))
-        p.lay.addWidget(now, 0, Qt.AlignLeft)
         p.finish()
         return p
+
+    def page_device(self):
+        p = Page("Device & Drivers")
+        hw = self.hw
+        model = hw.get("model", {})
+        info = [Row("Model", model.get("name") or "Unknown"),
+                Row("BIOS", " · ".join(x for x in (model.get("bios_version"), model.get("bios_date")) if x)
+                    or "Unknown"),
+                Row("Processor", hw.get("cpu") or "Unknown")]
+        for g in hw.get("gpus", []):
+            info.append(Row("Graphics", f"{g['vendor']} {g['device']}", self.driver_label(g)))
+        for n in hw.get("network", []):
+            info.append(Row(n.get("kind", "Network"), f"{n['vendor']} {n['device']}", self.driver_label(n)))
+        p.section("This device", info)
+
+        actions = [
+            Row("Update all drivers", "Kernel, graphics, Wi-Fi, Bluetooth and audio drivers plus device firmware, "
+                                      "matched to this device.", self.update_button("drivers")),
+            Row("Device firmware", "Controllers, SSDs, docks and other parts that publish updates (LVFS).",
+                self.update_button("firmware")),
+            Row("BIOS", "Installed only when the maker publishes it for your exact model. Plug in the charger "
+                        "first.", self.update_button("bios")),
+        ]
+        if hw.get("nvidia") and "nvidia" not in self.versions.get("image", ""):
+            actions.insert(0, Row("Nvidia graphics found", "Switch to the Gill-OSaab Nvidia edition for full "
+                                                           "Nvidia driver support. Restart after.",
+                                  self.update_button("nvidia", "Switch")))
+        p.section("Drivers and firmware", actions)
+        p.finish()
+        return p
+
+    def driver_label(self, dev):
+        lab = QLabel(f"●  {dev['driver']}" if dev.get("driver") else "●  No driver")
+        lab.setObjectName("ok" if dev.get("driver") else "bad")
+        return lab
 
     def page_security(self):
         p = Page("Apps & Security")
@@ -303,6 +532,22 @@ class Settings(QMainWindow):
                 "Each app gets its own private folder and can't see your files. Turn off only for apps "
                 "that must open your documents.", self.switch("features.conf", "sandbox_windows_apps")),
         ])
+        p.finish()
+        return p
+
+    def page_notifications(self):
+        p = Page("Notifications")
+        installed = self.backend.decky_plugin_installed()
+        status = QLabel("●  Ready" if installed else "●  Not set up")
+        status.setObjectName("ok" if installed else "bad")
+        p.section("Game Mode", [
+            Row("Pop-ups and live progress", "Downloads, copies and installs show percentages in Game Mode "
+                                             "(Quick Access › Gill-OSaab Notifications).", status),
+        ], note="Desktop mode uses the notification panel in the top bar.")
+        if not installed:
+            b = p.button("Set up Game Mode notifications", primary=True)
+            b.clicked.connect(lambda: self.backend.run(
+                ["konsole", "-e", "ujust", "gosaab-setup-notifications"], wait=False))
         p.finish()
         return p
 
@@ -319,10 +564,8 @@ class Settings(QMainWindow):
                 self.switch("features.conf", "screen_off_overnight", default=False)),
             Row("Wake after idle", "Seconds with no download or copy before the screen turns back on.", self.idle),
         ])
-        btn = QPushButton("Turn screen off now")
-        btn.setObjectName("primary")
+        btn = p.button("Turn screen off now", primary=True)
         btn.clicked.connect(lambda: self.backend.run(["gosaab-screen-off"], wait=False))
-        p.lay.addWidget(btn, 0, Qt.AlignLeft)
         p.finish()
         return p
 
@@ -351,9 +594,8 @@ class Settings(QMainWindow):
             Row("Night light", "Warmer screen in the evening.", self.night),
             Row("Auto dark mode at sunset", "Coming in a later update.", auto),
         ])
-        reset = QPushButton("Apply Gill-OSaab look (top bar + dock)")
+        reset = p.button("Apply Gill-OSaab look (top bar + dock)")
         reset.clicked.connect(self.apply_look)
-        p.lay.addWidget(reset, 0, Qt.AlignLeft)
         p.finish()
         return p
 
@@ -379,6 +621,7 @@ class Settings(QMainWindow):
         checks = [
             ("Windows apps (Wine)", b.have("wine")), ("App sandbox (bubblewrap)", b.have("bwrap")),
             ("Android apps (Waydroid)", b.have("waydroid")), ("Linux packages (distrobox)", b.have("distrobox")),
+            ("Firmware updates (fwupd)", b.have("fwupdmgr")),
             ("Gaming CPU scheduler", b.service_active("scx_loader.service")),
             ("NTSYNC", b.module_loaded("ntsync")),
             ("Gill-OSaab updater", b.service_active("gosaab-update.timer")),
@@ -394,6 +637,22 @@ class Settings(QMainWindow):
         return p
 
     # -------------------------------------------------------- actions
+    def bios_not_available(self):
+        url = self.hw.get("support_page", "")
+        name = self.hw.get("model", {}).get("name", "this device")
+        box = QMessageBox(self)
+        box.setWindowTitle("BIOS")
+        box.setText(f"{name} doesn't publish BIOS updates to the Linux firmware service.")
+        if url:
+            box.setInformativeText("Open the maker's support page to download the BIOS for your exact model?")
+            open_btn = box.addButton("Open support page", QMessageBox.AcceptRole)
+            box.addButton(QMessageBox.Close)
+            box.exec()
+            if box.clickedButton() is open_btn:
+                self.backend.run(["xdg-open", url], wait=False)
+        else:
+            box.exec()
+
     def apply_scheme(self, scheme):
         icons = "Papirus-Dark" if scheme.endswith("Dark") else "Papirus-Light"
         self.backend.run(["plasma-apply-colorscheme", scheme])
@@ -414,30 +673,37 @@ class Settings(QMainWindow):
 STYLE = """
 QMainWindow, #page { background: #1c1c1f; }
 QWidget { color: #ececf1; font-family: Inter, 'Noto Sans', sans-serif; font-size: 10.5pt; }
-#nav { background: #161618; border: none; padding: 14px 10px; outline: 0; }
-#nav::item { border-radius: 9px; padding: 6px 10px; margin: 2px 0; color: #d6d6dc; }
-#nav::item:selected { background: #1fb6c9; color: #ffffff; }
-#nav::item:hover:!selected { background: #26262a; }
-#pageTitle { font-size: 21pt; font-weight: 700; margin-bottom: 4px; }
-#sectionLabel { color: #8e8e98; font-size: 8.5pt; font-weight: 600; letter-spacing: 1px; margin-left: 4px; }
-#card { background: #26262a; border-radius: 12px; }
+#side { background: #161618; }
+#search { background: #26262a; border: none; border-radius: 10px; padding: 7px 12px; color: #ececf1; }
+#search:focus { background: #2e2e33; }
+#nav { background: transparent; border: none; outline: 0; }
+#nav::item { border-radius: 10px; padding: 4px 8px; margin: 1px 0; color: #e2e2e8; }
+#nav::item:selected { background: #2c2c31; color: #ffffff; }
+#nav::item:hover:!selected { background: #222226; }
+#pageTitle { font-size: 22pt; font-weight: 700; margin-bottom: 4px; }
+#sectionLabel { color: #8e8e98; font-size: 8.5pt; font-weight: 600; letter-spacing: 1px; margin-left: 6px; }
+#card { background: #26262a; border-radius: 14px; }
 #divider { background: #34343a; margin-left: 16px; }
 #rowTitle { font-weight: 500; }
 #rowSubtitle, #note { color: #9a9aa4; font-size: 9pt; }
-#note { margin-left: 4px; }
+#note { margin-left: 6px; }
 #ok { color: #34d378; } #bad { color: #ff635c; }
-QPushButton { background: #2f2f34; border: none; border-radius: 9px; padding: 8px 16px; }
+QPushButton { background: #2f2f34; border: none; border-radius: 10px; padding: 8px 16px; }
 QPushButton:hover { background: #3a3a40; }
+QPushButton:disabled { color: #8e8e98; }
 QPushButton#primary { background: #1fb6c9; color: #ffffff; font-weight: 600; }
 QPushButton#primary:hover { background: #27c7db; }
+QPushButton#pill { background: #34343a; border-radius: 14px; padding: 6px 16px; color: #5ad2e2; font-weight: 600; }
+QPushButton#pill:hover { background: #3d3d44; }
 QPushButton#segLeft, QPushButton#segRight { background: #34343a; padding: 6px 18px; border-radius: 0; }
-QPushButton#segLeft { border-top-left-radius: 8px; border-bottom-left-radius: 8px; }
-QPushButton#segRight { border-top-right-radius: 8px; border-bottom-right-radius: 8px; }
+QPushButton#segLeft { border-top-left-radius: 9px; border-bottom-left-radius: 9px; }
+QPushButton#segRight { border-top-right-radius: 9px; border-bottom-right-radius: 9px; }
 QPushButton#segLeft:checked, QPushButton#segRight:checked { background: #1fb6c9; color: #ffffff; }
-QSpinBox { background: #34343a; border: none; border-radius: 8px; padding: 4px 8px; min-width: 70px; }
+QSpinBox { background: #34343a; border: none; border-radius: 9px; padding: 4px 8px; min-width: 70px; }
 QScrollArea { background: transparent; }
 QScrollBar:vertical { width: 8px; background: transparent; }
 QScrollBar::handle:vertical { background: #44444a; border-radius: 4px; }
+QScrollBar::add-line, QScrollBar::sub-line { height: 0; }
 """
 
 
