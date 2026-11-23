@@ -36,6 +36,8 @@ protocols = [
   wl_protocol_dir / 'staging/ext-session-lock/ext-session-lock-v1.xml',
   wl_protocol_dir / 'staging/xdg-activation/xdg-activation-v1.xml',
   'protocols/wlr-layer-shell-unstable-v1.xml',
+  'protocols/wlr-output-management-unstable-v1.xml',
+  'protocols/wlr-output-power-management-unstable-v1.xml',
 ]
 protocol_headers = []
 foreach xml : protocols

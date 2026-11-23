@@ -46,6 +46,8 @@ modules:
         - quickshell
         - swaybg
         - swayidle
+        - wlr-randr
+        - wdisplays
         - xwayland-satellite
         - xorg-x11-server-Xwayland
         - qt6-qtwayland

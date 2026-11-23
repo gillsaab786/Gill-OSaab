@@ -285,6 +285,14 @@ EOF9
   else
     echo "FAIL: no front window found for the snap test"; fail=1
   fi
+  # Several screens: wlr-randr sees the display and can change its resolution
+  if command -v wlr-randr >/dev/null; then
+    wlr-randr >"$OUT/wlr-randr.txt" 2>&1
+    check "display settings: screens are listed" "grep -q HEADLESS-1 $OUT/wlr-randr.txt"
+    wlr-randr --output HEADLESS-1 --custom-mode 1600x900 >/dev/null 2>&1; sleep 1; shot 41-resolution-1600
+    check "display settings: resolution changes" "python3 -c \"from PIL import Image;import sys;sys.exit(0 if Image.open('$OUT/41-resolution-1600.png').size==(1600,900) else 1)\""
+    wlr-randr --output HEADLESS-1 --custom-mode 1920x1080 >/dev/null 2>&1; sleep 1
+  fi
 fi
 check "compositor survived the clicks" "kill -0 $WM"
 kill -TERM $WM 2>/dev/null; wait $WM; rc=$?

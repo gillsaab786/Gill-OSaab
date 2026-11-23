@@ -61,6 +61,9 @@
 #include <wlr/types/wlr_layer_shell_v1.h>
 #include <wlr/types/wlr_output.h>
 #include <wlr/types/wlr_output_layout.h>
+#include <wlr/types/wlr_output_management_v1.h>
+#include <wlr/types/wlr_output_power_management_v1.h>
+#include "wlr-output-power-management-unstable-v1-protocol.h"
 #include <wlr/types/wlr_pointer.h>
 #include <wlr/types/wlr_pointer_constraints_v1.h>
 #include <wlr/types/wlr_pointer_gestures_v1.h>
@@ -212,6 +215,10 @@ struct gs_server {
 	struct wlr_output_layout *output_layout;
 	struct wl_list outputs;
 	struct wl_listener new_output;
+	struct wlr_output_manager_v1 *output_mgr; /* Display settings: resolution, scale, arrangement */
+	struct wl_listener output_mgr_apply, output_mgr_test, layout_change;
+	struct wlr_output_power_manager_v1 *power_mgr; /* screen off/on (idle, "Screen Off") */
+	struct wl_listener output_power_set_mode;
 };
 
 struct gs_output {
@@ -247,6 +254,7 @@ struct gs_toplevel {
 	struct gs_anim min_anim;    /* minimise into / restore out of the Dock */
 	struct gs_slot ov;          /* place in Mission Control */
 	int ws;                     /* which space this window lives on */
+	bool in_overview;           /* has a place in the current Mission Control */
 	struct wl_listener request_move, request_resize, request_maximize, request_minimize, request_fullscreen;
 	bool mapped, placed, maximized, minimized, fullscreen, ssd, activated, tiled;
 	struct wlr_box saved; /* frame box before zoom/fullscreen */
@@ -353,8 +361,19 @@ static struct gs_output *first_output(struct gs_server *server) {
 	return output;
 }
 
-static struct wlr_box output_full_area(struct gs_server *server) {
-	struct gs_output *output = first_output(server);
+/* Several screens (e.g. handheld + XREAL glasses or a monitor): the screen at a point. */
+static struct gs_output *output_at(struct gs_server *server, double x, double y) {
+	struct wlr_output *wo = wlr_output_layout_output_at(server->output_layout, x, y);
+	struct gs_output *output;
+	wl_list_for_each(output, &server->outputs, link) {
+		if (output->wlr_output == wo) {
+			return output;
+		}
+	}
+	return first_output(server);
+}
+
+static struct wlr_box full_area_of(struct gs_server *server, struct gs_output *output) {
 	struct wlr_box box = { 0, 0, 1280, 720 };
 	if (output) {
 		wlr_output_layout_get_box(server->output_layout, output->wlr_output, &box);
@@ -362,12 +381,33 @@ static struct wlr_box output_full_area(struct gs_server *server) {
 	return box;
 }
 
-static struct wlr_box output_usable_area(struct gs_server *server) {
-	struct gs_output *output = first_output(server);
+static struct wlr_box usable_area_of(struct gs_server *server, struct gs_output *output) {
 	if (output && output->usable.width > 0 && output->usable.height > 0) {
 		return output->usable;
 	}
-	return output_full_area(server);
+	return full_area_of(server, output);
+}
+
+/* the screen the pointer is on: where new windows open, snapping, Mission Control */
+static struct gs_output *current_output(struct gs_server *server) {
+	return server->cursor ? output_at(server, server->cursor->x, server->cursor->y) : first_output(server);
+}
+
+static struct wlr_box output_full_area(struct gs_server *server) {
+	return full_area_of(server, current_output(server));
+}
+
+static struct wlr_box output_usable_area(struct gs_server *server) {
+	return usable_area_of(server, current_output(server));
+}
+
+/* all screens together */
+static struct wlr_box layout_area(struct gs_server *server) {
+	struct wlr_box box = { 0, 0, 1280, 720 };
+	if (!wl_list_empty(&server->outputs)) {
+		wlr_output_layout_get_box(server->output_layout, NULL, &box);
+	}
+	return box;
 }
 
 static struct gs_toplevel *focused_toplevel(struct gs_server *server) {
@@ -396,6 +436,11 @@ static int frame_w(struct gs_toplevel *t) {
 
 static int frame_h(struct gs_toplevel *t) {
 	return content_geo(t)->height + title_h(t);
+}
+
+/* the screen a window is mostly on */
+static struct gs_output *toplevel_output(struct gs_toplevel *t) {
+	return output_at(t->server, t->tree->node.x + frame_w(t) / 2.0, t->tree->node.y + frame_h(t) / 2.0);
 }
 
 static struct fx_corner_radii content_corners(struct gs_toplevel *t) {
@@ -554,7 +599,7 @@ static struct wlr_box minimize_target(struct gs_toplevel *t) {
 	if (t->dock_rect.width > 0 && t->dock_rect.height > 0) {
 		return t->dock_rect;
 	}
-	struct wlr_box full = output_full_area(t->server);
+	struct wlr_box full = full_area_of(t->server, toplevel_output(t));
 	return (struct wlr_box){ full.x + full.width / 2 - 32, full.y + full.height - 72, 64, 64 };
 }
 
@@ -596,11 +641,11 @@ static bool update_toplevel_visual(struct gs_toplevel *t, double now) {
 	}
 	/* spaces slide sideways; windows on spaces out of view are switched off */
 	double ws_off = (t->ws - server->ws_view);
-	struct wlr_box full = output_full_area(server);
+	struct wlr_box full = full_area_of(server, toplevel_output(t));
 	ox += ws_off * full.width;
 	bool hidden = t->minimized && !t->min_anim.active;
 	wlr_scene_node_set_enabled(&t->tree->node, t->mapped && !hidden && fabs(ws_off) < 0.999);
-	if (server->overview_t > 0 && !t->minimized && t->ws == server->ws) {
+	if (server->overview_t > 0 && !t->minimized && t->ws == server->ws && t->in_overview) {
 		double o = server->overview_t;
 		scale *= gs_lerp(1.0, t->ov.scale, o);
 		ox += (t->ov.cx - cx) * o;
@@ -924,7 +969,7 @@ static void overview_set(struct gs_server *server, bool on, struct gs_toplevel *
 		int w[64], h[64], n = 0;
 		struct gs_toplevel *t;
 		wl_list_for_each_reverse(t, &server->toplevels, link) { /* oldest first: stable places */
-			if (t->mapped && !t->minimized && t->ws == server->ws && n < 64) {
+			if (t->mapped && !t->minimized && t->ws == server->ws && toplevel_output(t) == current_output(server) && n < 64) {
 				list[n] = t;
 				w[n] = frame_w(t);
 				h[n] = frame_h(t);
@@ -937,8 +982,12 @@ static void overview_set(struct gs_server *server, bool on, struct gs_toplevel *
 		struct gs_slot slots[64];
 		struct wlr_box area = output_usable_area(server);
 		gs_overview_layout(n, w, h, area.x + 40, area.y + 40, area.width - 80, area.height - 80, slots);
+		wl_list_for_each(t, &server->toplevels, link) {
+			t->in_overview = false;
+		}
 		for (int i = 0; i < n; i++) {
 			list[i]->ov = slots[i];
+			list[i]->in_overview = true;
 		}
 		wlr_seat_pointer_clear_focus(server->seat);
 		server->cursor_mode = CURSOR_PASSTHROUGH;
@@ -958,18 +1007,16 @@ static void overview_set(struct gs_server *server, bool on, struct gs_toplevel *
 /* ------------------------------------------------------------------ layer shell */
 
 static void arrange_layers(struct gs_server *server) {
-	struct gs_output *output = first_output(server);
-	if (output == NULL) {
-		return;
-	}
-	struct wlr_box full = output_full_area(server);
+	struct gs_output *output;
+	wl_list_for_each(output, &server->outputs, link) {
+	struct wlr_box full = full_area_of(server, output);
 	struct wlr_box usable = full;
 	for (int pass = 0; pass < 2; pass++) {
 		for (int layer = ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY; layer >= ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND; layer--) {
 			struct gs_layer *l;
 			wl_list_for_each(l, &server->layer_surfaces, link) {
 				struct wlr_layer_surface_v1 *ls = l->layer_surface;
-				if (!ls->initialized || (int)ls->current.layer != layer) {
+				if (!ls->initialized || (int)ls->current.layer != layer || ls->output != output->wlr_output) {
 					continue;
 				}
 				bool exclusive = ls->current.exclusive_zone > 0;
@@ -981,10 +1028,12 @@ static void arrange_layers(struct gs_server *server) {
 		}
 	}
 	output->usable = usable;
-	wlr_scene_rect_set_size(server->layers.backdrop, full.width, full.height);
-	wlr_scene_node_set_position(&server->layers.backdrop->node, full.x, full.y);
-	wlr_scene_rect_set_size(server->layers.dim_rect, full.width, full.height);
-	wlr_scene_node_set_position(&server->layers.dim_rect->node, full.x, full.y);
+	}
+	struct wlr_box all = layout_area(server);
+	wlr_scene_rect_set_size(server->layers.backdrop, all.width, all.height);
+	wlr_scene_node_set_position(&server->layers.backdrop->node, all.x, all.y);
+	wlr_scene_rect_set_size(server->layers.dim_rect, all.width, all.height);
+	wlr_scene_node_set_position(&server->layers.dim_rect->node, all.x, all.y);
 }
 
 static struct wlr_scene_tree *layer_tree(struct gs_server *server, enum zwlr_layer_shell_v1_layer layer) {
@@ -1082,7 +1131,7 @@ static void layer_destroy(struct wl_listener *listener, void *data) {
 static void server_new_layer_surface(struct wl_listener *listener, void *data) {
 	struct gs_server *server = wl_container_of(listener, server, new_layer_surface);
 	struct wlr_layer_surface_v1 *ls = data;
-	struct gs_output *output = first_output(server);
+	struct gs_output *output = current_output(server);
 	if (ls->output == NULL) {
 		if (output == NULL) {
 			wlr_layer_surface_v1_destroy(ls);
@@ -1130,7 +1179,7 @@ static void set_maximized(struct gs_toplevel *t, bool maximized) {
 	}
 	if (maximized) {
 		t->saved = (struct wlr_box){ t->tree->node.x, t->tree->node.y, frame_w(t), frame_h(t) };
-		struct wlr_box area = output_usable_area(t->server);
+		struct wlr_box area = usable_area_of(t->server, toplevel_output(t));
 		wlr_scene_node_set_position(&t->tree->node, area.x, area.y);
 		t->maximized = true;
 		request_frame_size(t, area.width, area.height);
@@ -1151,7 +1200,7 @@ static void set_fullscreen(struct gs_toplevel *t, bool fullscreen) {
 		return;
 	}
 	if (fullscreen) {
-		struct wlr_box full = output_full_area(t->server);
+		struct wlr_box full = full_area_of(t->server, toplevel_output(t));
 		t->saved = (struct wlr_box){ t->tree->node.x, t->tree->node.y, frame_w(t), frame_h(t) };
 		t->fullscreen = true;
 		wlr_scene_node_reparent(&t->tree->node, t->server->layers.overlay);
@@ -1729,7 +1778,7 @@ static void handle_new_lock(struct wl_listener *listener, void *data) {
 	overview_set(server, false, NULL);
 	server->lock = lock;
 	server->locked = true;
-	struct wlr_box full = output_full_area(server);
+	struct wlr_box full = layout_area(server);
 	wlr_scene_rect_set_size(server->lock_bg, full.width, full.height);
 	wlr_scene_node_set_position(&server->lock_bg->node, full.x, full.y);
 	wlr_scene_node_set_enabled(&server->lock_tree->node, true);
@@ -2518,6 +2567,96 @@ static void output_request_state(struct wl_listener *listener, void *data) {
 	arrange_layers(output->server);
 }
 
+/* ---- several screens: Display settings (wlr-output-management) and unplugging */
+
+static void update_output_config(struct gs_server *server) {
+	struct wlr_output_configuration_v1 *config = wlr_output_configuration_v1_create();
+	struct gs_output *output;
+	wl_list_for_each(output, &server->outputs, link) {
+		struct wlr_output_configuration_head_v1 *head =
+			wlr_output_configuration_head_v1_create(config, output->wlr_output);
+		struct wlr_box box;
+		wlr_output_layout_get_box(server->output_layout, output->wlr_output, &box);
+		head->state.enabled = output->wlr_output->enabled;
+		head->state.x = box.x;
+		head->state.y = box.y;
+	}
+	wlr_output_manager_v1_set_configuration(server->output_mgr, config);
+}
+
+/* windows left on a screen that went away (glasses unplugged) come back to the main screen */
+static void rescue_windows(struct gs_server *server) {
+	struct gs_toplevel *t;
+	wl_list_for_each(t, &server->toplevels, link) {
+		double cx = t->tree->node.x + frame_w(t) / 2.0, cy = t->tree->node.y + frame_h(t) / 2.0;
+		if (t->mapped && wlr_output_layout_output_at(server->output_layout, cx, cy) == NULL) {
+			struct wlr_box area = usable_area_of(server, first_output(server));
+			wlr_scene_node_set_position(&t->tree->node, area.x + (area.width - frame_w(t)) / 2,
+				area.y + (area.height - frame_h(t)) / 2);
+			t->maximized = t->tiled = false;
+		}
+	}
+}
+
+static void layout_change(struct wl_listener *listener, void *data) {
+	struct gs_server *server = wl_container_of(listener, server, layout_change);
+	arrange_layers(server);
+	rescue_windows(server);
+	update_output_config(server);
+	schedule_frames(server);
+}
+
+static void output_mgr_apply_or_test(struct gs_server *server, struct wlr_output_configuration_v1 *config, bool test) {
+	bool ok = true;
+	struct wlr_output_configuration_head_v1 *head;
+	wl_list_for_each(head, &config->heads, link) {
+		struct wlr_output *wo = head->state.output;
+		struct wlr_output_state state;
+		wlr_output_state_init(&state);
+		wlr_output_head_v1_state_apply(&head->state, &state);
+		ok = ok && (test ? wlr_output_test_state(wo, &state) : wlr_output_commit_state(wo, &state));
+		wlr_output_state_finish(&state);
+		if (ok && !test) {
+			if (head->state.enabled) {
+				wlr_output_layout_add(server->output_layout, wo, head->state.x, head->state.y);
+			} else {
+				wlr_output_layout_remove(server->output_layout, wo);
+			}
+		}
+	}
+	if (ok) {
+		wlr_output_configuration_v1_send_succeeded(config);
+	} else {
+		wlr_output_configuration_v1_send_failed(config);
+	}
+	wlr_output_configuration_v1_destroy(config);
+	if (!test) {
+		update_output_config(server);
+	}
+}
+
+static void output_mgr_apply(struct wl_listener *listener, void *data) {
+	struct gs_server *server = wl_container_of(listener, server, output_mgr_apply);
+	output_mgr_apply_or_test(server, data, false);
+}
+
+static void output_mgr_test(struct wl_listener *listener, void *data) {
+	struct gs_server *server = wl_container_of(listener, server, output_mgr_test);
+	output_mgr_apply_or_test(server, data, true);
+}
+
+static void output_power_set_mode(struct wl_listener *listener, void *data) {
+	struct wlr_output_power_v1_set_mode_event *event = data;
+	struct wlr_output_state state;
+	wlr_output_state_init(&state);
+	wlr_output_state_set_enabled(&state, event->mode == ZWLR_OUTPUT_POWER_V1_MODE_ON);
+	wlr_output_commit_state(event->output, &state);
+	wlr_output_state_finish(&state);
+	if (event->mode == ZWLR_OUTPUT_POWER_V1_MODE_ON) {
+		wlr_output_schedule_frame(event->output);
+	}
+}
+
 static void output_destroy(struct wl_listener *listener, void *data) {
 	struct gs_output *output = wl_container_of(listener, output, destroy);
 	wl_list_remove(&output->frame.link);
@@ -2789,6 +2928,16 @@ int main(int argc, char *argv[]) {
 	wl_signal_add(&server.idle_inhibit->events.new_inhibitor, &server.new_inhibitor);
 
 	server.output_layout = wlr_output_layout_create(server.display);
+	server.layout_change.notify = layout_change;
+	wl_signal_add(&server.output_layout->events.change, &server.layout_change);
+	server.output_mgr = wlr_output_manager_v1_create(server.display);
+	server.output_mgr_apply.notify = output_mgr_apply;
+	wl_signal_add(&server.output_mgr->events.apply, &server.output_mgr_apply);
+	server.output_mgr_test.notify = output_mgr_test;
+	wl_signal_add(&server.output_mgr->events.test, &server.output_mgr_test);
+	server.power_mgr = wlr_output_power_manager_v1_create(server.display);
+	server.output_power_set_mode.notify = output_power_set_mode;
+	wl_signal_add(&server.power_mgr->events.set_mode, &server.output_power_set_mode);
 	wlr_xdg_output_manager_v1_create(server.display, server.output_layout);
 	wl_list_init(&server.outputs);
 	server.new_output.notify = server_new_output;
@@ -2952,6 +3101,7 @@ int main(int argc, char *argv[]) {
 		&server.swipe_begin, &server.swipe_update, &server.swipe_end, &server.pinch_begin, &server.pinch_update,
 		&server.pinch_end, &server.hold_begin, &server.hold_end, &server.touch_down, &server.touch_up,
 		&server.touch_motion, &server.touch_cancel, &server.touch_frame,
+		&server.layout_change, &server.output_mgr_apply, &server.output_mgr_test, &server.output_power_set_mode,
 	};
 	for (size_t i = 0; i < sizeof(server_listeners) / sizeof(server_listeners[0]); i++) {
 		wl_list_remove(&server_listeners[i]->link);
