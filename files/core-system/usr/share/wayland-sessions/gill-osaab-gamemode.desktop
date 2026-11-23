@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=Game Mode
+Comment=Steam, full screen, controller first (like SteamOS)
+Exec=/usr/libexec/gill-osaab/gosaab-gamemode-session
+Type=Application
+DesktopNames=gamescope

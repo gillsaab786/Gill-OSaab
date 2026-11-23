@@ -1629,6 +1629,12 @@ static void spawn(const char *cmd) {
 		return;
 	}
 	if (fork() == 0) {
+		/* apps must not inherit our signal setup: the event loop blocks signals and we ignore
+		 * SIGCHLD, and both survive exec (apps would then fail to wait for their own children) */
+		sigset_t all;
+		sigemptyset(&all);
+		sigprocmask(SIG_SETMASK, &all, NULL);
+		signal(SIGCHLD, SIG_DFL);
 		setsid();
 		execl("/bin/sh", "/bin/sh", "-c", cmd, (void *)NULL);
 		_exit(127);

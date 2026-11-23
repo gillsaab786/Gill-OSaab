@@ -1,0 +1,17 @@
+#!/bin/sh
+# Runs inside gosaab-wm once the desktop is up: services, wallpaper, the shell UI.
+dbus-update-activation-environment --systemd WAYLAND_DISPLAY DISPLAY XDG_CURRENT_DESKTOP \
+  XDG_SESSION_TYPE QT_QPA_PLATFORM 2>/dev/null || \
+  systemctl --user import-environment WAYLAND_DISPLAY DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE
+WALL=/usr/share/wallpapers/GillOSaab/contents/images_dark/3840x2160.png
+[ -f "$HOME/.config/gill-osaab/wallpaper" ] && WALL=$(cat "$HOME/.config/gill-osaab/wallpaper")
+swaybg -i "$WALL" -m fill &
+# password prompts for system changes
+for agent in /usr/libexec/lxqt-policykit-agent /usr/bin/lxqt-policykit-agent /usr/libexec/polkit-gnome-authentication-agent-1; do
+  [ -x "$agent" ] && { "$agent" & break; }
+done
+# the menu bar, Dock, notifications, Control Centre, Spotlight, Launchpad, lock screen
+while :; do
+  qs -c gill-osaab
+  sleep 1 # restart the shell if it ever crashes; the desktop keeps running
+done

@@ -1,0 +1,14 @@
+#!/bin/sh
+# (root) Make the login screen sign USER straight into SESSION next time (and after logout).
+# Called through pkexec by gosaab-game-mode / steamos-session-select.
+set -eu
+user=$1 session=$2
+case "$session" in gill-osaab|gill-osaab-gamemode) ;; *) echo "unknown session" >&2; exit 2 ;; esac
+id "$user" >/dev/null 2>&1 || { echo "unknown user" >&2; exit 2; }
+mkdir -p /etc/sddm.conf.d
+cat > /etc/sddm.conf.d/zz-gill-osaab-autologin.conf <<CONF
+[Autologin]
+User=$user
+Session=$session.desktop
+Relogin=true
+CONF

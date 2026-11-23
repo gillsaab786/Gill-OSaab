@@ -1,0 +1,12 @@
+#!/bin/sh
+# SteamOS-compatible: Steam's "Switch to Desktop" calls this. Also: gamescope / desktop.
+case "${1:-desktop}" in
+  gamescope|game*) target=gill-osaab-gamemode ;;
+  *) target=gill-osaab ;;
+esac
+pkexec /usr/libexec/gill-osaab/gosaab-session-select-root "$USER" "$target" || exit 1
+if [ "$target" = gill-osaab ]; then
+  steam -shutdown >/dev/null 2>&1 &    # leaving Game Mode: Steam closes, login screen relogs into the desktop
+else
+  loginctl terminate-session "${XDG_SESSION_ID:-}" 2>/dev/null || pkill -TERM gosaab-wm
+fi

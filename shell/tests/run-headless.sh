@@ -345,6 +345,14 @@ EOF8
   else
     echo "FAIL: X11 support (xwayland-satellite) not available"; fail=1
   fi
+  # the login screen theme, in SDDM's test mode
+  if command -v sddm-greeter-qt6 >/dev/null; then
+    pkill xclock; sleep 0.5
+    sddm-greeter-qt6 --test-mode --theme "$(pwd)/shell/sddm-theme" >"$OUT/sddm-greeter.log" 2>&1 &
+    sleep 4; shot 44-login-screen
+    check "login screen theme loads" "! grep -iE 'error|is not a type|ReferenceError|TypeError' $OUT/sddm-greeter.log && pgrep -f sddm-greeter-qt6 >/dev/null"
+    pkill -f sddm-greeter-qt6
+  fi
   check "shell has no QML errors" "! grep -v pipewire $OUT/quickshell.log | grep -E 'ERROR|TypeError|ReferenceError|is not a type|is not defined|Cannot assign|Could not load icon'"
   grep -E "WARN|ERROR|TypeError|ReferenceError|is not|Cannot" "$OUT/quickshell.log" | sort | uniq -c | sort -rn | head -15
   check "compositor survived the shell" "kill -0 $WM"

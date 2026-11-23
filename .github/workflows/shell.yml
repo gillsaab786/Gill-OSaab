@@ -27,7 +27,7 @@ jobs:
                 dejavu-sans-mono-fonts python3-pillow procps-ng \
                 pango-devel cairo-devel libdrm-devel rsms-inter-fonts >/dev/null
               dnf -y -q install dbus-daemon libnotify adwaita-icon-theme qt6-qtsvg qt6-qtwayland >/dev/null
-              dnf -y -q install xwayland-satellite xorg-x11-server-Xwayland >/dev/null || echo "no xwayland-satellite package"
+              dnf -y -q install xwayland-satellite xorg-x11-server-Xwayland xkeyboard-config sddm >/dev/null || echo "no xwayland-satellite package"
               dnf -y -q install xclock >/dev/null 2>&1 || dnf -y -q install xorg-x11-apps >/dev/null 2>&1 || echo "no xclock"
               dnf -y -q install quickshell >/dev/null 2>&1 || { dnf -y -q install dnf-plugins-core >/dev/null; \
                 dnf -y -q copr enable errornointernet/quickshell >/dev/null; dnf -y -q install quickshell >/dev/null; }
@@ -35,7 +35,12 @@ jobs:
               meson setup shell/compositor/build shell/compositor
               meson compile -C shell/compositor/build
               meson test -C shell/compositor/build --print-errorlogs
-              bash shell/tests/run-headless.sh shell/compositor/build artifacts'
+              bash shell/tests/run-headless.sh shell/compositor/build artifacts
+              echo "== install into the system, as the Core image build does"
+              bash shell/install.sh "$PWD/shell" >/tmp/install.log 2>&1 || { tail -30 /tmp/install.log; exit 1; }
+              test -x /usr/bin/gosaab-wm && test -f /etc/xdg/quickshell/gill-osaab/shell.qml && test -f /usr/share/sddm/themes/gill-osaab/Main.qml
+              for f in files/core-system/usr/bin/* files/core-system/usr/libexec/gill-osaab/*; do sh -n "$f" || exit 1; done
+              echo "PASS: install.sh installs the desktop; session scripts parse"'
       - name: Upload screenshots and logs
         if: always()
         uses: actions/upload-artifact@v4

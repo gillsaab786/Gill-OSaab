@@ -1,0 +1,3 @@
+#!/bin/sh
+# Switch from the desktop to Game Mode (Control Centre / logo menu / Steam).
+exec steamos-session-select gamescope

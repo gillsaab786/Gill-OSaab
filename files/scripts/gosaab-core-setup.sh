@@ -21,13 +21,16 @@ mkdir -p /etc/flatpak/remotes.d
 curl -fsSL --retry 3 -o /etc/flatpak/remotes.d/flathub.flatpakrepo \
     https://dl.flathub.org/repo/flathub.flatpakrepo || log "warning: could not fetch Flathub repo file"
 
-# Plasma on Wayland is the only session
+# Login screen: Gill-OSaab theme, Wayland greeter; sessions: Gill-OSaab desktop + Game Mode
 mkdir -p /etc/sddm.conf.d
 cat > /etc/sddm.conf.d/10-gill-osaab.conf <<'EOF'
 [General]
 DisplayServer=wayland
 [Theme]
-Current=breeze
+Current=gill-osaab
+CursorTheme=Adwaita
 EOF
+# Game Mode switching needs no password for the person at the screen (polkit allow_active)
+chmod 0755 /usr/libexec/gill-osaab/gosaab-session-select-root 2>/dev/null || true
 
 log "core setup complete"

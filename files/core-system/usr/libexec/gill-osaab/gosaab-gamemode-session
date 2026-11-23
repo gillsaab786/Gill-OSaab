@@ -1,0 +1,5 @@
+#!/bin/sh
+# Game Mode: Steam's big-picture UI in gamescope, like SteamOS.
+export STEAM_MULTIPLE_XWAYLANDS=1 STEAM_GAMESCOPE_VRR_SUPPORTED=1 STEAM_USE_MANGOAPP=1
+export STEAM_DISABLE_MANGOAPP_ATOM_WORKAROUND=1 STEAM_GAMESCOPE_HDR_SUPPORTED=1
+exec gamescope -e -f --adaptive-sync --mangoapp -- steam -gamepadui -steamos3 -steampal -steamdeck

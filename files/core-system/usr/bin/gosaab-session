@@ -1,0 +1,15 @@
+#!/bin/sh
+# Starts the Gill-OSaab desktop session (chosen at the login screen).
+export XDG_CURRENT_DESKTOP=Gill-OSaab
+export XDG_SESSION_DESKTOP=gill-osaab
+export XDG_SESSION_TYPE=wayland
+export QT_QPA_PLATFORM="wayland;xcb"
+export QT_WAYLAND_DISABLE_WINDOWDECORATION=1
+export GDK_BACKEND="wayland,x11"
+export MOZ_ENABLE_WAYLAND=1
+export ELECTRON_OZONE_PLATFORM_HINT=auto
+export SDL_VIDEODRIVER="wayland,x11"
+export XCURSOR_THEME="${XCURSOR_THEME:-Adwaita}"
+export XCURSOR_SIZE="${XCURSOR_SIZE:-24}"
+export GOSAAB_TERMINAL="${GOSAAB_TERMINAL:-foot}"
+exec gosaab-wm -s /usr/libexec/gill-osaab/gosaab-session-start
