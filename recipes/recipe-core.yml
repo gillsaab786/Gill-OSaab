@@ -17,6 +17,7 @@ modules:
         - bieszczaders/kernel-cachyos-addons # gaming CPU schedulers (scx)
         - errornointernet/quickshell # newest Quickshell (the shell UI toolkit)
         - hhd-dev/hhd # Handheld Daemon: TDP, fans, controller buttons in Steam's quick menu
+        - jackgreiner/lsfg-vk-git # frame generation layer (lsfg-vk)
     install:
       skip-unavailable: true
       packages:
@@ -76,6 +77,7 @@ modules:
         - hhd-ui
         - adjustor
         - ryzenadj
+        - lsfg-vk
         - mangohud
         - scx-scheds
         - scx-tools

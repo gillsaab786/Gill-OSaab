@@ -109,7 +109,7 @@ PanelWindow {
                 delegate: Rectangle {
                     required property var modelData
                     required property int index
-                    width: list.width; height: 44; radius: 10
+                    width: list.width; height: 44; radius: 22
                     color: index === spot.selected ? Theme.accent : "transparent"
                     Row {
                         anchors { left: parent.left; leftMargin: 10; verticalCenter: parent.verticalCenter }
