@@ -276,6 +276,19 @@ static void apply_toplevel_visual(struct gs_toplevel *t, float scale, float alph
 	int dx = (int)lroundf(geo->width * (1.0f - scale) / 2.0f);
 	int dy = (int)lroundf(geo->height * (1.0f - scale) / 2.0f);
 	wlr_scene_node_set_position(&t->xdg_tree->node, dx, dy);
+	/* blur and shadow follow the scaled window so no frame shows around it */
+	int sw = geo->width - dx * 2, sh = geo->height - dy * 2;
+	if (sw > 0 && sh > 0) {
+		int sigma = (int)SHADOW_SIGMA;
+		wlr_scene_blur_set_size(t->blur, sw, sh);
+		wlr_scene_node_set_position(&t->blur->node, dx, dy);
+		wlr_scene_shadow_set_size(t->shadow, sw + sigma * 2, sh + sigma * 2);
+		wlr_scene_node_set_position(&t->shadow->node, dx - sigma, dy - sigma + SHADOW_OFFSET_Y);
+		wlr_scene_shadow_set_clipped_region(t->shadow, (struct clipped_region){
+			.corners = corner_radii_all(t->maximized ? 0 : CORNER_RADIUS),
+			.area = { sigma, sigma - SHADOW_OFFSET_Y, sw, sh },
+		});
+	}
 	struct visual_args args = { t, scale, alpha };
 	wlr_scene_node_for_each_buffer(&t->xdg_tree->node, style_buffer, &args);
 	float shadow_color[4] = { 0.0f, 0.0f, 0.0f, 0.55f * alpha };
