@@ -1,0 +1,33 @@
+name: core-image-smoke-test
+# Boots the real Gill-OSaab Core desktop from the published image (headless, software GPU)
+# and checks everything is installed and starts. Screenshots go to the core-shots branch.
+on:
+  workflow_run:
+    workflows: [build-gill-osaab]
+    types: [completed]
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Virtual GPU
+        run: sudo modprobe vgem; sudo modprobe vkms; ls -l /dev/dri
+      - name: Run the Core desktop from the image
+        run: |
+          echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          mkdir -p core-shots
+          docker run --rm --privileged -v /dev/dri:/dev/dri -v "$PWD":/src -w /src \
+            ghcr.io/${{ github.repository_owner }}/gill-osaab-core:latest bash /src/shell/tests/core-smoke.sh /src/core-shots
+      - name: Publish screenshots to the core-shots branch
+        if: always()
+        run: |
+          sudo chown -R "$(id -u)" core-shots 2>/dev/null || exit 0
+          cd core-shots && git init -q && git checkout -q -b core-shots
+          git add -A && git -c user.name=gill-osaab-ci -c user.email=ci@gill-osaab.local commit -qm "core screens"
+          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" core-shots
