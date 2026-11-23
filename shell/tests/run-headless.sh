@@ -25,6 +25,12 @@ for card in /sys/class/drm/card[0-9]*; do
   fi
 done
 export MESA_LOADER_DRIVER_OVERRIDE=${MESA_LOADER_DRIVER_OVERRIDE:-kms_swrast}
+# Default: pure software GPU (llvmpipe) with udmabuf-backed buffers, no device node needed
+if [ "${GOSAAB_TEST_GPU:-software}" = software ]; then
+  unset GOSAAB_RENDER_CARD MESA_LOADER_DRIVER_OVERRIDE
+  export WLR_RENDERER_FORCE_SOFTWARE=1
+  ls -la /dev/udmabuf || true
+fi
 echo "render device: ${GOSAAB_RENDER_CARD:-auto}"
 
 fail=0
