@@ -20,7 +20,9 @@ Done 2026-11-24 (morning): touch-size window buttons in a glass pill + bigger sh
 batteries + 20%/10% reminders, Brave default (sandboxed, /usr/lib/brave.com), Android on by default
 (first sign-in, progress) + Settings on/off, Bazaar + Play Store + Bottles, drivers (printers,
 scanners, docks, sensors, fwupd) + every part listed, progress rings (boot screen, notifications,
-Settings), platform name prefixes only for duplicates. Open: lens shader, controller nav, 3D depth.
+Settings), platform name prefixes only for duplicates. Later: controller-as-mouse on the desktop
+(gosaab-gamepad, View+Menu toggles), Launchpad D-pad selection, Liquid Glass lens (patched scenefx
+in subprojects/, `wlr_scene_blur_set_lens`). Open: 3D depth slider (emulator-side today).
 Done 2026-11-24: 1 touch, 2 tap/natural scroll (+Settings), 3 pinch/hold to apps, 4 snapping,
 5 desktop progress notifications, 7 DXVK + 32/64-bit test, 8 Android setup (multi-window, libndk),
 9 sandbox + App Folders, 10 ~/Android + Android download folder. 6 Android notifications (adb bridge), VPN switch + import (Settings, Control Centre), cloud drives
