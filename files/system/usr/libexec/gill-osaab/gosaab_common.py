@@ -61,6 +61,75 @@ def log(tool, message):
         pass
 
 
+class Progress:
+    """A progress item in the notification area (percentage, message, done/failed).
+
+    Uses the KDE job protocol, which KDE Plasma shows in desktop mode and the
+    Gill-OSaab hub shows in Game Mode. Falls back to plain notifications.
+    """
+
+    def __init__(self, title, app="gosaab-settings"):
+        self.title, self.app = title, app
+        self.path = None
+        self.bus = None
+        self.notify_id = None
+
+    def _call(self, path, iface, method, args):
+        return self.bus.call_sync("org.kde.JobViewServer", path, iface, method, args, None, 0, 2000, None)
+
+    def start(self, message=""):
+        try:
+            import gi
+            gi.require_version("Gio", "2.0")
+            from gi.repository import Gio, GLib
+            self.bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+            reply = self._call("/JobViewServer", "org.kde.JobViewServerV2", "requestView",
+                               GLib.Variant("(sia{sv})", (self.app, 0, {})))
+            self.path = reply.unpack()[0]
+            self.update(message=message)
+        except Exception:  # no session bus, no job server or no PyGObject
+            self.path = None
+            self._fallback(message or "Starting…", None)
+        return self
+
+    def update(self, percent=None, message=None):
+        if self.path:
+            from gi.repository import GLib
+            props = {"title": GLib.Variant("s", self.title)}
+            if message is not None:
+                props["infoMessage"] = GLib.Variant("s", message)
+            if percent is not None:
+                props["percent"] = GLib.Variant("u", max(0, min(100, int(percent))))
+            try:
+                self._call(self.path, "org.kde.JobViewV3", "update", GLib.Variant("(a{sv})", (props,)))
+            except Exception:
+                pass
+        elif percent is not None:
+            self._fallback(message or self.title, percent)
+
+    def finish(self, ok=True, message=""):
+        if self.path:
+            from gi.repository import GLib
+            try:
+                self._call(self.path, "org.kde.JobViewV3", "terminate",
+                           GLib.Variant("(usa{sv})", (0 if ok else 1, "" if ok else (message or "Failed"), {})))
+            except Exception:
+                pass
+        if message:
+            notify(self.title, message, "normal" if ok else "critical")
+
+    def _fallback(self, body, percent):
+        if not shutil.which("notify-send"):
+            return
+        cmd = ["notify-send", "-a", "Gill-OSaab", "-p", self.title, body]
+        if percent is not None:
+            cmd[1:1] = ["-h", f"int:value:{int(percent)}"]
+        if self.notify_id:
+            cmd[1:1] = ["-r", self.notify_id]
+        out = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        self.notify_id = out.stdout.strip() or self.notify_id
+
+
 def notify(title, body="", urgency="normal"):
     """Desktop notification; silently skipped when notify-send is missing."""
     if shutil.which("notify-send"):

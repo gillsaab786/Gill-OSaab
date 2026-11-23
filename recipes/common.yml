@@ -19,6 +19,7 @@ modules:
         - rsms-inter-fonts
         - papirus-icon-theme
         - python3-pyside6
+        - python3-gobject
 
   # Enables Gill-OSaab services, disables stock updaters, refreshes app/MIME databases
   - type: script

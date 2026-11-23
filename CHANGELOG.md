@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.1.0 (2026-11-23)
+
+- Notifications with live progress in Game Mode: `gosaab-notify-hub` takes the standard
+  notification, KDE job (V1 + V2) and launcher-progress services in the Steam session
+- Gill-OSaab Notifications Decky plugin: pop-ups and a Quick Access tab with progress bars,
+  Cancel, Dismiss, Clear all; auto-installed and updated at boot when Decky is present
+- `gosaab-open` reports live progress (works in desktop mode and Game Mode)
+- Settings: Game Mode notifications status line
+- 53 tests, including a live D-Bus test of the hub
+
 ## 1.0.0 (2026-11-23)
 
 First build (Phase 1 and part of Phase 2).

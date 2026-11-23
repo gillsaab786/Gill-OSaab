@@ -48,3 +48,14 @@ gosaab-install-xreal:
         https://github.com/wheaney/breezy-desktop/releases/latest/download/breezy_vulkan_setup
     chmod +x "$tmp/breezy_vulkan_setup"
     sudo "$tmp/breezy_vulkan_setup"
+
+# Notifications + live progress in Game Mode (installs Decky Loader if needed)
+gosaab-setup-notifications:
+    #!/usr/bin/bash
+    set -euo pipefail
+    if ! systemctl list-unit-files plugin_loader.service >/dev/null 2>&1; then
+        echo "Installing Decky Loader first..."
+        ujust setup-decky
+    fi
+    sudo /usr/libexec/gill-osaab/gosaab-decky-sync
+    echo "Done. Open Quick Access (Armoury Crate / ... button) > Decky > Gill-OSaab Notifications."

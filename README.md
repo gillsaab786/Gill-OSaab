@@ -10,7 +10,7 @@ Gill-OSaab features below.
 | Handheld | `ghcr.io/gillsaab786/gill-osaab` | ROG Ally, GPD Win Max 2, Steam Deck. Boots into Game Mode |
 | Desktop | `ghcr.io/gillsaab786/gill-osaab-desktop` | Intel/AMD desktops and laptops. Boots to the desktop |
 
-## What's in 1.0.0
+## What's in 1.1.0
 
 **One-click apps** (`gosaab-open`, the default for these files):
 
@@ -34,6 +34,15 @@ Gill-OSaab features below.
 installs or Steam downloads run. The device stays awake and the screen comes back with "Done"
 when the work finishes. Run it again to wake early. `--overnight` sleeps after "Done".
 
+**Notifications with live progress, in desktop mode and Game Mode**: downloads, file copies,
+installs and app notifications show percentages, like Android. In desktop mode KDE Plasma's
+notification panel shows them. In Game Mode the Gill-OSaab hub collects them and the
+**Gill-OSaab Notifications** Decky plugin shows pop-ups plus a Quick Access tab with live progress
+bars, Cancel and Dismiss. Anything that reports progress the standard Linux ways appears: KDE jobs
+(Dolphin, KIO), the notification progress hint and launcher progress bars (Chromium-based
+browsers). Apps that never report a percentage, like Firefox without its browser extension or
+Windows apps, still show their normal notifications. Gill-OSaab's own installer reports progress too.
+
 **Look and feel**: dark Gill-OSaab colour scheme with a teal accent, Inter font, Papirus icons,
 a macOS-style top bar (menu, app menu, tray, clock) and a floating, centred dock that moves out of
 the way of windows. Window buttons sit on the left, Magic Lamp minimise and blur are on, and the
@@ -54,6 +63,8 @@ what updates.
    ```
 4. In desktop mode, apply the look once: `ujust gosaab-apply-look` (new users get it automatically).
 5. One-time Android setup: `ujust setup-waydroid`.
+6. Game Mode notifications: `ujust gosaab-setup-notifications` (installs Decky Loader if needed;
+   the plugin then updates itself with every Gill-OSaab update).
 
 Going back is one command: `rpm-ostree rollback` (or pick the previous entry at boot).
 
@@ -66,6 +77,7 @@ Going back is one command: `rpm-ostree rollback` (or pick the previous entry at 
 | `gosaab-updates` | Show switches; `gosaab-updates all off`, `os on`, `now` |
 | `gosaab-screen-off` | Screen off until tasks finish; `--overnight` |
 | `ujust gosaab-status` | Check every component |
+| `ujust gosaab-setup-notifications` | Game Mode notifications and progress (Decky plugin) |
 | `ujust gosaab-install-xreal` | XREAL glasses support for games (Breezy; trial, then paid features) |
 
 ## Phase 1 test checklist (GPD)
@@ -78,6 +90,8 @@ Going back is one command: `rpm-ostree rollback` (or pick the previous entry at 
 - [ ] Double-click an `.AppImage` and a `.deb`
 - [ ] Gill-OSaab Settings: flip each update switch and reopen; the switches persist
 - [ ] Screen-off during a Firefox download; the screen returns when it finishes
+- [ ] Game Mode: copy a big file in Desktop mode's Dolphin, switch to Game Mode, and check Quick
+      Access > Gill-OSaab Notifications shows its progress; pop-up when done
 - [ ] Top bar + dock + wallpaper look right, Dark/Light switch works
 - [ ] `ujust gosaab-status` shows everything ready
 

@@ -59,6 +59,9 @@ class Backend:
         except OSError:
             return False
 
+    def decky_plugin_installed(self):
+        return (Path.home() / "homebrew/plugins/gill-osaab-notify/plugin.json").exists()
+
     def kde_night_light(self):
         out = subprocess.run(["kreadconfig6", "--file", "kwinrc", "--group", "NightColor", "--key", "Active"],
                              capture_output=True, text=True, check=False) if self.have("kreadconfig6") else None
@@ -379,6 +382,7 @@ class Settings(QMainWindow):
             ("Gaming CPU scheduler", b.service_active("scx_loader.service")),
             ("NTSYNC", b.module_loaded("ntsync")),
             ("Gill-OSaab updater", b.service_active("gosaab-update.timer")),
+            ("Game Mode notifications (Decky)", b.decky_plugin_installed()),
         ]
         rows = []
         for name, ok in checks:

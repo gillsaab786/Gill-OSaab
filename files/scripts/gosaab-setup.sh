@@ -19,6 +19,10 @@ done
 systemctl --global disable flatpak-user-update.timer >/dev/null 2>&1 || true
 systemctl enable gosaab-update.timer
 
+# --- Notifications in Game Mode (starts and stops with the Steam session)
+systemctl --global enable gosaab-notify-hub.service || log "warning: could not enable notify hub"
+systemctl enable gosaab-decky-sync.service
+
 # --- Performance: gaming CPU scheduler (scx_lavd) when the loader exists
 if systemctl list-unit-files scx_loader.service >/dev/null 2>&1; then
     systemctl enable scx_loader.service || log "warning: could not enable scx_loader"

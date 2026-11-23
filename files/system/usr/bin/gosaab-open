@@ -22,7 +22,7 @@ from pathlib import Path
 
 sys.path.insert(0, "/usr/libexec/gill-osaab")
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "../libexec/gill-osaab"))
-from gosaab_common import ETC, is_on, log, notify, read_conf  # noqa: E402
+from gosaab_common import ETC, Progress, is_on, log, notify, read_conf  # noqa: E402
 
 DATA = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share"))
 PREFIXES = DATA / "gill-osaab" / "wine"
@@ -307,8 +307,26 @@ class SetupNeeded(Exception):
     pass
 
 
-def execute(steps):
-    for step in steps:
+STEP_MESSAGES = {
+    "prepare_prefix": "Preparing Windows support", "stage_file": "Copying installer into its sandbox",
+    "fix_menu_entries": "Adding to app menu", "require_waydroid": "Starting Android",
+    "install_appimage": "Installing", "ensure_box": "Preparing Linux container",
+    "export_apps": "Adding to app menu", "make_executable": "Preparing",
+}
+
+
+def step_message(step):
+    if step[0] == "call":
+        return STEP_MESSAGES.get(step[1], "Working")
+    name = Path(step[1][0]).name
+    return {"wine": "Running", "bwrap": "Running", "waydroid": "Installing Android app",
+            "distrobox": "Installing package", "flatpak": "Installing Flatpak"}.get(name, "Running")
+
+
+def execute(steps, progress=None):
+    for i, step in enumerate(steps):
+        if progress:
+            progress.update(percent=i * 100 // len(steps), message=step_message(step))
         if step[0] == "call":
             ACTIONS[step[1]](*step[2])
         else:
@@ -357,16 +375,19 @@ def main(argv):
                 print("  " + line)
             continue
         log("open", f"{f}: {kind}")
+        installs = kind not in ("exe", "msi", "appimage", "elf")
+        verb = "Installing" if installs else "Opening"
+        progress = Progress(f"{verb} {Path(f).name}", app="gosaab-open").start("Starting")
         try:
-            execute(steps)
-            if kind not in ("exe", "msi", "appimage", "elf"):
-                notify("Installed", f"{Path(f).name} is ready in your app menu.")
+            execute(steps, progress)
+            progress.finish(True, "Ready in your app menu." if installs else "")
         except SetupNeeded as exc:
+            progress.finish(False, "")
             notify("One-time setup needed", str(exc), "critical")
             status = 1
         except (RuntimeError, subprocess.CalledProcessError, OSError) as exc:
             log("open", f"error: {exc}")
-            notify("Couldn't open app", f"{Path(f).name}: {exc}", "critical")
+            progress.finish(False, f"Couldn't open {Path(f).name}: {exc}")
             status = 1
     return status
 

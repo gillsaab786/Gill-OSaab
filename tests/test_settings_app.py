@@ -44,6 +44,9 @@ class FakeBackend:
     def kde_night_light(self):
         return False
 
+    def decky_plugin_installed(self):
+        return False
+
     def color_scheme(self):
         return "GillOSaabDark"
 

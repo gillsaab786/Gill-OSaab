@@ -1,0 +1,10 @@
+[Unit]
+Description=Install or update the Gill-OSaab Notifications Decky plugin
+After=local-fs.target plugin_loader.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/gill-osaab/gosaab-decky-sync
+
+[Install]
+WantedBy=multi-user.target

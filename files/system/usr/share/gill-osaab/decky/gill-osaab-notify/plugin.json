@@ -1,0 +1,11 @@
+{
+  "name": "Gill-OSaab Notifications",
+  "author": "GILL-Saab",
+  "flags": [],
+  "api_version": 1,
+  "publish": {
+    "tags": ["notifications", "progress", "gill-osaab"],
+    "description": "Pop-ups and live progress bars for downloads, copies, installs and app notifications in Game Mode.",
+    "image": ""
+  }
+}
