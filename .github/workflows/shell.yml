@@ -25,3 +25,23 @@ jobs:
           dnf -y -q copr enable errornointernet/quickshell >/dev/null 2>&1 && \
             echo "copr quickshell: $(dnf -q repoquery --latest-limit 1 --qf '%{version}' quickshell | head -1)" || \
             echo "copr quickshell: unavailable"
+
+  probe-gpu:
+    name: Probe virtual GPU
+    runs-on: ubuntu-latest
+    steps:
+      - name: Load virtual KMS / GEM drivers
+        run: |
+          uname -r
+          sudo modprobe vkms && echo "vkms loaded" || echo "vkms unavailable"
+          sudo modprobe vgem && echo "vgem loaded" || echo "vgem unavailable"
+          ls -la /dev/dri || true
+      - name: EGL on the virtual device inside Fedora
+        run: |
+          docker run --rm --privileged -v /dev/dri:/dev/dri registry.fedoraproject.org/fedora:45 bash -c '
+            dnf -y -q install mesa-dri-drivers mesa-libEGL mesa-demos >/dev/null 2>&1
+            ls -la /dev/dri
+            for node in /dev/dri/card* /dev/dri/renderD*; do
+              echo "== $node"; EGL_PLATFORM=surfaceless eglinfo -B 2>&1 | grep -iE "renderer|vendor" | head -4
+            done
+            MESA_LOADER_DRIVER_OVERRIDE=kms_swrast eglinfo -B 2>&1 | grep -iE "gbm|renderer" | head -6'
