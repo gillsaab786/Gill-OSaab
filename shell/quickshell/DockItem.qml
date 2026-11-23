@@ -33,7 +33,7 @@ Item {
         id: img
         anchors.fill: parent
         anchors.bottomMargin: item.bounce
-        source: Quickshell.iconPath(item.entry ? item.entry.icon : item.appId, "application-x-executable")
+        source: Theme.icon(item.entry ? item.entry.icon : "", item.appId, (item.appId || "").toLowerCase(), "application-x-executable")
         asynchronous: true
         scale: press.pressed ? 0.88 : 1
         Behavior on scale { NumberAnimation { duration: Theme.fast } }

@@ -49,9 +49,9 @@ Scope {
         margins { top: 8; right: 8 }
         implicitWidth: 372
         implicitHeight: Math.max(1, column.height + 4)
-        visible: root.banners.length > 0 && !ShellState.notificationCenter
+        visible: root.banners.length > 0 && !ShellState.notificationCenter && !ShellState.controlCenter
         color: "transparent"
-        exclusionMode: ExclusionMode.Ignore
+        exclusionMode: ExclusionMode.Normal
         WlrLayershell.namespace: "gosaab-notifications:r16"
         WlrLayershell.layer: WlrLayer.Overlay
 

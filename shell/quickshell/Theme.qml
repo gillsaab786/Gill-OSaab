@@ -26,6 +26,18 @@ Singleton {
     readonly property int dockIcon: 52
     readonly property int dockMagnified: 78
 
+    // An icon path that exists, trying each name in turn ("" if none do)
+    function icon() {
+        for (let i = 0; i < arguments.length; i++) {
+            const n = arguments[i]
+            if (!n) continue
+            if (n.startsWith("/") || n.startsWith("file:") || n.startsWith("image:")) return n
+            const p = Quickshell.iconPath(n, true)
+            if (p !== "") return p
+        }
+        return ""
+    }
+
     // Motion: quick, springy, never sluggish
     readonly property int fast: 140
     readonly property int normal: 240

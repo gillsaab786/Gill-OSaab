@@ -113,7 +113,7 @@ PanelWindow {
                     Row {
                         anchors { left: parent.left; leftMargin: 10; verticalCenter: parent.verticalCenter }
                         spacing: 12
-                        IconImage { width: 30; height: 30; source: Quickshell.iconPath(modelData.icon, "application-x-executable") }
+                        IconImage { width: 30; height: 30; source: Theme.icon(modelData.icon, "application-x-executable") }
                         Column {
                             anchors.verticalCenter: parent.verticalCenter
                             Text { text: modelData.name; color: index === spot.selected ? "white" : Theme.text; font { family: Theme.font; pixelSize: 14 } }

@@ -43,11 +43,16 @@ Rectangle {
         id: body
         anchors { left: parent.left; right: parent.right; top: parent.top; margins: 12 }
         spacing: 10
-        IconImage {
+        Item {
             width: 36; height: 36
-            source: card.notification.image !== "" ? card.notification.image
-                  : Quickshell.iconPath(card.notification.appIcon !== "" ? card.notification.appIcon
-                                        : (card.notification.desktopEntry || "dialog-information"), "dialog-information")
+            readonly property string src: Theme.icon(card.notification.image, card.notification.appIcon,
+                card.notification.desktopEntry, (card.notification.appName || "").toLowerCase(), "dialog-information-symbolic", "dialog-information")
+            IconImage { anchors.fill: parent; visible: parent.src !== ""; source: parent.src }
+            Rectangle { // no icon found: a tidy letter tile instead of a broken image
+                anchors.fill: parent; radius: 9; visible: parent.src === ""; color: Theme.accent
+                Text { anchors.centerIn: parent; text: (card.notification.appName || "G").charAt(0).toUpperCase()
+                    color: "white"; font { family: Theme.font; pixelSize: 18; weight: Font.Bold } }
+            }
         }
         Column {
             width: parent.width - 46

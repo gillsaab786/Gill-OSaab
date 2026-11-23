@@ -16,7 +16,7 @@ PanelWindow {
     implicitHeight: Math.max(1, inner.implicitHeight + 28)
     color: "transparent"
     visible: open || panel.opacity > 0.01
-    exclusionMode: ExclusionMode.Ignore
+    exclusionMode: ExclusionMode.Normal // sit below the menu bar
     WlrLayershell.namespace: "gosaab-popup:r18"
     WlrLayershell.layer: WlrLayer.Overlay
 

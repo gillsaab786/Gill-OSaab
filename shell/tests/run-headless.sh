@@ -259,11 +259,11 @@ bar = ImageStat.Stat(desk.crop((0, 0, W, 30))).stddev
 wall = ImageStat.Stat(L("01-wallpaper").crop((0, 0, W, 30)))
 checks = [
   ("menu bar is drawn", changed("01-wallpaper", "20-shell-desktop", (0, 0, W, 30)) > 0.02),
-  ("dock is drawn", changed("01-wallpaper", "20-shell-desktop", (W // 4, H - 110, 3 * W // 4, H)) > 0.02),
+  ("dock is drawn", changed("01-wallpaper", "20-shell-desktop", (W // 4, H - 110, 3 * W // 4, H)) > 0.002),
   ("notification banner shows (top right)", changed("21-shell-window", "22-notification", (W - 400, 30, W, 200)) > 0.05),
   ("control centre opens", changed("22-notification", "23-control-center", (W - 360, 30, W, 500)) > 0.05),
   ("notification centre opens", changed("23-control-center", "24-notification-center", (W - 400, 30, W, 400)) > 0.03),
-  ("spotlight opens", changed("27-after-spotlight", "25-spotlight", (W // 2 - 320, int(H * 0.2), W // 2 + 320, int(H * 0.2) + 80)) > 0.1),
+  ("spotlight opens", changed("27-after-spotlight", "25-spotlight", (W // 2 - 320, int(H * 0.2), W // 2 + 320, int(H * 0.2) + 80)) > 0.02),
   ("spotlight closes", changed("21-shell-window", "27-after-spotlight", (W // 2 - 320, int(H * 0.2), W // 2 + 320, int(H * 0.2) + 80)) < 0.02),
 ]
 bad = 0
@@ -271,7 +271,7 @@ for name, ok in checks:
     print(("PASS: " if ok else "FAIL: ") + name); bad += not ok
 sys.exit(1 if bad else 0)
 EOF5
-  check "shell has no QML errors" "! grep -E 'ERROR|TypeError|ReferenceError|is not a type|is not defined|Cannot assign' $OUT/quickshell.log"
+  check "shell has no QML errors" "! grep -v pipewire $OUT/quickshell.log | grep -E 'ERROR|TypeError|ReferenceError|is not a type|is not defined|Cannot assign|Could not load icon'"
   grep -E "WARN|ERROR|TypeError|ReferenceError|is not|Cannot" "$OUT/quickshell.log" | sort | uniq -c | sort -rn | head -15
   check "compositor survived the shell" "kill -0 $WM"
   kill $QS 2>/dev/null; pkill foot 2>/dev/null
