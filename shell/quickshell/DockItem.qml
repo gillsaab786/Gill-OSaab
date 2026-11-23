@@ -47,7 +47,7 @@ Item {
         visible: item.builtinIcon === ""
         anchors.fill: parent
         anchors.bottomMargin: item.bounce
-        source: visible ? Theme.icon(item.entry ? item.entry.icon : "", item.appId, (item.appId || "").toLowerCase(), "application-x-executable") : ""
+        source: visible ? Theme.icon(item.entry ? item.entry.icon : "", item.appId, (item.appId || "").toLowerCase(), "applications-games", "application-x-executable", "system-run") : ""
         asynchronous: true
         scale: press.pressed ? 0.88 : 1
         Behavior on scale { NumberAnimation { duration: Theme.fast } }
