@@ -16,7 +16,11 @@ unset WAYLAND_DISPLAY
 for card in /sys/class/drm/card[0-9]*; do
   drv=$(basename "$(readlink -f "$card/device/driver" 2>/dev/null)")
   echo "$(basename "$card"): $drv"
-  [ "$drv" = vkms ] && export WLR_RENDER_DRM_DEVICE=/dev/dri/$(basename "$card")
+  # vkms shows up as "vkms" or, on newer kernels, "faux_driver"
+  if [ "$drv" = vkms ] || [ "$drv" = faux_driver ]; then
+    WLR_RENDER_DRM_DEVICE=/dev/dri/$(basename "$card")
+    export WLR_RENDER_DRM_DEVICE
+  fi
 done
 echo "render device: ${WLR_RENDER_DRM_DEVICE:-auto}"
 
