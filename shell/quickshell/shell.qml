@@ -32,6 +32,7 @@ ShellRoot {
     Spotlight {}
     Launchpad {}
     LockScreen {}
+    GlassesProfiles {}
 
     IpcHandler {
         target: "shell"

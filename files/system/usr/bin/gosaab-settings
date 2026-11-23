@@ -14,7 +14,7 @@ from gosaab_common import ETC, is_on, read_conf  # noqa: E402
 from PySide6.QtCore import (QEasingCurve, QProcess, QPropertyAnimation, QRectF, QSize, Qt,  # noqa: E402
                             Property, Signal)
 from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPainterPath, QPixmap  # noqa: E402
-from PySide6.QtWidgets import (QAbstractButton, QApplication, QButtonGroup, QFrame,  # noqa: E402
+from PySide6.QtWidgets import (QAbstractButton, QApplication, QButtonGroup, QComboBox, QFrame,  # noqa: E402
                                QGraphicsOpacityEffect, QHBoxLayout, QLabel, QLineEdit, QListWidget,
                                QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QScrollArea, QSpinBox,
                                QStackedWidget, QVBoxLayout, QWidget)
@@ -174,6 +174,25 @@ class Backend:
         return self.run(["foot", "-T", "Add a cloud drive", "-e", "sh", "-c",
                          "echo 'Choose n (new), give it a name, pick Google Drive / OneDrive / Dropbox...';"
                          " rclone config; echo; read -p 'Done. Press Enter to close.' x"], wait=False)
+
+    GLASSES_CONF = Path.home() / ".config/gill-osaab/glasses.conf"
+
+    def glasses_status(self):
+        out = subprocess.run(["gosaab-glasses", "status"], capture_output=True, text=True, check=False).stdout
+        return out.strip() or "No glasses connected"
+
+    def glasses_profiles(self):
+        try:
+            return dict(ln.split("=", 1) for ln in self.GLASSES_CONF.read_text().splitlines()
+                        if "=" in ln and not ln.startswith("#"))
+        except OSError:
+            return {}
+
+    def set_glasses_profiles(self, profiles):
+        self.GLASSES_CONF.parent.mkdir(parents=True, exist_ok=True)
+        self.GLASSES_CONF.write_text("# app-id=3d|2d|only|extend (applied when the app is in front)\n" +
+                                     "".join(f"{k}={v}\n" for k, v in profiles.items()))
+        return 0
 
     APP_FOLDERS = Path.home() / ".config/gill-osaab/app-folders"
 
@@ -442,6 +461,7 @@ PAGES = [
     ("Apps & Security", "#5E5CE6", "security-high-symbolic", "S"),
     ("App Folders", "#64D2FF", "folder-symbolic", "F"),
     ("VPN & Cloud", "#0A84FF", "network-vpn-symbolic", "V"),
+    ("Glasses", "#FF9F0A", "video-display-symbolic", "X"),
     ("Notifications", "#FF453A", "preferences-system-notifications-symbolic", "N"),
     ("Screen Off", "#FF9F0A", "video-display-symbolic", "O"),
     ("Appearance", "#1FB6C9", "preferences-desktop-appearance-symbolic", "A"),
@@ -492,7 +512,7 @@ class Settings(QMainWindow):
         layout.addWidget(self.stack, 1)
         self.setCentralWidget(root)
 
-        builders = [self.page_updates, self.page_device, self.page_security, self.page_folders, self.page_vpn_cloud, self.page_notifications,
+        builders = [self.page_updates, self.page_device, self.page_security, self.page_folders, self.page_vpn_cloud, self.page_glasses, self.page_notifications,
                     self.page_screen, self.page_appearance, self.page_gamemode, self.page_optional, self.page_about]
         self.pages = []
         for (name, color, glyph, letter), builder in zip(PAGES, builders):
@@ -821,6 +841,45 @@ class Settings(QMainWindow):
                                               "VPN files (*.conf *.ovpn)")
         if path:
             self.backend.vpn_import(path)
+
+    GLASSES_MODES = [("2D", "2d"), ("3D (side by side)", "3d"), ("Glasses only", "only"), ("Extend", "extend")]
+    EMULATOR_3D = {"org.citra_emu.citra": "3d", "citra-qt": "3d", "org.azahar_emu.azahar": "3d",
+                   "org.DolphinEmu.dolphin-emu": "3d", "rpcs3": "3d", "net.rpcs3.RPCS3": "3d"}
+
+    def page_glasses(self):
+        p = Page("Glasses")
+        b = self.backend
+        self.glasses_label = QLabel(b.glasses_status())
+        modes = QWidget()
+        ml = QHBoxLayout(modes)
+        ml.setContentsMargins(0, 0, 0, 0)
+        for label, mode in self.GLASSES_MODES:
+            btn = QPushButton(label)
+            btn.setObjectName("pill")
+            btn.clicked.connect(lambda _=False, m=mode: (b.run(["gosaab-glasses", m]),
+                                                        self.glasses_label.setText(b.glasses_status())))
+            ml.addWidget(btn)
+        p.section("XREAL and other glasses", [Row("Status", "", self.glasses_label), Row("Mode", "", modes)],
+                  "Plug the glasses into USB-C. 3D shows games side by side (3840x1080); Glasses only turns "
+                  "the built-in screen off to save battery.")
+        rows = []
+        self.glasses_combo = {}
+        profiles = {**b.glasses_profiles()}
+        for app in sorted(set(profiles) | set(self.EMULATOR_3D)):
+            combo = QComboBox()
+            combo.addItems(["Off", "2d", "3d", "only", "extend"])
+            combo.setCurrentText(profiles.get(app, "Off"))
+            combo.currentTextChanged.connect(self.save_glasses_profiles)
+            self.glasses_combo[app] = combo
+            rows.append(Row(app, "", combo))
+        p.section("Per-app modes", rows, "When one of these apps is in front, the glasses switch to its mode. "
+                  "Set 3D for 3DS, Wii/GameCube and PS3 emulators to have 3D come on by itself.")
+        p.finish()
+        return p
+
+    def save_glasses_profiles(self, *_):
+        self.backend.set_glasses_profiles({a: c.currentText() for a, c in self.glasses_combo.items()
+                                           if c.currentText() != "Off"})
 
     def page_gamemode(self):
         p = Page("Game Mode")

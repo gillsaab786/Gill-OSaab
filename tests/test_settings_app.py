@@ -44,6 +44,16 @@ class FakeBackend:
     def kde_night_light(self):
         return False
 
+    def glasses_status(self):
+        return "No glasses connected"
+
+    def glasses_profiles(self):
+        return getattr(self, "gp", {})
+
+    def set_glasses_profiles(self, profiles):
+        self.gp = dict(profiles)
+        return 0
+
     def vpn_connections(self):
         return [("Home WG", "wireguard", False)]
 
@@ -164,8 +174,8 @@ class SettingsApp(unittest.TestCase):
 
     def test_every_page_builds(self):
         w = self.gs.Settings(FakeBackend())
-        self.assertEqual(w.stack.count(), 11)
-        for i in range(11):
+        self.assertEqual(w.stack.count(), 12)
+        for i in range(12):
             w.nav.setCurrentRow(i)
             self.assertEqual(w.stack.currentIndex(), i)
 
@@ -184,6 +194,12 @@ class SettingsApp(unittest.TestCase):
         self.assertEqual(b.app_folders("vlc"), ["/b", "/c"])
         w.clear_folders("vlc")
         self.assertEqual(b.app_folders("vlc"), [])
+
+    def test_glasses_profiles_save(self):
+        b = FakeBackend()
+        w = self.gs.Settings(b)
+        w.glasses_combo["rpcs3"].setCurrentText("3d")
+        self.assertEqual(b.gp, {"rpcs3": "3d"})
 
     def test_apply_dark_light(self):
         b = FakeBackend()

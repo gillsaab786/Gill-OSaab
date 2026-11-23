@@ -19,7 +19,8 @@ Qt Quick via Quickshell. Runs on the Gill-OSaab Core image (minimal Fedora bootc
 Done 2026-11-24: 1 touch, 2 tap/natural scroll (+Settings), 3 pinch/hold to apps, 4 snapping,
 5 desktop progress notifications, 7 DXVK + 32/64-bit test, 8 Android setup (multi-window, libndk),
 9 sandbox + App Folders, 10 ~/Android + Android download folder. 6 Android notifications (adb bridge), VPN switch + import (Settings, Control Centre), cloud drives
-(rclone, several accounts, off by default). Open: XREAL modes, lens effect, controller nav, multi-monitor.
+(rclone, several accounts, off by default). Several screens + display settings protocol, XREAL modes (2D/3D/only/extend) with per-app
+profiles (emulators -> 3D). Open: lens effect, controller nav in the shell, depth slider.
 1. Touchscreen in the desktop (wlr touch events -> clients; tap, drag, scroll) - Ally/GPD screens.
 2. libinput setup: tap-to-click, natural scrolling, disable-while-typing (+ Settings switches).
 3. Pinch-zoom and 2-finger swipe back/forward in browsers: wlr pointer-gestures protocol

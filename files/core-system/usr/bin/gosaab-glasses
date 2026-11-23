@@ -1,0 +1,24 @@
+#!/bin/sh
+# XREAL (and other USB-C display) glasses on Gill-OSaab.
+#   gosaab-glasses status        show whether glasses are connected and how
+#   gosaab-glasses extend        glasses as a second screen (right of the built-in one)
+#   gosaab-glasses only          picture only in the glasses (built-in screen off, saves battery)
+#   gosaab-glasses 3d | 2d       side-by-side 3D (3840x1080) or normal 2D (1920x1080)
+#   gosaab-glasses off           glasses screen off, built-in screen on
+# Per-app modes (e.g. 3D for the 3DS emulator) live in ~/.config/gill-osaab/glasses.conf:
+#   app-id=3d|2d|only|extend    -- the shell applies them when that app is in front.
+set -e
+info=$(wlr-randr 2>/dev/null)
+glasses=$(printf '%s\n' "$info" | awk '/^[^ ]/{out=$1} /XREAL|Nreal|NREAL|MRG|Air|VITURE|Rokid/{print out; exit}')
+internal=$(printf '%s\n' "$info" | awk '/^(eDP|LVDS|DSI)/{print $1; exit}')
+[ -n "$glasses" ] || { echo "No glasses connected"; [ "$1" = status ] && exit 0 || exit 1; }
+case "${1:-status}" in
+  status) echo "Glasses: $glasses"; printf '%s\n' "$info" | sed -n "/^$glasses/,/^[^ ]/p" | grep -E 'current|Enabled' ;;
+  extend) wlr-randr --output "$glasses" --on --pos "$(printf '%s\n' "$info" | awk -v o="$internal" '$1==o{f=1} f&&/current/{split($1,a,"x");print a[1]",0";exit}')" ${internal:+--output "$internal" --on --pos 0,0} ;;
+  only)   wlr-randr --output "$glasses" --on --pos 0,0 ${internal:+--output "$internal" --off} ;;
+  3d)     wlr-randr --output "$glasses" --mode 3840x1080 2>/dev/null || wlr-randr --output "$glasses" --custom-mode 3840x1080
+          echo "3D on. If the picture doesn't split into two, hold the glasses' brightness-up button for 3 seconds." ;;
+  2d)     wlr-randr --output "$glasses" --mode 1920x1080 ;;
+  off)    wlr-randr --output "$glasses" --off ${internal:+--output "$internal" --on} ;;
+  *) echo "usage: gosaab-glasses status|extend|only|3d|2d|off" >&2; exit 2 ;;
+esac
