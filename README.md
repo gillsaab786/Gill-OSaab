@@ -7,10 +7,29 @@ Gill-OSaab features below.
 
 | Edition | Image | For |
 | --- | --- | --- |
-| **Core (new)** | `ghcr.io/gillsaab786/gill-osaab-core` | Built directly on minimal Fedora bootc, no Bazzite: only what Gill-OSaab uses. Milestone 1: desktop, Steam, Windows/Android/Linux apps, drivers. Game Mode and handheld controls come next |
+| **Core (new)** | `ghcr.io/gillsaab786/gill-osaab-core` | Our own desktop on minimal Fedora bootc, no Bazzite and no KDE: the Gill-OSaab window manager and shell (macOS-style), Game Mode (Steam + gamescope), Windows/Android/Linux apps, drivers |
 | Handheld | `ghcr.io/gillsaab786/gill-osaab` | ROG Ally, GPD Win Max 2, Steam Deck. Boots into Game Mode |
 | Desktop | `ghcr.io/gillsaab786/gill-osaab-desktop` | Intel/AMD desktops and laptops. Boots to the desktop |
 | Desktop Nvidia | `ghcr.io/gillsaab786/gill-osaab-desktop-nvidia` | PCs with Nvidia GTX 16 / RTX 20 or newer (Settings offers the switch) |
+
+## The Gill-OSaab desktop (Core edition)
+
+Our own window manager (`gosaab-wm`) and shell, written for Gill-OSaab (`shell/`):
+- **Windows**: macOS-style title bars with red/yellow/green buttons, rounded corners, soft
+  shadows, frosted glass; windows spring open and fade closed; minimise flies into the Dock.
+- **Menu bar** with the Gill-OSaab menu (Settings, Updates, Game Mode, Sleep/Restart/Shut Down,
+  Lock), app name, battery and clock. **Dock** with magnification, running dots, Launchpad, Trash.
+- **Control Centre**: Wi-Fi, Bluetooth, Focus, Dark Mode, Game Mode, VPN, Screen Off, Glasses,
+  brightness and volume. **Notifications** with download/update progress bars.
+- **Spotlight** (Super+Space, also does sums), **Launchpad** (Super+G), **Mission Control**
+  (Super+Up), **lock screen** (Super+L) and a matching **login screen** with Desktop / Game Mode.
+- Windows (X11) apps and games get the same look; games get pointer lock and raw mouse input.
+- Every change is tested by CI: the desktop runs headless, a robot clicks the buttons and
+  screenshots are checked (`shell/tests/run-headless.sh`, screenshots on the `ci-shots` branch).
+
+Try it: on any Fedora Atomic / bootc install run
+`sudo bootc switch ghcr.io/gillsaab786/gill-osaab-core:latest`, reboot, pick **Gill-OSaab** at
+the login screen.
 
 ## What's in 1.2.0
 

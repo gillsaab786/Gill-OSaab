@@ -24,19 +24,22 @@ Qt Quick via Quickshell. Runs on the Gill-OSaab Core image (minimal Fedora bootc
       close/minimise/zoom buttons, centred title in Inter, rounded corners, inactive dimming),
       SSD for apps that accept it, title bar scales with open/close animations, double-click
       title to zoom, drag to move, resize grips around the frame. CI clicks every button.
-- [~] **M3 Shell UI (Quickshell/QML, `shell/quickshell`)**: done: menu bar (logo menu, app
-      name, battery, clock), Dock (magnification, running dots, launch bounce, click to
-      show/hide via wlr-foreign-toplevel-management), frosted glass behind shell panels
+- [x] **M3 Shell UI (Quickshell/QML, `shell/quickshell`)**: menu bar (logo menu, app name,
+      battery, clock), Dock (magnification, running dots, launch bounce, Launchpad + Trash, click
+      to show/hide via wlr-foreign-toplevel-management), frosted glass behind shell panels
       (namespace `gosaab-*`), notification banners + Notification Centre with progress bars,
       Control Centre (Wi-Fi, Bluetooth, Focus, Dark Mode, Game Mode, VPN, Screen Off, Glasses,
-      brightness + volume sliders), Spotlight (apps + maths, Super+Space). Next: tray icons,
-      Now Playing, night light, settings app restyle.
-- Shortcuts: Super+Space Spotlight, Super+A Control Centre, Super+N notifications,
-  Super+Q close, Super+M minimise, Super+F zoom, Super+Return terminal, Alt/Super+Tab switch.
-- [ ] **M4 Motion and spaces**: minimise to dock (genie), Mission Control overview, Launchpad,
-      Spotlight search, workspaces with swipe, iOS-style spring physics everywhere.
-- [ ] **M5 System integration**: lock screen + greeter (greetd), XWayland, Game Mode session
-      switch (gamescope + Steam), Gill-OSaab Settings restyled to match, notifications hub
-      reuse, multi-monitor, HiDPI/fractional scaling, touch + controller navigation.
-- [ ] **M6 Ship**: replace KDE in the Core image, installer ISO, first-boot setup, test on GPD
+      brightness + volume), Spotlight (apps + maths).
+- [~] **M4 Motion and spaces**: done: Launchpad, Mission Control (Super+Up / F3), minimise flies
+      into the app's Dock icon and back. Next: workspaces with swipe, touchpad gestures.
+- [~] **M5 System integration**: done: lock screen (ext-session-lock + PAM, Super+L), login
+      screen (SDDM theme, Desktop/Game Mode choice), X11 apps via xwayland-satellite (with title
+      bars), pointer lock + raw mouse for games, xdg-activation, Game Mode switch
+      (`gosaab-game-mode`, SteamOS-compatible `steamos-session-select`). Next: idle lock/dim,
+      multi-monitor arrangement, HiDPI scaling UI, controller navigation in the shell.
+- Shortcuts: Super+Space Spotlight, Super+G Launchpad, Super+Up Mission Control, Super+A Control
+  Centre, Super+N notifications, Super+L lock, Super+Q close, Super+M minimise, Super+F zoom,
+  Super+Return terminal, Alt/Super+Tab switch.
+- [~] **M6 Ship**: done: Core image uses gosaab-wm + shell instead of KDE (`shell/install.sh`,
+      `files/core-system`). Next: installer ISO, first-boot setup, test on GPD
       Win Max 2 and ROG Ally, performance pass (idle RAM/CPU, frame pacing).
