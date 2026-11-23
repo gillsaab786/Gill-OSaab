@@ -83,7 +83,7 @@ Scope {
                 font { family: Theme.font; pixelSize: 15; weight: Font.Bold } }
             Text { id: clearBtn; text: root.all.length ? "Clear" : ""; color: Theme.accent
                 font { family: Theme.font; pixelSize: 13 }
-                MouseArea { anchors.fill: parent; onClicked: for (const n of root.all.slice()) n.dismiss() } }
+                MouseArea { anchors.fill: parent; onClicked: { for (const n of root.all.slice()) n.dismiss() } } }
         }
         Text {
             visible: root.all.length === 0

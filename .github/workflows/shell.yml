@@ -26,7 +26,7 @@ jobs:
                 mesa-dri-drivers mesa-libEGL mesa-libgbm grim foot swaybg \
                 dejavu-sans-mono-fonts python3-pillow procps-ng \
                 pango-devel cairo-devel libdrm-devel rsms-inter-fonts >/dev/null
-              dnf -y -q install libnotify adwaita-icon-theme qt6-qtsvg qt6-qtwayland >/dev/null
+              dnf -y -q install dbus-daemon libnotify adwaita-icon-theme qt6-qtsvg qt6-qtwayland >/dev/null
               dnf -y -q install quickshell >/dev/null 2>&1 || { dnf -y -q install dnf-plugins-core >/dev/null; \
                 dnf -y -q copr enable errornointernet/quickshell >/dev/null; dnf -y -q install quickshell >/dev/null; }
               qs --version || true

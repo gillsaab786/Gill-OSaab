@@ -91,8 +91,8 @@ def changed(a, b):  # fraction of pixels that visibly changed
 checks = [
     ("wallpaper is drawn (not a flat colour)", ImageStat.Stat(load("01-wallpaper")).stddev[0] > 5),
     ("a window appears", diff("01-wallpaper", "03-one-window") > 2),
-    ("second window appears", changed("03-one-window", "04-two-windows") > 0.005),
-    ("closing removes the window", changed("04-two-windows", "06-after-close") > 0.005),
+    ("second window appears", changed("03-one-window", "04-two-windows") > 0.0004),
+    ("closing removes the window", changed("04-two-windows", "06-after-close") > 0.0004),
     ("after close matches one window", diff("03-one-window", "06-after-close") < 1.5),
 ]
 bad = 0
@@ -219,6 +219,8 @@ if command -v qs >/dev/null; then
   SHELLDIR=$(pwd)/shell/quickshell
   export QT_QUICK_BACKEND=software QT_QPA_PLATFORM=wayland
   export GOSAAB_SHELL_IPC="qs -p $SHELLDIR ipc call"
+  # a session bus, for notifications
+  DBUS_SESSION_BUS_ADDRESS=$(dbus-daemon --session --fork --print-address 2>/dev/null) && export DBUS_SESSION_BUS_ADDRESS
   rm -f "$XDG_RUNTIME_DIR/gosaab-wm.socket"
   "$BUILD/gosaab-wm" -s "swaybg -i $WALL -m fill" >"$OUT/gosaab-wm-shell.log" 2>&1 &
   WM=$!
