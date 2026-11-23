@@ -12,6 +12,10 @@ image-version: "45"
 modules:
   - type: dnf
     repos:
+      files:
+        - https://brave-browser-rpm-release.s3.brave.com/brave-browser.repo # Brave, the default browser
+      keys:
+        - https://brave-browser-rpm-release.s3.brave.com/brave-core.asc
       nonfree: rpmfusion
       copr:
         - bieszczaders/kernel-cachyos-addons # gaming CPU schedulers (scx)
@@ -47,6 +51,21 @@ modules:
         - swaybg
         - swayidle
         - wlr-randr
+        # --- drivers and helpers for whatever gets plugged in (no setup needed)
+        - cups
+        - cups-filters
+        - gutenprint-cups
+        - hplip
+        - ipp-usb
+        - sane-backends
+        - sane-airscan
+        - simple-scan
+        - system-config-printer
+        - fwupd
+        - bolt
+        - iio-sensor-proxy
+        - usbutils
+        - pciutils
         - wdisplays
         - xwayland-satellite
         - xorg-x11-server-Xwayland
@@ -54,7 +73,7 @@ modules:
         - qt6-qtsvg
         - foot
         - nautilus
-        - firefox
+        - brave-browser
         - vlc
         - wireguard-tools
         - NetworkManager-openvpn

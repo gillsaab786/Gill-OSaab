@@ -7,7 +7,7 @@ fail=0
 check() { if eval "$2"; then echo "PASS: $1"; else echo "FAIL: $1"; fail=1; fi; }
 
 for b in gosaab-wm gosaab-session gosaab-game-mode steamos-session-select qs swaybg xwayland-satellite \
-         foot nautilus firefox gamescope steam sddm grim wine waydroid distrobox flatpak gosaab-settings gosaab-updates gosaab-emudeck gosaab-android-setup gosaab-glasses wlr-randr vlc wg; do
+         foot nautilus brave-browser gamescope steam sddm grim wine waydroid distrobox flatpak gosaab-settings gosaab-updates gosaab-emudeck gosaab-android-setup gosaab-glasses wlr-randr vlc wg; do
   check "installed: $b" "command -v $b >/dev/null"
 done
 echo "wine files: $(ls -d /usr/bin/wine* /etc/alternatives/wine* 2>/dev/null | tr "\n" " ")"
@@ -22,6 +22,8 @@ fi
 check "TDP/fans/buttons: Handheld Daemon installed" "command -v hhd >/dev/null"
 check "frame generation layer installed (lsfg-vk)" "ls /usr/share/vulkan/implicit_layer.d/ 2>/dev/null | grep -qi lsfg"
 check "VPN, cloud drives and Android bridge tools" "command -v nmcli >/dev/null && command -v rclone >/dev/null && command -v adb >/dev/null && [ -f /usr/lib/systemd/user/gosaab-cloud@.service ]"
+check "Android installs on first sign-in, can be removed in Settings" "[ -x /usr/libexec/gill-osaab/gosaab-first-setup ] && grep -q org.gillosaab.android /usr/share/polkit-1/actions/org.gillosaab.session.policy"
+check "printers, scanners, firmware ready" "command -v lpstat >/dev/null && command -v scanimage >/dev/null && command -v fwupdmgr >/dev/null"
 check "Android folders service ready" "command -v bindfs >/dev/null && systemctl is-enabled gosaab-android-folders.service >/dev/null 2>&1"
 check "start-up choice applied at boot" "systemctl is-enabled gosaab-boot-mode.service >/dev/null 2>&1"
 /usr/libexec/gill-osaab/gosaab-session-select-root --boot root game
@@ -44,7 +46,8 @@ echo top-secret > /tmp/sbhome/secret/file; echo film > /tmp/sbhome/Movies/film
 echo /tmp/sbhome/Movies > /tmp/sbhome/.config/gill-osaab/app-folders/testapp.conf
 check "sandboxed app cannot see your other files" "! HOME=/tmp/sbhome gosaab-sandbox testapp cat /tmp/sbhome/secret/file 2>/dev/null"
 check "sandboxed app can use its allowed folder" "HOME=/tmp/sbhome gosaab-sandbox testapp cat /tmp/sbhome/Movies/film | grep -q film"
-check "Firefox opens sandboxed" "grep -qs '^Exec=gosaab-sandbox firefox' /usr/share/applications/*firefox*.desktop"
+check "Brave opens sandboxed" "grep -qs '^Exec=gosaab-sandbox brave' /usr/share/applications/brave-browser.desktop"
+check "Brave is the default browser" "grep -q 'https=brave-browser.desktop' /etc/xdg/mimeapps.list"
 check "VLC opens sandboxed" "grep -qs '^Exec=gosaab-sandbox vlc' /usr/share/applications/*vlc*.desktop /usr/share/applications/*VLC*.desktop"
 
 # start the real session the way the login screen does (headless, software GPU)

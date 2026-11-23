@@ -1,0 +1,36 @@
+#!/bin/sh
+# First sign-in: finish setting up apps that are too big to ship inside the system image,
+# with a progress notification (Liquid Glass ring in the shell). Runs once per user, retries
+# next sign-in if it was interrupted (e.g. no internet).
+DONE="$HOME/.config/gill-osaab/first-setup.done"
+[ -f "$DONE" ] && exit 0
+mkdir -p "$(dirname "$DONE")"
+id=0
+progress() { # percent, title, text
+  id=$(notify-send --print-id ${id:+--replace-id "$id"} -a "Gill-OSaab" -i system-software-install \
+       -h "int:value:$1" "$2" "$3" 2>/dev/null || echo "$id")
+}
+# wait for the internet (up to 10 min)
+for _ in $(seq 1 120); do nm-online -q -t 5 2>/dev/null && break; sleep 5; done
+nm-online -q -t 5 2>/dev/null || exit 0
+
+progress 5 "Setting up your apps" "Adding the Flathub app store"
+flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo || true
+
+progress 15 "Setting up your apps" "Installing Bottles (Windows app installers)"
+flatpak install --user --noninteractive -y flathub com.usebottles.bottles >/dev/null 2>&1 || true
+
+android=$(sed -n 's/^android=//p' /etc/gill-osaab/features.conf 2>/dev/null)
+if [ "${android:-on}" = on ] && ! waydroid status 2>/dev/null | grep -qi "initialized: *yes\|Session:.*RUNNING\|Container:"; then
+  progress 30 "Setting up Android" "Downloading Android with Google Play (about 1 GB)"
+  pkexec /usr/bin/gosaab-android-setup --auto 2>&1 | while IFS= read -r line; do
+    case "$line" in
+      *"1/4"*) progress 35 "Setting up Android" "Downloading Android with Google Play" ;;
+      *"2/4"*) progress 75 "Setting up Android" "Giving each Android app its own window" ;;
+      *"3/4"*) progress 85 "Setting up Android" "Adding support for phone-only (ARM) apps" ;;
+      *"4/4"*) progress 98 "Setting up Android" "Almost done" ;;
+    esac
+  done
+fi
+progress 100 "Your apps are ready" "Android with Play Store, Brave, VLC, Steam and Bottles are set up."
+touch "$DONE"

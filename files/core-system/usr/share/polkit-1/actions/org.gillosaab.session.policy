@@ -13,4 +13,14 @@
     </defaults>
     <annotate key="org.freedesktop.policykit.exec.path">/usr/libexec/gill-osaab/gosaab-session-select-root</annotate>
   </action>
+  <action id="org.gillosaab.android">
+    <description>Install or remove Android (Waydroid)</description>
+    <message>Setting up Android apps</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/bin/gosaab-android-setup</annotate>
+  </action>
 </policyconfig>

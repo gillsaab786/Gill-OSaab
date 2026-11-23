@@ -198,7 +198,7 @@ class Backend:
 
     def sandboxed_apps(self):
         """(id, label) of apps that run sealed off: Firefox, VLC and every Windows app."""
-        apps = [("firefox", "Firefox (downloads)"), ("vlc", "VLC (videos and music)"),
+        apps = [("brave", "Brave (downloads)"), ("vlc", "VLC (videos and music)"),
                 ("android", "Android downloads (1 folder; Android's files are in ~/Android)")]
         wine = Path.home() / ".local/share/gill-osaab/wine"
         if wine.is_dir():
@@ -647,6 +647,12 @@ class Settings(QMainWindow):
         for n in hw.get("network", []):
             info.append(Row(n.get("kind", "Network"), f"{n['vendor']} {n['device']}", self.driver_label(n)))
         p.section("This device", info)
+        parts = [Row(d["kind"], f"{d['vendor']} {d['device']}", self.driver_label(d)) for d in hw.get("parts", [])]
+        parts += [Row("USB", name, QLabel("●  Connected")) for name in hw.get("usb", [])]
+        if parts:
+            p.section("Every part and its driver", parts, "Drivers for these come built in and update with the "
+                      "system. Printers, scanners, controllers, webcams and USB/Thunderbolt docks work as soon "
+                      "as they are plugged in; firmware for them is checked automatically.")
 
         actions = [
             Row("Update all drivers", "Kernel, graphics, Wi-Fi, Bluetooth and audio drivers plus device firmware, "
@@ -676,6 +682,15 @@ class Settings(QMainWindow):
                 "Each app gets its own private folder and can't see your files. Turn off only for apps "
                 "that must open your documents.", self.switch("features.conf", "sandbox_windows_apps")),
         ])
+        android = self.switch("features.conf", "android", default=True)
+        android.toggled.connect(self.android_toggled)
+        p.section("Android apps", [
+            Row("Android (with Google Play)", "On: Android is installed and Android apps run in their own windows. "
+                "Off: Android and all Android apps and their data are removed (about 3 GB freed).", android),
+        ])
+        win = QPushButton("Get Windows apps (Bottles)…")
+        win.clicked.connect(lambda: self.backend.run(["flatpak", "run", "com.usebottles.bottles"], wait=False))
+        p.lay.addWidget(win)
         p.finish()
         return p
 
@@ -792,6 +807,19 @@ class Settings(QMainWindow):
     def set_folders(self, app, folders):
         self.backend.set_app_folders(app, folders)
         self.folder_labels[app].setText("  ·  ".join(Path(f).name for f in folders) or "Only its own files")
+
+    def android_toggled(self, on):
+        if on:
+            self.backend.run(["gosaab-android-setup"], wait=False)
+            return
+        answer = QMessageBox.question(self, "Remove Android?", "Android, every Android app and their data "
+                                      "will be removed. You can install it again later by turning this on.")
+        if answer == QMessageBox.Yes:
+            self.backend.run(["pkexec", "/usr/bin/gosaab-android-setup", "--remove"], wait=False)
+        else:
+            sw = self.switches[("features.conf", "android")][0]
+            sw.set_quiet(True)
+            self.backend.set_value("features.conf", "android", "on")
 
     def page_vpn_cloud(self):
         p = Page("VPN & Cloud")

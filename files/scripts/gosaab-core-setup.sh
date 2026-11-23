@@ -35,13 +35,15 @@ chmod 0755 /usr/libexec/gill-osaab/gosaab-session-select-root 2>/dev/null || tru
 
 systemctl enable gosaab-boot-mode.service || log "warning: gosaab-boot-mode not enabled"
 systemctl enable gosaab-android-folders.service || log "warning: android folders not enabled"
+# printers/scanners appear by themselves (driverless IPP, USB printers), firmware updates
+for unit in cups.socket ipp-usb.service fwupd-refresh.timer; do systemctl enable "$unit" 2>/dev/null || true; done
 
 # Frame generation (off by default) comes from the lsfg-vk package (recipe); games opt in from
 # Settings > Game Mode or with the launch option LSFG_PROCESS=gosaab %command%
 ls /usr/share/vulkan/implicit_layer.d/ 2>/dev/null | grep -qi lsfg || log "warning: lsfg-vk layer not installed"
 
-# Firefox and VLC run sandboxed: each sees only its own data plus up to two folders you allow
-for pair in firefox:firefox org.mozilla.firefox:firefox vlc:vlc org.videolan.VLC:vlc; do
+# Brave and VLC run sandboxed: each sees only its own data plus up to two folders you allow
+for pair in brave-browser:brave com.brave.Browser:brave vlc:vlc org.videolan.VLC:vlc; do
     desktop=/usr/share/applications/${pair%%:*}.desktop
     [ -f "$desktop" ] && sed -i "s#^Exec=\(gosaab-sandbox [^ ]* \)\?#Exec=gosaab-sandbox ${pair##*:} #" "$desktop" &&
         log "sandboxed ${pair%%:*}" || true

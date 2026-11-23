@@ -4,10 +4,23 @@
 if [ "$(id -u)" != 0 ]; then
   exec foot -T "Set up Android apps" -e sh -c 'pkexec /usr/bin/gosaab-android-setup; echo; read -p "Press Enter to close." x'
 fi
+# gosaab-android-setup --remove : uninstall Android and all Android apps and their data
+if [ "${1:-}" = "--remove" ]; then
+  user=$(id -nu "${PKEXEC_UID:-0}" 2>/dev/null)
+  home=$(getent passwd "$user" | cut -d: -f6)
+  waydroid session stop 2>/dev/null || true
+  systemctl disable --now waydroid-container.service gosaab-android-folders.service 2>/dev/null || true
+  umount "$home/Android" 2>/dev/null; umount "$home/.local/share/waydroid/data/media/0/Download" 2>/dev/null
+  rm -rf /var/lib/waydroid /etc/waydroid-extra "$home/.local/share/waydroid" "$home/Android"
+  rm -f "$home"/.local/share/applications/waydroid.*.desktop
+  echo "Android removed"
+  exit 0
+fi
 set -e
 user=$(logname 2>/dev/null || echo "${SUDO_USER:-${PKEXEC_UID:+$(id -nu "$PKEXEC_UID")}}")
 echo "1/4 Downloading Android (about 1 GB)..."
 waydroid init -s GAPPS -f
+systemctl enable gosaab-android-folders.service 2>/dev/null || true
 systemctl enable --now waydroid-container.service
 echo "2/4 Each Android app gets its own window"
 cfg=/var/lib/waydroid/waydroid.cfg

@@ -68,6 +68,27 @@ def pci_devices(runner=subprocess.run):
     return parse_lspci(out.stdout)
 
 
+def other_parts(devices):
+    """Every other chip (audio, storage, USB, Bluetooth...) with the driver the kernel picked."""
+    skip = ("VGA compatible controller", "3D controller", "Display controller", "Network controller",
+            "Ethernet controller", "Host bridge", "PCI bridge", "ISA bridge", "SMBus", "Signal processing controller")
+    return [{"kind": d.get("Class", ""), "vendor": d.get("Vendor", ""), "device": d.get("Device", ""),
+             "driver": d.get("Driver", "")} for d in devices if d.get("Class", "") not in skip]
+
+
+def usb_devices(runner=subprocess.run):
+    """Plugged-in USB things (controllers, dongles, printers, webcams) as 'Vendor Product' names."""
+    if not shutil.which("lsusb"):
+        return []
+    out = runner(["lsusb"], capture_output=True, text=True, check=False).stdout
+    names = []
+    for line in out.splitlines():
+        name = line.split(" ID ", 1)[-1][10:].strip() if " ID " in line else ""
+        if name and "root hub" not in name.lower() and name not in names:
+            names.append(name)
+    return names
+
+
 def classify(devices):
     gpus, network = [], []
     for d in devices:
@@ -95,7 +116,9 @@ def support_page(vendor):
 
 
 def summary(dmi=DMI, runner=subprocess.run, cpuinfo="/proc/cpuinfo"):
-    gpus, network = classify(pci_devices(runner))
+    devices = pci_devices(runner)
+    gpus, network = classify(devices)
     model = device_model(dmi)
     return {"model": model, "cpu": cpu_model(cpuinfo), "gpus": gpus, "network": network,
+            "parts": other_parts(devices), "usb": usb_devices(runner),
             "nvidia": has_nvidia(gpus), "support_page": support_page(model["vendor"])}
