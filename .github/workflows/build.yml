@@ -6,6 +6,10 @@ on:
     paths-ignore:
       - "**.md"
       - "tests/**"
+      - "shell/tests/**"
+      - ".github/workflows/shell.yml"
+      - ".github/workflows/core-smoke.yml"
+      - ".github/workflows/iso.yml"
   pull_request:
   workflow_dispatch:
 
