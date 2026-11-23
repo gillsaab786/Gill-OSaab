@@ -16,6 +16,7 @@
  */
 #define _POSIX_C_SOURCE 200809L
 #include <assert.h>
+#include <fcntl.h>
 #include <getopt.h>
 #include <math.h>
 #include <signal.h>
@@ -1199,7 +1200,14 @@ int main(int argc, char *argv[]) {
 		wlr_log(WLR_ERROR, "failed to create backend");
 		return 1;
 	}
-	server.renderer = fx_renderer_create(server.backend);
+	/* GOSAAB_RENDER_CARD lets tests render on a virtual KMS card (vkms) */
+	const char *card = getenv("GOSAAB_RENDER_CARD");
+	if (card != NULL) {
+		int fd = open(card, O_RDWR | O_CLOEXEC);
+		server.renderer = fd >= 0 ? fx_renderer_create_with_drm_fd(fd) : NULL;
+	} else {
+		server.renderer = fx_renderer_create(server.backend);
+	}
 	if (server.renderer == NULL) {
 		wlr_log(WLR_ERROR, "failed to create renderer");
 		return 1;
