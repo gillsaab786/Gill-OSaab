@@ -12,35 +12,54 @@ rm -rf "$XDG_RUNTIME_DIR" && mkdir -p -m 700 "$XDG_RUNTIME_DIR"
 export WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 GOSAAB_HEADLESS_SIZE=1920x1080
 unset WAYLAND_DISPLAY
 
-# Render on the virtual KMS card (vkms, shown as "vkms" or "faux_driver") with Mesa's
-# software rasteriser; render nodes can't allocate scan-out buffers here.
+# Find the virtual cards (vkms / vgem show up as "faux_driver" on new kernels)
+VKMS= VGEM=
 for card in /sys/class/drm/card[0-9]*; do
   [ -e "$card" ] || continue
-  drv=$(basename "$(readlink -f "$card/device/driver" 2>/dev/null)")
   dev=$(basename "$(readlink -f "$card/device" 2>/dev/null)")
-  echo "$(basename "$card"): driver=$drv device=$dev"
-  if [ "$dev" = "${GOSAAB_TEST_GPU:-vgem}" ]; then
-    GOSAAB_RENDER_CARD=/dev/dri/$(basename "$card")
-    export GOSAAB_RENDER_CARD
-  fi
+  echo "$(basename "$card"): $dev"
+  [ "$dev" = vkms ] && VKMS=/dev/dri/$(basename "$card")
+  [ "$dev" = vgem ] && VGEM=/dev/dri/$(basename "$card")
 done
-export MESA_LOADER_DRIVER_OVERRIDE=${MESA_LOADER_DRIVER_OVERRIDE:-kms_swrast}
-# Default: pure software GPU (llvmpipe) with udmabuf-backed buffers, no device node needed
-if [ "${GOSAAB_TEST_GPU:-software}" = software ]; then
-  unset GOSAAB_RENDER_CARD MESA_LOADER_DRIVER_OVERRIDE
-  export WLR_RENDERER_FORCE_SOFTWARE=1
-  ls -la /dev/udmabuf || true
-fi
-echo "render device: ${GOSAAB_RENDER_CARD:-auto}"
+
+start_wm() { # $1 = label; environment already set
+  rm -f "$XDG_RUNTIME_DIR/gosaab-wm.socket"
+  "$BUILD/gosaab-wm" -s "swaybg -i $WALL -m fill" >"$OUT/gosaab-wm.log" 2>&1 &
+  WM=$!
+  for _ in $(seq 1 30); do [ -s "$XDG_RUNTIME_DIR/gosaab-wm.socket" ] && break; sleep 0.1; done
+  sleep 1.5
+  if kill -0 $WM 2>/dev/null && ! grep -q "Failed to allocate\|failed test\|failed to create" "$OUT/gosaab-wm.log"; then
+    echo "GPU setup that works: $1"; return 0
+  fi
+  echo "GPU setup failed: $1"; grep "\[ERROR\]" "$OUT/gosaab-wm.log" | sort -u | head -3
+  kill $WM 2>/dev/null; wait $WM 2>/dev/null; return 1
+}
+
+try_setups() {
+  ( export GOSAAB_RENDER_CARD=$VKMS LIBGL_ALWAYS_SOFTWARE=1 MESA_LOADER_DRIVER_OVERRIDE=kms_swrast; start_wm "vkms+always_software" ) && return 0
+  ( export GOSAAB_RENDER_CARD=$VKMS LIBGL_ALWAYS_SOFTWARE=1; start_wm "vkms+libgl_software" ) && return 0
+  ( export GOSAAB_RENDER_CARD=$VKMS MESA_LOADER_DRIVER_OVERRIDE=swrast; start_wm "vkms+swrast" ) && return 0
+  ( export WLR_RENDER_DRM_DEVICE=/dev/dri/renderD128 LIBGL_ALWAYS_SOFTWARE=1; start_wm "vgem-render+software" ) && return 0
+  return 1
+}
 
 fail=0
 check() { if eval "$2"; then echo "PASS: $1"; else echo "FAIL: $1"; fail=1; fi; }
 shot() { grim "$OUT/$1.png" && echo "shot $1"; }
 
+SETUP=$(try_setups 2>&1 | tee /dev/stderr | sed -n 's/^GPU setup that works: //p')
+pkill -f "$BUILD/gosaab-wm" 2>/dev/null; sleep 0.5
+case "$SETUP" in
+  vkms+always_software) export GOSAAB_RENDER_CARD=$VKMS LIBGL_ALWAYS_SOFTWARE=1 MESA_LOADER_DRIVER_OVERRIDE=kms_swrast ;;
+  vkms+libgl_software) export GOSAAB_RENDER_CARD=$VKMS LIBGL_ALWAYS_SOFTWARE=1 ;;
+  vkms+swrast) export GOSAAB_RENDER_CARD=$VKMS MESA_LOADER_DRIVER_OVERRIDE=swrast ;;
+  vgem-render+software) export WLR_RENDER_DRM_DEVICE=/dev/dri/renderD128 LIBGL_ALWAYS_SOFTWARE=1 ;;
+esac
+rm -f "$XDG_RUNTIME_DIR/gosaab-wm.socket"
 "$BUILD/gosaab-wm" -s "swaybg -i $WALL -m fill" >"$OUT/gosaab-wm.log" 2>&1 &
 WM=$!
 for _ in $(seq 1 50); do [ -s "$XDG_RUNTIME_DIR/gosaab-wm.socket" ] && break; sleep 0.1; done
-check "compositor starts" "[ -s $XDG_RUNTIME_DIR/gosaab-wm.socket ] && kill -0 $WM"
+check "compositor starts (GPU setup: ${SETUP:-none})" "[ -n \"$SETUP\" ] && [ -s $XDG_RUNTIME_DIR/gosaab-wm.socket ] && kill -0 $WM"
 export WAYLAND_DISPLAY=$(cat "$XDG_RUNTIME_DIR/gosaab-wm.socket" 2>/dev/null)
 sleep 1.5
 shot 01-wallpaper
