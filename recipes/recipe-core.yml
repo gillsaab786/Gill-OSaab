@@ -67,6 +67,7 @@ modules:
         - bolt
         - iio-sensor-proxy
         - usbutils
+        - python3-evdev
         - pciutils
         - wdisplays
         - xwayland-satellite

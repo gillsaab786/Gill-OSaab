@@ -25,7 +25,15 @@ PanelWindow {
         .sort((a, b) => a.name.localeCompare(b.name))
     readonly property int pages: Math.max(1, Math.ceil(apps.length / perPage))
     property int page: 0
-    onQueryChanged: page = 0
+    property int selected: -1 // highlighted app (controller D-pad / arrow keys), -1 = none
+    onQueryChanged: { page = 0; selected = query === "" ? -1 : 0 }
+    function moveSelection(dx, dy) {
+        if (apps.length === 0) return
+        let i = selected < 0 ? page * perPage : selected + dx + dy * columns
+        i = Math.max(0, Math.min(apps.length - 1, i))
+        selected = i
+        page = Math.floor(i / perPage)
+    }
 
     function open(e) {
         e.execute()
@@ -67,9 +75,11 @@ PanelWindow {
                 color: Theme.text; font { family: Theme.font; pixelSize: 14 }
                 Text { visible: !search.text; text: "Search"; color: Theme.subtext; font: search.font }
                 Keys.onEscapePressed: { if (search.text) search.text = ""; else ShellState.launchpad = false }
-                Keys.onReturnPressed: if (pad.apps.length) pad.open(pad.apps[0])
-                Keys.onRightPressed: pad.page = Math.min(pad.page + 1, pad.pages - 1)
-                Keys.onLeftPressed: pad.page = Math.max(pad.page - 1, 0)
+                Keys.onReturnPressed: if (pad.apps.length) pad.open(pad.apps[Math.max(0, pad.selected)])
+                Keys.onRightPressed: pad.moveSelection(1, 0)
+                Keys.onLeftPressed: pad.moveSelection(-1, 0)
+                Keys.onUpPressed: pad.moveSelection(0, -1)
+                Keys.onDownPressed: pad.moveSelection(0, 1)
             }
         }
 
@@ -100,7 +110,14 @@ PanelWindow {
                                 model: pad.apps.slice(pageItem.index * pad.perPage, (pageItem.index + 1) * pad.perPage)
                                 Item {
                                     required property var modelData
+                                    required property int index
                                     width: parent.cellW; height: parent.cellH
+                                    Rectangle { // controller / keyboard highlight: glass pill around the app
+                                        anchors.fill: parent; anchors.margins: 6; radius: 26
+                                        color: Qt.rgba(1, 1, 1, 0.16)
+                                        visible: pad.selected === pageItem.index * pad.perPage + parent.index
+                                        GlassRim { radius: 26 }
+                                    }
                                     Column {
                                         anchors.centerIn: parent
                                         spacing: 8

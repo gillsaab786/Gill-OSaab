@@ -1,0 +1,155 @@
+#!/usr/bin/python3
+"""Use the handheld's controller on the Gill-OSaab desktop (not needed in Game Mode).
+
+  left stick   pointer            right stick  scroll
+  A            click              B            right-click / back (Esc)
+  X            Spotlight          Y            Launchpad
+  D-pad        arrow keys         Start        Enter
+  LB / RB      previous / next window          Guide (Xbox/ROG button)  Control Centre
+  View + Menu (Select + Start) held together: turn controller-as-mouse off/on (e.g. for a game)
+"""
+import math
+import os
+import select
+import subprocess
+import sys
+import time
+
+try:
+    import evdev
+    from evdev import ecodes as e
+except ImportError:  # pragma: no cover
+    evdev = None
+
+DEADZONE = 0.15
+SPEED = 1400.0     # pixels per second at full tilt
+SCROLL = 14.0      # scroll steps per second at full tilt
+
+BUTTONS = {  # controller button -> action
+    "BTN_SOUTH": ("mouse", "BTN_LEFT"), "BTN_EAST": ("key", ["KEY_ESC"]),
+    "BTN_NORTH": ("key", ["KEY_LEFTMETA", "KEY_SPACE"]), "BTN_WEST": ("key", ["KEY_LEFTMETA", "KEY_G"]),
+    "BTN_START": ("key", ["KEY_ENTER"]), "BTN_MODE": ("key", ["KEY_LEFTMETA", "KEY_A"]),
+    "BTN_TL": ("key", ["KEY_LEFTALT", "KEY_LEFTSHIFT", "KEY_TAB"]), "BTN_TR": ("key", ["KEY_LEFTALT", "KEY_TAB"]),
+}
+RIGHT_CLICK_HOLD = 0.4  # hold B this long for a right-click instead of Esc
+
+
+def curve(value):
+    """Stick value -1..1 -> speed -1..1 with a deadzone and a gentle curve for precise aiming."""
+    if abs(value) < DEADZONE:
+        return 0.0
+    v = (abs(value) - DEADZONE) / (1 - DEADZONE)
+    return math.copysign(v ** 1.8, value)
+
+
+def normalise(raw, info):
+    mid = (info.max + info.min) / 2
+    half = (info.max - info.min) / 2 or 1
+    return max(-1.0, min(1.0, (raw - mid) / half))
+
+
+def is_gamepad(dev):
+    caps = dev.capabilities()
+    keys = caps.get(e.EV_KEY, [])
+    return e.BTN_SOUTH in keys and e.EV_ABS in caps and "gosaab" not in dev.name.lower()
+
+
+def notify(text):
+    subprocess.run(["notify-send", "-a", "Controller", "-i", "input-gaming", "Controller", text], check=False)
+
+
+def main():
+    if evdev is None:
+        print("python3-evdev missing", file=sys.stderr)
+        return 1
+    ui = evdev.UInput({e.EV_KEY: [e.BTN_LEFT, e.BTN_RIGHT] + [getattr(e, k) for v in BUTTONS.values()
+                                                             if v[0] == "key" for k in v[1]] +
+                       [e.KEY_UP, e.KEY_DOWN, e.KEY_LEFT, e.KEY_RIGHT],
+                       e.EV_REL: [e.REL_X, e.REL_Y, e.REL_WHEEL, e.REL_HWHEEL]}, name="gosaab-gamepad-mouse")
+    enabled = os.environ.get("GOSAAB_GAMEPAD", "on") != "off"
+    pads, axes = {}, {}
+    held, b_down = set(), 0.0
+    frac = [0.0, 0.0, 0.0, 0.0]
+    last = time.monotonic()
+    while True:
+        for path in evdev.list_devices():  # pick up controllers as they connect
+            if path not in pads:
+                try:
+                    dev = evdev.InputDevice(path)
+                    if is_gamepad(dev):
+                        pads[path] = dev
+                except OSError:
+                    pass
+        fds = {d.fd: p for p, d in pads.items()}
+        ready, _, _ = select.select(list(fds), [], [], 1 / 120)
+        for fd in ready:
+            dev = pads[fds[fd]]
+            try:
+                events = list(dev.read())
+            except OSError:  # unplugged
+                del pads[fds[fd]]
+                continue
+            for ev in events:
+                if ev.type == e.EV_ABS:
+                    name = e.ABS[ev.code] if not isinstance(e.ABS[ev.code], list) else e.ABS[ev.code][0]
+                    if name in ("ABS_HAT0X", "ABS_HAT0Y") and enabled:
+                        key = {("ABS_HAT0X", -1): e.KEY_LEFT, ("ABS_HAT0X", 1): e.KEY_RIGHT,
+                               ("ABS_HAT0Y", -1): e.KEY_UP, ("ABS_HAT0Y", 1): e.KEY_DOWN}.get((name, ev.value))
+                        if key:
+                            ui.write(e.EV_KEY, key, 1); ui.write(e.EV_KEY, key, 0); ui.syn()
+                    else:
+                        axes[name] = normalise(ev.value, dev.absinfo(ev.code))
+                elif ev.type == e.EV_KEY:
+                    names = e.BTN.get(ev.code) or e.KEY.get(ev.code)
+                    name = names[0] if isinstance(names, list) else names
+                    if ev.value == 1:
+                        held.add(name)
+                    elif ev.value == 0:
+                        held.discard(name)
+                    if {"BTN_SELECT", "BTN_START"} <= held:
+                        enabled = not enabled
+                        held.clear()
+                        notify("Controller works as a mouse" if enabled else "Controller is free for games")
+                        continue
+                    if not enabled or name not in BUTTONS or name == "BTN_START" and "BTN_SELECT" in held:
+                        continue
+                    kind, target = BUTTONS[name]
+                    if name == "BTN_EAST":  # B: tap = back, hold = right-click
+                        if ev.value == 1:
+                            b_down = time.monotonic()
+                        elif ev.value == 0:
+                            if time.monotonic() - b_down >= RIGHT_CLICK_HOLD:
+                                ui.write(e.EV_KEY, e.BTN_RIGHT, 1); ui.write(e.EV_KEY, e.BTN_RIGHT, 0)
+                            else:
+                                ui.write(e.EV_KEY, e.KEY_ESC, 1); ui.write(e.EV_KEY, e.KEY_ESC, 0)
+                            ui.syn()
+                        continue
+                    if kind == "mouse" and ev.value in (0, 1):
+                        ui.write(e.EV_KEY, getattr(e, target), ev.value); ui.syn()
+                    elif kind == "key" and ev.value == 1:
+                        codes = [getattr(e, k) for k in target]
+                        for c in codes:
+                            ui.write(e.EV_KEY, c, 1)
+                        for c in reversed(codes):
+                            ui.write(e.EV_KEY, c, 0)
+                        ui.syn()
+        now = time.monotonic()
+        dt, last = now - last, now
+        if enabled and pads:
+            moves = [curve(axes.get("ABS_X", 0)) * SPEED * dt, curve(axes.get("ABS_Y", 0)) * SPEED * dt,
+                     -curve(axes.get("ABS_RY", 0)) * SCROLL * dt, curve(axes.get("ABS_RX", 0)) * SCROLL * dt]
+            out = []
+            for i, m in enumerate(moves):
+                frac[i] += m
+                whole = int(frac[i])
+                frac[i] -= whole
+                out.append(whole)
+            for code, v in zip((e.REL_X, e.REL_Y, e.REL_WHEEL, e.REL_HWHEEL), out):
+                if v:
+                    ui.write(e.EV_REL, code, v)
+            if any(out):
+                ui.syn()
+
+
+if __name__ == "__main__":
+    sys.exit(main())

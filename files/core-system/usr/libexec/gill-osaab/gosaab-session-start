@@ -21,6 +21,8 @@ swayidle -w \
 command -v waydroid >/dev/null && /usr/libexec/gill-osaab/gosaab-android-notify &
 # first sign-in: Android with Play Store, Flathub, Bottles (progress in notifications)
 /usr/libexec/gill-osaab/gosaab-first-setup &
+# the handheld's controller works as mouse + keys on the desktop (View+Menu toggles it)
+/usr/libexec/gill-osaab/gosaab-gamepad &
 # the menu bar, Dock, notifications, Control Centre, Spotlight, Launchpad, lock screen
 while :; do
   qs -c gill-osaab
