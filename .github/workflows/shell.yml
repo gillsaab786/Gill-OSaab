@@ -10,6 +10,8 @@ jobs:
   compositor:
     name: Build and test gosaab-wm
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - name: Virtual GPU (vkms)
@@ -33,3 +35,11 @@ jobs:
         with:
           name: gosaab-wm-screenshots
           path: artifacts/
+      - name: Publish screenshots to the ci-shots branch
+        if: always()
+        run: |
+          sudo chown -R "$(id -u)" artifacts 2>/dev/null || exit 0
+          cd artifacts
+          git init -q && git checkout -q -b ci-shots
+          git add -A && git -c user.name=gill-osaab-ci -c user.email=ci@gill-osaab.local commit -qm "screens for ${GITHUB_SHA}"
+          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" ci-shots

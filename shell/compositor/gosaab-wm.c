@@ -140,6 +140,7 @@ struct gs_toplevel {
 	struct wl_listener request_move, request_resize, request_maximize, request_fullscreen;
 	bool mapped, placed, maximized;
 	struct wlr_box saved; /* geometry before maximise */
+	struct wlr_xdg_toplevel_decoration_v1 *decoration;
 	struct gs_anim open;
 };
 
@@ -531,6 +532,10 @@ static void set_maximized(struct gs_toplevel *t, bool maximized) {
 static void toplevel_commit(struct wl_listener *listener, void *data) {
 	struct gs_toplevel *t = wl_container_of(listener, t, commit);
 	if (t->xdg_toplevel->base->initial_commit) {
+		if (t->decoration) {
+			wlr_xdg_toplevel_decoration_v1_set_mode(t->decoration,
+				WLR_XDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE);
+		}
 		wlr_xdg_toplevel_set_size(t->xdg_toplevel, 0, 0);
 		wlr_xdg_toplevel_set_wm_capabilities(t->xdg_toplevel,
 			WLR_XDG_TOPLEVEL_WM_CAPABILITIES_MAXIMIZE | WLR_XDG_TOPLEVEL_WM_CAPABILITIES_FULLSCREEN);
@@ -789,10 +794,58 @@ static void server_new_xdg_popup(struct wl_listener *listener, void *data) {
 	wl_signal_add(&xdg_popup->events.destroy, &popup->destroy);
 }
 
+struct gs_decoration {
+	struct wlr_xdg_toplevel_decoration_v1 *decoration;
+	struct gs_toplevel *toplevel;
+	struct wl_listener request_mode, destroy;
+};
+
+static struct gs_toplevel *toplevel_from_xdg(struct wlr_xdg_toplevel *xdg_toplevel) {
+	struct wlr_scene_tree *xdg_tree = xdg_toplevel->base->data;
+	if (xdg_tree == NULL || xdg_tree->node.parent == NULL) {
+		return NULL;
+	}
+	return xdg_tree->node.parent->node.data;
+}
+
+/* Apps draw their own title bars for now; Gill-OSaab title bars come later.
+ * The mode may only be sent once the toplevel has made its initial commit. */
+static void decoration_apply(struct gs_decoration *d) {
+	if (d->decoration->toplevel->base->initialized) {
+		wlr_xdg_toplevel_decoration_v1_set_mode(d->decoration,
+			WLR_XDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE);
+	}
+}
+
+static void decoration_request_mode(struct wl_listener *listener, void *data) {
+	struct gs_decoration *d = wl_container_of(listener, d, request_mode);
+	decoration_apply(d);
+}
+
+static void decoration_destroy(struct wl_listener *listener, void *data) {
+	struct gs_decoration *d = wl_container_of(listener, d, destroy);
+	struct gs_toplevel *t = toplevel_from_xdg(d->decoration->toplevel);
+	if (t && t->decoration == d->decoration) {
+		t->decoration = NULL;
+	}
+	wl_list_remove(&d->request_mode.link);
+	wl_list_remove(&d->destroy.link);
+	free(d);
+}
+
 static void handle_new_decoration(struct wl_listener *listener, void *data) {
 	struct wlr_xdg_toplevel_decoration_v1 *decoration = data;
-	/* Apps draw their own title bars for now; Gill-OSaab title bars come later. */
-	wlr_xdg_toplevel_decoration_v1_set_mode(decoration, WLR_XDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE);
+	struct gs_decoration *d = calloc(1, sizeof(*d));
+	d->decoration = decoration;
+	struct gs_toplevel *t = toplevel_from_xdg(decoration->toplevel);
+	if (t) {
+		t->decoration = decoration;
+	}
+	d->request_mode.notify = decoration_request_mode;
+	wl_signal_add(&decoration->events.request_mode, &d->request_mode);
+	d->destroy.notify = decoration_destroy;
+	wl_signal_add(&decoration->events.destroy, &d->destroy);
+	decoration_apply(d);
 }
 
 /* ------------------------------------------------------------------ input */
