@@ -9,7 +9,7 @@ WALL=files/system/usr/share/wallpapers/GillOSaab/contents/images_dark/3840x2160.
 mkdir -p "$OUT"
 export XDG_RUNTIME_DIR=/tmp/gosaab-xdg
 rm -rf "$XDG_RUNTIME_DIR" && mkdir -p -m 700 "$XDG_RUNTIME_DIR"
-export WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 GOSAAB_HEADLESS_SIZE=1920x1080
+export WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 GOSAAB_HEADLESS_SIZE=1920x1080 WLR_RENDERER_ALLOW_SOFTWARE=1
 unset WAYLAND_DISPLAY
 
 # Find the virtual cards (vkms / vgem show up as "faux_driver" on new kernels)
