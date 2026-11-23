@@ -25,6 +25,10 @@ Qt Quick via Quickshell. Runs on the Gill-OSaab Core image (minimal Fedora bootc
 5. Download/progress notifications in the desktop: run gosaab-notify-hub's JobView + Unity
    LauncherEntry bridges in the Core desktop too (Chromium, file copies, Steam, Flatpak).
 6. Android (Waydroid) notifications, incl. download progress, mirrored to the shell.
+7. Windows apps: DXVK + VKD3D-Proton in the .exe sandboxes (gosaab-open) for full-speed DirectX;
+   check 32-bit (new WoW64) apps and installers in CI with a test .exe.
+8. Android apps: Waydroid multi-window mode on by default (each app its own resizable window,
+   full screen on maximise), ARM translation (libndk on AMD/Intel) for ARM-only apps, GPU accel.
 
 ## Milestones
 - [x] **M1 Window manager core**: windows, popups, layer-shell (bar/dock/wallpaper), centred
