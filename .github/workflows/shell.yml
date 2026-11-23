@@ -7,41 +7,29 @@ on:
   workflow_dispatch:
 
 jobs:
-  probe:
-    name: Probe toolchain
-    runs-on: ubuntu-latest
-    container: registry.fedoraproject.org/fedora:45
-    steps:
-      - name: Package versions
-        run: |
-          dnf -y -q install dnf5-plugins >/dev/null 2>&1 || true
-          for p in wlroots-devel scenefx-devel wayland-devel wayland-protocols-devel libxkbcommon-devel \
-                   pixman-devel libinput-devel libseat-devel mesa-libGLES-devel meson ninja-build gcc \
-                   grim xorg-x11-server-Xwayland quickshell layer-shell-qt-devel qt6-qtdeclarative-devel \
-                   qt6-qtwayland-devel cairo-devel pango-devel; do
-            v=$(dnf -q repoquery --latest-limit 1 --qf '%{version}-%{release}' "$p" 2>/dev/null | head -1)
-            echo "$p: ${v:-NOT FOUND}"
-          done
-          dnf -y -q copr enable errornointernet/quickshell >/dev/null 2>&1 && \
-            echo "copr quickshell: $(dnf -q repoquery --latest-limit 1 --qf '%{version}' quickshell | head -1)" || \
-            echo "copr quickshell: unavailable"
-
-  probe-gpu:
-    name: Probe virtual GPU
+  compositor:
+    name: Build and test gosaab-wm
     runs-on: ubuntu-latest
     steps:
-      - name: Load virtual KMS / GEM drivers
+      - uses: actions/checkout@v4
+      - name: Virtual GPU (vkms)
+        run: sudo modprobe vkms && ls -la /dev/dri
+      - name: Build, unit tests, headless run with screenshots
         run: |
-          uname -r
-          sudo modprobe vkms && echo "vkms loaded" || echo "vkms unavailable"
-          sudo modprobe vgem && echo "vgem loaded" || echo "vgem unavailable"
-          ls -la /dev/dri || true
-      - name: EGL on the virtual device inside Fedora
-        run: |
-          docker run --rm --privileged -v /dev/dri:/dev/dri registry.fedoraproject.org/fedora:45 bash -c '
-            dnf -y -q install mesa-dri-drivers mesa-libEGL mesa-demos >/dev/null 2>&1
-            ls -la /dev/dri
-            for node in /dev/dri/card* /dev/dri/renderD*; do
-              echo "== $node"; EGL_PLATFORM=surfaceless eglinfo -B 2>&1 | grep -iE "renderer|vendor" | head -4
-            done
-            MESA_LOADER_DRIVER_OVERRIDE=kms_swrast eglinfo -B 2>&1 | grep -iE "gbm|renderer" | head -6'
+          docker run --rm --privileged -v /dev/dri:/dev/dri -v "$PWD":/src -w /src \
+            registry.fedoraproject.org/fedora:45 bash -c '
+              set -e
+              dnf -y -q install gcc meson ninja-build pkgconf wayland-devel wayland-protocols-devel \
+                wlroots-devel scenefx-devel libxkbcommon-devel pixman-devel \
+                mesa-dri-drivers mesa-libEGL mesa-libgbm grim foot swaybg \
+                dejavu-sans-mono-fonts python3-pillow procps-ng >/dev/null
+              meson setup shell/compositor/build shell/compositor
+              meson compile -C shell/compositor/build
+              meson test -C shell/compositor/build --print-errorlogs
+              bash shell/tests/run-headless.sh shell/compositor/build artifacts'
+      - name: Upload screenshots and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gosaab-wm-screenshots
+          path: artifacts/
