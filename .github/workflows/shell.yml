@@ -25,7 +25,7 @@ jobs:
                 wlroots-devel scenefx-devel libxkbcommon-devel pixman-devel \
                 mesa-dri-drivers mesa-libEGL mesa-libgbm grim foot swaybg \
                 dejavu-sans-mono-fonts python3-pillow procps-ng \
-                pango-devel cairo-devel libdrm-devel libinput-devel rsms-inter-fonts >/dev/null
+                pango-devel cairo-devel libdrm-devel libinput-devel git-core mesa-libEGL-devel mesa-libgbm-devel libglvnd-devel rsms-inter-fonts >/dev/null
               dnf -y -q install wlr-randr python3-gobject glib2 dbus-daemon libnotify adwaita-icon-theme qt6-qtsvg qt6-qtwayland >/dev/null
               dnf -y -q install xwayland-satellite xorg-x11-server-Xwayland xkeyboard-config sddm >/dev/null || echo "no xwayland-satellite package"
               dnf -y -q install xclock >/dev/null 2>&1 || dnf -y -q install xorg-x11-apps >/dev/null 2>&1 || echo "no xclock"

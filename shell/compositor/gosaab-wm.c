@@ -1102,6 +1102,11 @@ static void layer_update_blur(struct gs_layer *l) {
 	if (r) {
 		wlr_scene_blur_set_corner_radii(l->blur, corner_radii_all(atoi(r + 2)));
 	}
+	/* Liquid Glass: the glass bends the picture behind it near its edges (not the full-screen
+	 * Launchpad/Spotlight backdrops, only floating panels: bar, Dock, menus, notifications) */
+	bool floating = strncmp(ls->namespace, "gosaab-launchpad", 16) != 0 &&
+		strncmp(ls->namespace, "gosaab-spotlight", 16) != 0 && strncmp(ls->namespace, "gosaab-dismiss", 14) != 0;
+	wlr_scene_blur_set_lens(l->blur, floating && !getenv("GOSAAB_NO_LENS") ? 18.0f : 0.0f);
 	struct wlr_scene_buffer *buffer = NULL;
 	wlr_scene_node_for_each_buffer(&l->scene->tree->node, find_surface_buffer, &buffer);
 	if (buffer) {

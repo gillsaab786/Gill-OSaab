@@ -13,7 +13,9 @@ cc = meson.get_compiler('c')
 wayland_server = dependency('wayland-server')
 wayland_protos = dependency('wayland-protocols')
 wlroots = dependency('wlroots-0.20')
-scenefx = dependency('scenefx-0.5')
+# scenefx with our Liquid Glass lens patch (subprojects/scenefx.wrap), built in statically
+scenefx = subproject('scenefx', default_options: ['default_library=static', 'examples=false',
+  'werror=false']).get_variable('scenefx')
 xkbcommon = dependency('xkbcommon')
 math = cc.find_library('m')
 pangocairo = dependency('pangocairo')

@@ -1,0 +1,171 @@
+diff --git a/include/render/fx_renderer/shaders.h b/include/render/fx_renderer/shaders.h
+index f3a2bd5..7c8b774 100644
+--- a/include/render/fx_renderer/shaders.h
++++ b/include/render/fx_renderer/shaders.h
+@@ -126,6 +126,9 @@ struct tex_shader {
+ 		GLint clip_size;
+ 		GLint clip_position;
+ 		struct shader_corner_radii clip_radius;
++
++		GLint lens;
++		GLint tex_px;
+ 	} effects;
+ };
+ 
+diff --git a/include/scenefx/render/pass.h b/include/scenefx/render/pass.h
+index 0ef3750..9565aa6 100644
+--- a/include/scenefx/render/pass.h
++++ b/include/scenefx/render/pass.h
+@@ -47,6 +47,7 @@ struct fx_render_texture_options {
+ 	struct fx_corner_fradii corners;
+ 	bool discard_transparent;
+ 	struct clipped_fregion clipped_region;
++	float lens; // Liquid Glass edge bending band in px (0 = off)
+ };
+ 
+ struct fx_render_rect_options {
+diff --git a/include/scenefx/types/wlr_scene.h b/include/scenefx/types/wlr_scene.h
+index ac1bc49..754cdb5 100644
+--- a/include/scenefx/types/wlr_scene.h
++++ b/include/scenefx/types/wlr_scene.h
+@@ -182,6 +182,8 @@ struct wlr_scene_blur {
+ 	bool should_only_blur_bottom_layer;
+ 
+ 	struct linked_node transparency_mask_source;
++
++	float lens; // Gill-OSaab: Liquid Glass edge bending band in px (0 = off)
+ };
+ 
+ /** A scene-graph node telling SceneFX to render the optimized blur */
+@@ -661,6 +663,12 @@ struct wlr_scene_buffer *wlr_scene_blur_get_transparency_mask_source(
+  */
+ void wlr_scene_blur_set_alpha(struct wlr_scene_blur *blur, float alpha);
+ 
++/**
++ * Gill-OSaab: bend the blurred background near the node's edges like thick glass
++ * (Liquid Glass). `lens` is the width of the bending band in pixels; 0 turns it off.
++ */
++void wlr_scene_blur_set_lens(struct wlr_scene_blur *blur, float lens);
++
+ /**
+  * Sets the blur strength from 1.0f -> 0.0f. This adjusts how strong the blur is
+  * relative to the base 1.0 value.
+diff --git a/render/fx_renderer/fx_pass.c b/render/fx_renderer/fx_pass.c
+index 39b6226..852c6b8 100644
+--- a/render/fx_renderer/fx_pass.c
++++ b/render/fx_renderer/fx_pass.c
+@@ -357,7 +357,7 @@ void fx_render_pass_add_texture(struct fx_gles_render_pass *pass,
+ 	struct tex_shader *shader = NULL;
+ 
+ 	bool use_effects = !fx_corner_fradii_is_empty(&fx_options->corners)
+-		|| clipped_fregion_is_valid(&fx_options->clipped_region);
++		|| clipped_fregion_is_valid(&fx_options->clipped_region) || fx_options->lens > 0;
+ 	switch (texture->target) {
+ 	case GL_TEXTURE_2D:
+ 		if (texture->has_alpha) {
+@@ -487,6 +487,10 @@ void fx_render_pass_add_texture(struct fx_gles_render_pass *pass,
+ 		glUniform2f(shader->effects.clip_size, clipped_region_box.width, clipped_region_box.height);
+ 		glUniform2f(shader->effects.clip_position, clipped_region_box.x, clipped_region_box.y);
+ 		uniform_corner_radii_set(&shader->effects.clip_radius, &clipped_region_corners);
++
++		glUniform1f(shader->effects.lens, fx_options->lens);
++		glUniform2f(shader->effects.tex_px, 1.0f / (texture->wlr_texture.width ? texture->wlr_texture.width : 1),
++			1.0f / (texture->wlr_texture.height ? texture->wlr_texture.height : 1));
+ 	}
+ 
+ 	set_proj_matrix(shader->proj, pass->projection_matrix, &dst_box);
+@@ -1141,6 +1145,7 @@ void fx_render_pass_add_blur(struct fx_gles_render_pass *pass,
+ 
+ 		struct fx_render_texture_options tex_options = fx_options->tex_options;
+ 		tex_options.discard_transparent = true;
++		tex_options.lens = 0; // the stencil uses the panel's real shape
+ 		tex_options.clipped_region = fx_options->clipped_region;
+ 		fx_render_pass_add_texture(pass, &tex_options);
+ 
+diff --git a/render/fx_renderer/shaders.c b/render/fx_renderer/shaders.c
+index 51cfe90..c77ab6e 100644
+--- a/render/fx_renderer/shaders.c
++++ b/render/fx_renderer/shaders.c
+@@ -266,6 +266,8 @@ bool link_tex_program(struct tex_shader *shader, enum fx_tex_shader_source sourc
+ 	if (!effects) {
+ 		return true;
+ 	}
++	shader->effects.lens = glGetUniformLocation(prog, "lens");
++	shader->effects.tex_px = glGetUniformLocation(prog, "tex_px");
+ 	shader->effects.size = glGetUniformLocation(prog, "size");
+ 	shader->effects.position = glGetUniformLocation(prog, "position");
+ 	shader->effects.radius.top_left = glGetUniformLocation(prog, "radius_top_left");
+diff --git a/render/fx_renderer/shaders/tex.frag b/render/fx_renderer/shaders/tex.frag
+index 11e3102..51c62cb 100644
+--- a/render/fx_renderer/shaders/tex.frag
++++ b/render/fx_renderer/shaders/tex.frag
+@@ -43,15 +43,39 @@ uniform float clip_radius_top_left;
+ uniform float clip_radius_top_right;
+ uniform float clip_radius_bottom_left;
+ uniform float clip_radius_bottom_right;
++
++// Liquid Glass lens (Gill-OSaab): near the edges, the glass bends what is behind it
++uniform float lens;   // width of the bending band in pixels (0 = off)
++uniform vec2 tex_px;  // one pixel in texture coordinates
+ #endif
+ 
+ uniform bool discard_transparent;
+ 
++vec2 lens_uv() {
++#if EFFECTS
++	if (lens > 0.0) {
++		vec2 rel = gl_FragCoord.xy - position;
++		float edge = min(min(rel.x, size.x - rel.x), min(rel.y, size.y - rel.y));
++		float band = min(lens, 0.5 * min(size.x, size.y));
++		if (edge >= 0.0 && edge < band) {
++			float t = 1.0 - edge / band;
++			vec2 to_centre = 0.5 * size - rel;
++			float len = max(length(to_centre), 1.0);
++			// pull the picture in from the edge, strongest right at the rim (a convex glass edge)
++			vec2 shift = to_centre / len * band * 0.45 * t * t;
++			return v_texcoord + vec2(shift.x, -shift.y) * tex_px;
++		}
++	}
++#endif
++	return v_texcoord;
++}
++
+ vec4 sample_texture() {
++	vec2 uv = lens_uv();
+ #if SOURCE == SOURCE_TEXTURE_RGBA || SOURCE == SOURCE_TEXTURE_EXTERNAL
+-	return texture2D(tex, v_texcoord);
++	return texture2D(tex, uv);
+ #elif SOURCE == SOURCE_TEXTURE_RGBX
+-	return vec4(texture2D(tex, v_texcoord).rgb, 1.0);
++	return vec4(texture2D(tex, uv).rgb, 1.0);
+ #endif
+ }
+ 
+diff --git a/types/scene/wlr_scene.c b/types/scene/wlr_scene.c
+index 9a9fcc0..7ddc75c 100644
+--- a/types/scene/wlr_scene.c
++++ b/types/scene/wlr_scene.c
+@@ -1170,6 +1170,15 @@ struct wlr_scene_buffer *wlr_scene_blur_get_transparency_mask_source(
+ 	return output;
+ }
+ 
++void wlr_scene_blur_set_lens(struct wlr_scene_blur *blur, float lens) {
++	if (blur->lens == lens) {
++		return;
++	}
++
++	blur->lens = lens;
++	scene_node_update(&blur->node, NULL);
++}
++
+ void wlr_scene_blur_set_alpha(struct wlr_scene_blur *blur, float alpha) {
+ 	if (blur->alpha == alpha) {
+ 		return;
+@@ -2224,6 +2233,7 @@ static void scene_entry_render(struct render_list_entry *entry, const struct ren
+ 				.clip_box = &dst_box,
+ 				.corners = fx_corner_radii_scale(blur_corners, data->scale),
+ 				.discard_transparent = false,
++				.lens = blur->lens * data->scale,
+ 			},
+ 			.use_optimized_blur = blur->should_only_blur_bottom_layer,
+ 			.blur_data = &scene->blur_data,
