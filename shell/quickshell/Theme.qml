@@ -48,7 +48,7 @@ Singleton {
         "nm-connection-editor", "lxqt-policykit-agent", "xdg-desktop-portal-gtk"]
     function listed(e) {
         // Wine's own helper apps (Notepad, Regedit, WineMine...) stay out; Wine Configuration stays in
-        if (e.id.startsWith("wine-") && e.id !== "wine-winecfg") return false
+        if (/^wine-(notepad|regedit|winemine|wordpad|winhelp|oleview|uninstaller|wineboot|taskmgr|control|cmd|iexplore|explorer|winefile|mime-msi|mime-.*)$/.test(e.id)) return false
         return !e.noDisplay && hiddenApps.indexOf(e.id) < 0
     }
 
