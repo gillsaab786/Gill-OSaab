@@ -87,6 +87,7 @@ modules:
         # --- Windows, Android and Linux apps
         - wine
         - wine-dxvk
+        - bindfs
         - git-core
         - python3-pip
         - waydroid

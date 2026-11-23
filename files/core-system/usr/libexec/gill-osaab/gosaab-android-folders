@@ -1,0 +1,24 @@
+#!/bin/sh
+# (root, after Waydroid starts) Android <-> your folders:
+#  - ~/Android shows what Android apps saved (Download, Pictures, Movies, Android/data/<app>...)
+#  - Android's Download folder can be any folder you choose (Settings > App Folders > Android)
+user=$(cat /etc/gill-osaab/boot-user 2>/dev/null)
+[ -n "$user" ] || user=$(awk -F: '$3>=1000 && $3<60000 {print $1; exit}' /etc/passwd)
+[ -n "$user" ] && command -v bindfs >/dev/null || exit 0
+home=$(getent passwd "$user" | cut -d: -f6)
+media="$home/.local/share/waydroid/data/media/0"
+[ -d "$media" ] || exit 0
+uid=$(id -u "$user"); gid=$(id -g "$user")
+# Android storage, readable and writable as you
+mkdir -p "$home/Android" && chown "$uid:$gid" "$home/Android"
+mountpoint -q "$home/Android" || bindfs -o nonempty --force-user="$uid" --force-group="$gid" \
+  --create-for-user=1023 --create-for-group=1023 "$media" "$home/Android"
+# Android's Download -> chosen folder, files show up as Android's media user inside Android
+conf="$home/.config/gill-osaab/app-folders/android.conf"
+target=$(grep -v '^#' "$conf" 2>/dev/null | grep . | tail -1) # newest choice
+if [ -n "$target" ] && [ -d "$target" ]; then
+  mkdir -p "$media/Download"
+  mountpoint -q "$media/Download" && umount "$media/Download"
+  bindfs -o nonempty --force-user=1023 --force-group=1023 --create-for-user="$uid" --create-for-group="$gid" \
+    "$target" "$media/Download"
+fi

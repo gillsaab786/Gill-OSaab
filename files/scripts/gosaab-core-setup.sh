@@ -34,6 +34,7 @@ EOF
 chmod 0755 /usr/libexec/gill-osaab/gosaab-session-select-root 2>/dev/null || true
 
 systemctl enable gosaab-boot-mode.service || log "warning: gosaab-boot-mode not enabled"
+systemctl enable gosaab-android-folders.service || log "warning: android folders not enabled"
 
 # Frame generation (off by default) comes from the lsfg-vk package (recipe); games opt in from
 # Settings > Game Mode or with the launch option LSFG_PROCESS=gosaab %command%

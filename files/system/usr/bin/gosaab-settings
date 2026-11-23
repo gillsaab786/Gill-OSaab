@@ -142,7 +142,8 @@ class Backend:
 
     def sandboxed_apps(self):
         """(id, label) of apps that run sealed off: Firefox, VLC and every Windows app."""
-        apps = [("firefox", "Firefox (downloads)"), ("vlc", "VLC (videos and music)")]
+        apps = [("firefox", "Firefox (downloads)"), ("vlc", "VLC (videos and music)"),
+                ("android", "Android downloads (1 folder; Android's files are in ~/Android)")]
         wine = Path.home() / ".local/share/gill-osaab/wine"
         if wine.is_dir():
             apps += [(d.name, f"Windows app: {d.name}") for d in sorted(wine.iterdir()) if d.is_dir()]

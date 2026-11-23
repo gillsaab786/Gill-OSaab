@@ -22,5 +22,7 @@ if git clone -q --depth 1 https://github.com/casualsnek/waydroid_script "$tmp/ws
     "$tmp/venv/bin/python" "$tmp/ws/main.py" install libndk || echo "   (skipped: translation could not be installed)"
 fi
 rm -rf "$tmp"
-echo "4/4 Done. Open an .apk to install it, or open Play Store from Launchpad."
+systemctl restart gosaab-android-folders.service || true
+echo "4/4 Done. Android files: the Android folder in your home."
+echo "Done. Open an .apk to install it, or open Play Store from Launchpad."
 echo "Google Play needs a one-time device registration: https://www.google.com/android/uncertified"

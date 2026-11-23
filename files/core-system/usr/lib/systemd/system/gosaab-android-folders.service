@@ -1,0 +1,12 @@
+[Unit]
+Description=Gill-OSaab: Android files in ~/Android, Android downloads to your chosen folder
+After=waydroid-container.service
+Wants=waydroid-container.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/gill-osaab/gosaab-android-folders
+
+[Install]
+WantedBy=multi-user.target
