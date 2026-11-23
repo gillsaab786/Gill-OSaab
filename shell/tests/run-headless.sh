@@ -17,8 +17,9 @@ unset WAYLAND_DISPLAY
 for card in /sys/class/drm/card[0-9]*; do
   [ -e "$card" ] || continue
   drv=$(basename "$(readlink -f "$card/device/driver" 2>/dev/null)")
-  echo "$(basename "$card"): $drv"
-  if [ "$drv" = vkms ] || [ "$drv" = faux_driver ]; then
+  dev=$(basename "$(readlink -f "$card/device" 2>/dev/null)")
+  echo "$(basename "$card"): driver=$drv device=$dev"
+  if [ "$drv" = vkms ] || [ "$dev" = vkms ]; then
     GOSAAB_RENDER_CARD=/dev/dri/$(basename "$card")
     export GOSAAB_RENDER_CARD
   fi
