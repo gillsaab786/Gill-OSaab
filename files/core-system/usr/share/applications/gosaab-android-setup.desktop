@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Set up Android apps
+Comment=Install Android (Waydroid) with Google Play, app windows and ARM support
+Exec=gosaab-android-setup
+Icon=waydroid
+Type=Application
+Categories=System;
+Keywords=android;waydroid;apk;play store;

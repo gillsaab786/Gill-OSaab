@@ -1,0 +1,51 @@
+#!/bin/sh
+# Run an app sealed off from your files: it sees only its own private home plus at most two
+# folders you allow in Settings > Privacy > App folders.
+#   gosaab-sandbox <app-name> <command> [args...]
+app=$1; shift
+[ -n "$app" ] && [ $# -gt 0 ] || { echo "usage: gosaab-sandbox APP COMMAND..." >&2; exit 2; }
+command -v bwrap >/dev/null || exec "$@"
+conf="$HOME/.config/gill-osaab/app-folders/$app.conf"
+if [ ! -f "$conf" ]; then # first run: sensible defaults
+  mkdir -p "$(dirname "$conf")"
+  dl=$(xdg-user-dir DOWNLOAD 2>/dev/null || echo "$HOME/Downloads")
+  case "$app" in
+    firefox|browser) printf '%s\n' "$dl" > "$conf" ;;
+    vlc) printf '%s\n%s\n' "$(xdg-user-dir VIDEOS 2>/dev/null || echo "$HOME/Videos")" \
+           "$(xdg-user-dir MUSIC 2>/dev/null || echo "$HOME/Music")" > "$conf" ;;
+    *) : > "$conf" ;;
+  esac
+fi
+home=$(realpath "$HOME")
+private="$home/.local/share/gill-osaab/sandbox/$app"
+mkdir -p "$private"
+binds=""
+n=0
+while IFS= read -r dir && [ $n -lt 2 ]; do
+  case "$dir" in ""|\#*) continue ;; esac
+  mkdir -p "$dir" 2>/dev/null
+  [ -d "$dir" ] || continue
+  binds="$binds$(realpath "$dir")
+"
+  n=$((n + 1))
+done < "$conf"
+# options in order: base system read-only, empty /home, the app's private home, allowed folders
+set -- "$@" # command stays last
+opts="--die-with-parent --ro-bind / / --dev-bind /dev /dev --proc /proc --tmpfs /tmp"
+cmd_count=$#
+set -- $opts --ro-bind-try /tmp/.X11-unix /tmp/.X11-unix --tmpfs "$(dirname "$home")" \
+  --bind "$private" "$home" --ro-bind-try "$home/.config/gill-osaab" "$home/.config/gill-osaab" "$@"
+IFS='
+'
+for b in $binds; do
+  # insert "--bind b b" just before the command (the last cmd_count arguments)
+  i=0; total=$#
+  for arg in "$@"; do
+    i=$((i + 1))
+    if [ $i -eq $((total - cmd_count + 1)) ]; then set -- "$@" --bind "$b" "$b"; fi
+    set -- "$@" "$arg"
+  done
+  shift $total
+done
+unset IFS
+exec bwrap "$@"

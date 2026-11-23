@@ -133,6 +133,20 @@ def home_root(home=None):
     return "/var/home" if home.startswith("/var/home/") else "/home"
 
 
+APP_FOLDERS = Path.home() / ".config" / "gill-osaab" / "app-folders"
+MAX_APP_FOLDERS = 2
+
+
+def allowed_folders(app):
+    """Up to two folders the user let this app use (Settings > Privacy > App folders)."""
+    try:
+        lines = (APP_FOLDERS / f"{app}.conf").read_text().splitlines()
+    except OSError:
+        return []
+    folders = [ln.strip() for ln in lines if ln.strip() and not ln.startswith("#")]
+    return [f for f in folders if Path(f).is_dir()][:MAX_APP_FOLDERS]
+
+
 def wine_command(prefix, args, sandbox, which=shutil.which):
     """Wine command line; in sandbox mode wrapped in bubblewrap so the app only
     sees its own prefix (plus the menu/icon folders Wine writes shortcuts to)."""
@@ -155,6 +169,7 @@ def wine_command(prefix, args, sandbox, which=shutil.which):
         "--bind", menu, menu,
         "--bind", icons, icons,
         "--setenv", "WINEPREFIX", prefix,
+    ] + [arg for f in allowed_folders(Path(prefix).name) for arg in ("--bind", real(f), real(f))] + [
         "--",
     ] + base
 
@@ -232,7 +247,9 @@ def require_waydroid():
     status = subprocess.run(["waydroid", "status"], capture_output=True, text=True, check=False)
     output = (status.stdout + status.stderr).lower()
     if "not initialized" in output:
-        raise SetupNeeded("Set up Android once: open a terminal and run  ujust setup-waydroid")
+        raise SetupNeeded("Set up Android once: open 'Set up Android apps' in Launchpad"
+                          if shutil.which("gosaab-android-setup") else
+                          "Set up Android once: open a terminal and run  ujust setup-waydroid")
     if "running" not in output:
         subprocess.Popen(["waydroid", "session", "start"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         subprocess.run(["sleep", "8"], check=False)

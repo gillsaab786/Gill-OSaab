@@ -18,6 +18,14 @@ jobs:
       - uses: actions/checkout@v4
       - name: Virtual GPU
         run: sudo modprobe vgem; sudo modprobe vkms; ls -l /dev/dri
+      - name: Build 32-bit and 64-bit Windows test apps
+        run: |
+          sudo apt-get install -y -q gcc-mingw-w64 >/dev/null
+          mkdir -p core-test
+          printf '#include <stdio.h>\nint main(void){printf("hello from %%d-bit\\n",(int)sizeof(void*)*8);return 0;}\n' > core-test/hello.c
+          x86_64-w64-mingw32-gcc -o core-test/hello64.exe core-test/hello.c
+          i686-w64-mingw32-gcc -o core-test/hello32.exe core-test/hello.c
+          ls -l core-test
       - name: Run the Core desktop from the image
         run: |
           echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin

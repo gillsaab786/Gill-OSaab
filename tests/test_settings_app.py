@@ -44,6 +44,16 @@ class FakeBackend:
     def kde_night_light(self):
         return False
 
+    def sandboxed_apps(self):
+        return [("firefox", "Firefox"), ("vlc", "VLC")]
+
+    def app_folders(self, app):
+        return getattr(self, "folders", {}).get(app, [])
+
+    def set_app_folders(self, app, folders):
+        self.folders = {**getattr(self, "folders", {}), app: list(folders)[:2]}
+        return 0
+
     def input_setting(self, key, default=True):
         return default
 
@@ -130,8 +140,8 @@ class SettingsApp(unittest.TestCase):
 
     def test_every_page_builds(self):
         w = self.gs.Settings(FakeBackend())
-        self.assertEqual(w.stack.count(), 9)
-        for i in range(9):
+        self.assertEqual(w.stack.count(), 10)
+        for i in range(10):
             w.nav.setCurrentRow(i)
             self.assertEqual(w.stack.currentIndex(), i)
 
@@ -140,6 +150,16 @@ class SettingsApp(unittest.TestCase):
         names = [w.nav.item(i).text() for i in range(w.nav.count())]
         self.assertIn("Game Mode", names)
         self.assertEqual([b.text() for b in w.boot_group.buttons()], ["Game Mode", "Desktop", "Ask"])
+
+    def test_app_folders_keep_two(self):
+        b = FakeBackend()
+        w = self.gs.Settings(b)
+        for f in ("/a", "/b", "/c"):
+            current = [x for x in b.app_folders("vlc") if x != f]
+            w.set_folders("vlc", (current + [f])[-2:])
+        self.assertEqual(b.app_folders("vlc"), ["/b", "/c"])
+        w.clear_folders("vlc")
+        self.assertEqual(b.app_folders("vlc"), [])
 
     def test_apply_dark_light(self):
         b = FakeBackend()

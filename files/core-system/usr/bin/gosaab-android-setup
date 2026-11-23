@@ -1,0 +1,26 @@
+#!/bin/sh
+# One-time Android (Waydroid) setup for Gill-OSaab Core: Android with Google Play, each app in
+# its own resizable window, and ARM translation so phone-only (ARM) apps run on AMD/Intel.
+if [ "$(id -u)" != 0 ]; then
+  exec foot -T "Set up Android apps" -e sh -c 'pkexec /usr/bin/gosaab-android-setup; echo; read -p "Press Enter to close." x'
+fi
+set -e
+user=$(logname 2>/dev/null || echo "${SUDO_USER:-${PKEXEC_UID:+$(id -nu "$PKEXEC_UID")}}")
+echo "1/4 Downloading Android (about 1 GB)..."
+waydroid init -s GAPPS -f
+systemctl enable --now waydroid-container.service
+echo "2/4 Each Android app gets its own window"
+cfg=/var/lib/waydroid/waydroid.cfg
+grep -q '^\[properties\]' "$cfg" || printf '\n[properties]\n' >> "$cfg"
+sed -i '/^persist.waydroid.multi_windows/d' "$cfg"
+sed -i '/^\[properties\]/a persist.waydroid.multi_windows = true' "$cfg"
+waydroid upgrade -o || true
+echo "3/4 ARM translation for phone-only apps (libndk)"
+tmp=$(mktemp -d)
+if git clone -q --depth 1 https://github.com/casualsnek/waydroid_script "$tmp/ws" 2>/dev/null; then
+  python3 -m venv "$tmp/venv" && "$tmp/venv/bin/pip" -q install -r "$tmp/ws/requirements.txt" &&
+    "$tmp/venv/bin/python" "$tmp/ws/main.py" install libndk || echo "   (skipped: translation could not be installed)"
+fi
+rm -rf "$tmp"
+echo "4/4 Done. Open an .apk to install it, or open Play Store from Launchpad."
+echo "Google Play needs a one-time device registration: https://www.google.com/android/uncertified"

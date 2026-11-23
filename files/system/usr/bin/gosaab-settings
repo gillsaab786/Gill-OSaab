@@ -138,6 +138,28 @@ class Backend:
         subprocess.run(["pkill", "-RTMIN+2", "-x", "gosaab-wm"], check=False)  # apply now
         return 0
 
+    APP_FOLDERS = Path.home() / ".config/gill-osaab/app-folders"
+
+    def sandboxed_apps(self):
+        """(id, label) of apps that run sealed off: Firefox, VLC and every Windows app."""
+        apps = [("firefox", "Firefox (downloads)"), ("vlc", "VLC (videos and music)")]
+        wine = Path.home() / ".local/share/gill-osaab/wine"
+        if wine.is_dir():
+            apps += [(d.name, f"Windows app: {d.name}") for d in sorted(wine.iterdir()) if d.is_dir()]
+        return apps
+
+    def app_folders(self, app):
+        try:
+            return [ln.strip() for ln in (self.APP_FOLDERS / f"{app}.conf").read_text().splitlines()
+                    if ln.strip() and not ln.startswith("#")][:2]
+        except OSError:
+            return []
+
+    def set_app_folders(self, app, folders):
+        self.APP_FOLDERS.mkdir(parents=True, exist_ok=True)
+        (self.APP_FOLDERS / f"{app}.conf").write_text("".join(f + "\n" for f in folders[:2]))
+        return 0
+
     def decky_plugin_installed(self):
         return (Path.home() / "homebrew/plugins/gill-osaab-notify/plugin.json").exists()
 
@@ -373,6 +395,7 @@ PAGES = [
     ("Updates", "#0A84FF", "system-software-update-symbolic", "U"),
     ("Device & Drivers", "#30D158", "computer-symbolic", "D"),
     ("Apps & Security", "#5E5CE6", "security-high-symbolic", "S"),
+    ("App Folders", "#64D2FF", "folder-symbolic", "F"),
     ("Notifications", "#FF453A", "preferences-system-notifications-symbolic", "N"),
     ("Screen Off", "#FF9F0A", "video-display-symbolic", "O"),
     ("Appearance", "#1FB6C9", "preferences-desktop-appearance-symbolic", "A"),
@@ -423,7 +446,7 @@ class Settings(QMainWindow):
         layout.addWidget(self.stack, 1)
         self.setCentralWidget(root)
 
-        builders = [self.page_updates, self.page_device, self.page_security, self.page_notifications,
+        builders = [self.page_updates, self.page_device, self.page_security, self.page_folders, self.page_notifications,
                     self.page_screen, self.page_appearance, self.page_gamemode, self.page_optional, self.page_about]
         self.pages = []
         for (name, color, glyph, letter), builder in zip(PAGES, builders):
@@ -662,6 +685,47 @@ class Settings(QMainWindow):
         reset.clicked.connect(self.apply_look)
         p.finish()
         return p
+
+    def page_folders(self):
+        p = Page("App Folders")
+        rows = []
+        self.folder_labels = {}
+        for app, label in self.backend.sandboxed_apps():
+            current = self.backend.app_folders(app)
+            text = QLabel("  ·  ".join(Path(f).name for f in current) or "Only its own files")
+            self.folder_labels[app] = text
+            box = QWidget()
+            bl = QHBoxLayout(box)
+            bl.setContentsMargins(0, 0, 0, 0)
+            bl.addWidget(text)
+            add = QPushButton("Choose…")
+            add.setObjectName("pill")
+            add.clicked.connect(lambda _=False, a=app: self.choose_folder(a))
+            clear = QPushButton("Clear")
+            clear.setObjectName("pill")
+            clear.clicked.connect(lambda _=False, a=app: self.clear_folders(a))
+            bl.addWidget(add)
+            bl.addWidget(clear)
+            rows.append(Row(label, "", box))
+        p.section("Each app is sealed off", rows, "Apps see only their own files plus up to 2 folders you "
+                  "choose here. Picking a third folder replaces the oldest. Changes apply next time the app "
+                  "opens.")
+        p.finish()
+        return p
+
+    def choose_folder(self, app):
+        from PySide6.QtWidgets import QFileDialog
+        folder = QFileDialog.getExistingDirectory(self, "Choose a folder this app may use", str(Path.home()))
+        if folder:
+            current = [f for f in self.backend.app_folders(app) if f != folder]
+            self.set_folders(app, (current + [folder])[-2:])
+
+    def clear_folders(self, app):
+        self.set_folders(app, [])
+
+    def set_folders(self, app, folders):
+        self.backend.set_app_folders(app, folders)
+        self.folder_labels[app].setText("  ·  ".join(Path(f).name for f in folders) or "Only its own files")
 
     def page_gamemode(self):
         p = Page("Game Mode")

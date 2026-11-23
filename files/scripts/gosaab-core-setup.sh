@@ -39,6 +39,13 @@ systemctl enable gosaab-boot-mode.service || log "warning: gosaab-boot-mode not 
 # Settings > Game Mode or with the launch option LSFG_PROCESS=gosaab %command%
 ls /usr/share/vulkan/implicit_layer.d/ 2>/dev/null | grep -qi lsfg || log "warning: lsfg-vk layer not installed"
 
+# Firefox and VLC run sandboxed: each sees only its own data plus up to two folders you allow
+for pair in firefox:firefox vlc:vlc org.videolan.VLC:vlc; do
+    desktop=/usr/share/applications/${pair%%:*}.desktop
+    [ -f "$desktop" ] && sed -i "s#^Exec=\(gosaab-sandbox [^ ]* \)\?#Exec=gosaab-sandbox ${pair##*:} #" "$desktop" &&
+        log "sandboxed ${pair%%:*}" || true
+done
+
 # Wine: make sure the plain "wine" command exists (Fedora may only ship it via alternatives)
 if [ ! -e /usr/bin/wine ]; then
     for c in /etc/alternatives/wine /usr/bin/wine64 /usr/bin/wine-stable /usr/lib64/wine/x86_64-unix/wine /usr/lib/wine/wine64; do
