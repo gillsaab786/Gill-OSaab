@@ -20,13 +20,19 @@ Qt Quick via Quickshell. Runs on the Gill-OSaab Core image (minimal Fedora bootc
       placement, maximise/fullscreen, Alt/Super+Tab, Super+Q/Return/F, spring open + fade/shrink
       close animations, rounded corners, shadows, blur, screencopy/xdg-output, clean shutdown.
       CI: 11/11 checks.
-- [ ] **M2 macOS window chrome**: server-side title bars drawn by gosaab-wm (traffic-light
-      close/minimise/zoom buttons, centred title in Inter, rounded on all corners, inactive
-      dimming), force SSD for apps that accept it; title bar scales with open/close animations.
-- [ ] **M3 Shell UI (Quickshell/QML)**: top bar (logo menu, app name, tray, clock, Control Center
-      button), floating dock with magnification + running indicators (needs
-      wlr-foreign-toplevel-management in gosaab-wm), wallpaper, notification server + center,
-      Control Center (Wi-Fi, Bluetooth, volume, brightness, dark mode, night light).
+- [x] **M2 macOS window chrome**: server-side title bars drawn by gosaab-wm (traffic-light
+      close/minimise/zoom buttons, centred title in Inter, rounded corners, inactive dimming),
+      SSD for apps that accept it, title bar scales with open/close animations, double-click
+      title to zoom, drag to move, resize grips around the frame. CI clicks every button.
+- [~] **M3 Shell UI (Quickshell/QML, `shell/quickshell`)**: done: menu bar (logo menu, app
+      name, battery, clock), Dock (magnification, running dots, launch bounce, click to
+      show/hide via wlr-foreign-toplevel-management), frosted glass behind shell panels
+      (namespace `gosaab-*`), notification banners + Notification Centre with progress bars,
+      Control Centre (Wi-Fi, Bluetooth, Focus, Dark Mode, Game Mode, VPN, Screen Off, Glasses,
+      brightness + volume sliders), Spotlight (apps + maths, Super+Space). Next: tray icons,
+      Now Playing, night light, settings app restyle.
+- Shortcuts: Super+Space Spotlight, Super+A Control Centre, Super+N notifications,
+  Super+Q close, Super+M minimise, Super+F zoom, Super+Return terminal, Alt/Super+Tab switch.
 - [ ] **M4 Motion and spaces**: minimise to dock (genie), Mission Control overview, Launchpad,
       Spotlight search, workspaces with swipe, iOS-style spring physics everywhere.
 - [ ] **M5 System integration**: lock screen + greeter (greetd), XWayland, Game Mode session

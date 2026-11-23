@@ -9,6 +9,7 @@ Singleton {
     property bool notificationCenter: false
     property bool spotlight: false
     property bool systemMenu: false
+    property bool launchpad: false
     property bool doNotDisturb: false
     readonly property bool anyPopup: controlCenter || notificationCenter || systemMenu
 
@@ -17,6 +18,7 @@ Singleton {
         notificationCenter = false
         systemMenu = false
         spotlight = false
+        launchpad = false
     }
     function toggle(name) {
         const was = root[name]

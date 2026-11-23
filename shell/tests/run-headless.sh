@@ -244,6 +244,8 @@ if command -v qs >/dev/null; then
   qs -p "$SHELLDIR" ipc call spotlight search "foo"; sleep 1.2; shot 25-spotlight
   qs -p "$SHELLDIR" ipc call spotlight search "12*(3+4)"; sleep 0.8; shot 26-spotlight-maths
   qs -p "$SHELLDIR" ipc call spotlight toggle; sleep 0.8; shot 27-after-spotlight
+  qs -p "$SHELLDIR" ipc call launchpad toggle; sleep 1.2; shot 28-launchpad
+  qs -p "$SHELLDIR" ipc call launchpad toggle; sleep 0.8; shot 29-after-launchpad
   python3 - "$OUT" <<'EOF5' || fail=1
 import sys
 from PIL import Image, ImageChops, ImageStat
@@ -263,8 +265,10 @@ checks = [
   ("notification banner shows (top right)", changed("21-shell-window", "22-notification", (W - 400, 30, W, 200)) > 0.05),
   ("control centre opens", changed("22-notification", "23-control-center", (W - 360, 30, W, 500)) > 0.05),
   ("notification centre opens", changed("23-control-center", "24-notification-center", (W - 400, 30, W, 400)) > 0.03),
-  ("spotlight opens", changed("27-after-spotlight", "25-spotlight", (W // 2 - 320, int(H * 0.2), W // 2 + 320, int(H * 0.2) + 80)) > 0.02),
-  ("spotlight closes", changed("21-shell-window", "27-after-spotlight", (W // 2 - 320, int(H * 0.2), W // 2 + 320, int(H * 0.2) + 80)) < 0.02),
+  ("spotlight opens", changed("27-after-spotlight", "25-spotlight", (W // 2 - 320, int(H * 0.2), W // 2 + 320, int(H * 0.2) + 200)) > 0.02),
+  ("spotlight closes", changed("21-shell-window", "27-after-spotlight", (W // 2 - 320, int(H * 0.2), W // 2 + 320, int(H * 0.2) + 200)) < 0.02),
+  ("launchpad opens", changed("27-after-spotlight", "28-launchpad", (0, 30, W, H - 120)) > 0.05),
+  ("launchpad closes", changed("27-after-spotlight", "29-after-launchpad", (0, 30, W, H - 120)) < 0.01),
 ]
 bad = 0
 for name, ok in checks:

@@ -1346,6 +1346,10 @@ static bool handle_keybinding(struct gs_server *server, uint32_t mods, xkb_keysy
 		focus_next_toplevel(server);
 		return true;
 	}
+	if (sym == XKB_KEY_XF86LaunchB) {
+		shell_ipc("launchpad toggle");
+		return true;
+	}
 	if (!super) {
 		return false;
 	}
@@ -1364,6 +1368,9 @@ static bool handle_keybinding(struct gs_server *server, uint32_t mods, xkb_keysy
 		return true;
 	case XKB_KEY_space:
 		shell_ipc("spotlight toggle");
+		return true;
+	case XKB_KEY_g:
+		shell_ipc("launchpad toggle");
 		return true;
 	case XKB_KEY_a:
 		shell_ipc("controlcenter toggle");

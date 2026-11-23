@@ -30,6 +30,7 @@ ShellRoot {
     ControlCenter {}
     Notifications {}
     Spotlight {}
+    Launchpad {}
 
     IpcHandler {
         target: "shell"

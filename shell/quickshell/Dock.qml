@@ -21,7 +21,10 @@ PanelWindow {
     // Pinned apps (shown if installed); everything running is added after a divider.
     readonly property var pinnedIds: ["org.gnome.Nautilus", "org.kde.dolphin", "firefox", "org.mozilla.firefox",
         "steam", "gill-osaab-settings", "org.kde.konsole", "foot", "vlc", "org.videolan.VLC"]
-    readonly property var pinned: pinnedIds.map(id => DesktopEntries.byId(id)).filter(e => e)
+    readonly property var pinned: {
+        const apps = DesktopEntries.applications.values // re-evaluates once app scanning finishes
+        return pinnedIds.map(id => apps.find(e => e.id === id)).filter(e => e)
+    }
     readonly property var windows: ToplevelManager.toplevels.values
     readonly property var running: {
         const seen = {}
@@ -74,6 +77,12 @@ PanelWindow {
             id: items
             anchors { horizontalCenter: parent.horizontalCenter; bottom: parent.bottom; bottomMargin: 7 }
             spacing: 6
+            DockItem { // Launchpad: every app, iPad style
+                builtinIcon: "launchpad"
+                label: "Launchpad"
+                pointerX: dock.mouseX
+                onActivated: ShellState.toggle("launchpad")
+            }
             Repeater {
                 model: dock.pinned
                 DockItem {
@@ -83,7 +92,6 @@ PanelWindow {
                 }
             }
             Rectangle {
-                visible: dock.running.length > 0
                 width: 1; height: Theme.dockIcon - 10
                 anchors.bottom: parent.bottom; anchors.bottomMargin: 5
                 color: Qt.rgba(1, 1, 1, 0.25)
@@ -96,6 +104,12 @@ PanelWindow {
                     windows: dock.windowsFor(modelData.entry, modelData.appId)
                     pointerX: dock.mouseX
                 }
+            }
+            DockItem { // Trash, always last
+                builtinIcon: "trash"
+                label: "Trash"
+                pointerX: dock.mouseX
+                onActivated: ShellState.run("gio open trash:/// || xdg-open trash:///")
             }
         }
     }

@@ -31,8 +31,9 @@ Singleton {
         for (let i = 0; i < arguments.length; i++) {
             const n = arguments[i]
             if (!n) continue
-            if (n.startsWith("/") || n.startsWith("file:") || n.startsWith("image:")) return n
-            const p = Quickshell.iconPath(n, true)
+            const name = n.startsWith("image://icon/") ? n.substring(13) : n
+            if (name.startsWith("/") || name.startsWith("file:") || name.startsWith("image:")) return name
+            const p = Quickshell.iconPath(name, true)
             if (p !== "") return p
         }
         return ""

@@ -11,7 +11,9 @@ Item {
     property real pointerX: -1000
     readonly property bool isRunning: windows.length > 0
     readonly property bool isActive: windows.some(w => w.activated)
-    readonly property string label: entry ? entry.name : appId
+    property string label: entry ? entry.name : appId
+    property string builtinIcon: "" // Gill-OSaab's own items (Launchpad, Trash) draw their own icon
+    signal activated()
 
     // macOS magnification: icons swell smoothly as the pointer passes over them
     readonly property real centre: x + width / 2
@@ -31,12 +33,27 @@ Item {
 
     IconImage {
         id: img
+        visible: item.builtinIcon === ""
         anchors.fill: parent
         anchors.bottomMargin: item.bounce
-        source: Theme.icon(item.entry ? item.entry.icon : "", item.appId, (item.appId || "").toLowerCase(), "application-x-executable")
+        source: visible ? Theme.icon(item.entry ? item.entry.icon : "", item.appId, (item.appId || "").toLowerCase(), "application-x-executable") : ""
         asynchronous: true
         scale: press.pressed ? 0.88 : 1
         Behavior on scale { NumberAnimation { duration: Theme.fast } }
+    }
+    Rectangle { // built-in item: a glossy rounded tile with a drawn symbol
+        visible: item.builtinIcon !== ""
+        anchors.fill: parent
+        anchors.margins: parent.width * 0.06
+        anchors.bottomMargin: item.bounce + parent.width * 0.06
+        radius: width * 0.23
+        scale: press.pressed ? 0.88 : 1
+        Behavior on scale { NumberAnimation { duration: Theme.fast } }
+        gradient: Gradient {
+            GradientStop { position: 0; color: item.builtinIcon === "trash" ? "#8e8e93" : "#5e5ce6" }
+            GradientStop { position: 1; color: item.builtinIcon === "trash" ? "#48484a" : "#0a84ff" }
+        }
+        Icon { anchors.centerIn: parent; width: parent.width * 0.58; height: width; name: item.builtinIcon; color: "white" }
     }
 
     // running indicator
@@ -66,6 +83,10 @@ Item {
         hoverEnabled: true
         acceptedButtons: Qt.LeftButton | Qt.MiddleButton
         onClicked: m => {
+            if (item.builtinIcon !== "") {
+                item.activated()
+                return
+            }
             if (m.button === Qt.MiddleButton || !item.isRunning) {
                 if (item.entry) item.entry.execute()
                 bounceAnim.restart()

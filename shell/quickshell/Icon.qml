@@ -117,6 +117,15 @@ Canvas {
         case "airplane":
             c.beginPath(); c.moveTo(12, 2); c.lineTo(13.5, 9); c.lineTo(21, 13); c.lineTo(21, 15); c.lineTo(13.5, 12.5); c.lineTo(13, 18); c.lineTo(15.5, 20); c.lineTo(15.5, 21.5); c.lineTo(12, 20.5); c.lineTo(8.5, 21.5); c.lineTo(8.5, 20); c.lineTo(11, 18); c.lineTo(10.5, 12.5); c.lineTo(3, 15); c.lineTo(3, 13); c.lineTo(10.5, 9); c.closePath(); c.fill()
             break
+        case "launchpad": // 3x3 grid of rounded squares
+            for (let r = 0; r < 3; r++) for (let q = 0; q < 3; q++) { rrect(3 + q * 6.6, 3 + r * 6.6, 4.6, 4.6, 1.3); c.fill() }
+            break
+        case "trash":
+            c.lineWidth = 1.7
+            line([4, 6.5, 20, 6.5]); line([9.5, 6.5, 10, 4, 14, 4, 14.5, 6.5])
+            c.beginPath(); c.moveTo(6, 6.5); c.lineTo(7.2, 20); c.lineTo(16.8, 20); c.lineTo(18, 6.5); c.stroke()
+            line([10, 10, 10.3, 17]); line([14, 10, 13.7, 17])
+            break
         case "close":
             line([6, 6, 18, 18]); line([18, 6, 6, 18])
             break
