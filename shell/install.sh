@@ -11,10 +11,7 @@ meson compile -C /tmp/gosaab-wm-build
 meson test -C /tmp/gosaab-wm-build --print-errorlogs
 meson install -C /tmp/gosaab-wm-build
 rm -rf /tmp/gosaab-wm-build
-# keep the image small: the compiler and build tools go again. The -devel packages stay
-# (they are tiny, and removing them would also remove the runtime libraries they pulled in).
-dnf mark user scenefx wlroots pango cairo libdrm libxkbcommon pixman >/dev/null 2>&1 || true
-dnf -y remove gcc meson ninja-build || true
+# Build tools stay installed: removing gcc also removed 200 packages Wine needs.
 /usr/bin/gosaab-wm -v # still runs without the build tools
 
 # the shell UI (Quickshell config) -> `qs -c gill-osaab`
