@@ -1,8 +1,8 @@
-name: build-core-iso
-# Makes an installer ISO of Gill-OSaab Core (bootc-image-builder, Anaconda installer) and
-# publishes it on the "core-iso" GitHub Release. GitHub limits files to 2 GB, so the ISO is
-# split into parts: join them with   cat gill-osaab-core.iso.part-* > gill-osaab-core.iso
-# (Windows: copy /b gill-osaab-core.iso.part-aa+gill-osaab-core.iso.part-ab+... gill-osaab-core.iso)
+name: build-core-usb
+# Makes a bootable USB image of Gill-OSaab Core (bootc-image-builder raw disk): write it to a
+# USB stick (32 GB+) and boot from it to try everything without touching the internal drive.
+# (The Anaconda ISO needs Fedora 45 installer definitions that bootc-image-builder lacks.)
+# Published on the "core-usb" release, split in parts because GitHub limits files to 2 GB.
 on:
   workflow_dispatch:
   workflow_run:
@@ -10,7 +10,7 @@ on:
     types: [completed]
 
 concurrency:
-  group: core-iso
+  group: core-usb
   cancel-in-progress: true
 
 jobs:
@@ -30,29 +30,37 @@ jobs:
         run: |
           echo "${{ github.token }}" | sudo podman login ghcr.io -u "${{ github.actor }}" --password-stdin
           sudo podman pull ghcr.io/${{ github.repository_owner }}/gill-osaab-core:latest
-      - name: Build the installer ISO
+      - name: Build the USB image
         run: |
           mkdir -p output
+          # test login: user "gill", password "gill" (change it with: passwd)
+          cat > config.toml <<'TOML'
+          [[customizations.user]]
+          name = "gill"
+          password = "gill"
+          groups = ["wheel"]
+          TOML
           sudo podman run --rm --privileged --pull=newer \
             --security-opt label=type:unconfined_t \
-            -v ./output:/output \
+            -v ./output:/output -v ./config.toml:/config.toml:ro \
             -v /var/lib/containers/storage:/var/lib/containers/storage \
             quay.io/centos-bootc/bootc-image-builder:latest \
-            --type anaconda-iso --rootfs btrfs \
+            --type raw --rootfs btrfs \
             ghcr.io/${{ github.repository_owner }}/gill-osaab-core:latest
-          sudo find output -name '*.iso' -exec ls -lh {} \;
-      - name: Split and checksum
+          sudo find output -type f -exec ls -lh {} \;
+      - name: Compress, split and checksum
         run: |
-          iso=$(sudo find output -name '*.iso' | head -1)
+          img=$(sudo find output -name '*.raw' | head -1)
+          sudo xz -T0 -6 -k "$img"
           mkdir -p release
-          sudo split -b 1900M -d -a 2 "$iso" release/gill-osaab-core.iso.part-
-          sudo sha256sum "$iso" | sed 's|  .*|  gill-osaab-core.iso|' | sudo tee release/SHA256SUMS
+          sudo split -b 1900M -d -a 2 "$img.xz" release/gill-osaab-core-usb.img.xz.part-
+          sudo sha256sum "$img.xz" | sed 's|  .*|  gill-osaab-core-usb.img.xz|' | sudo tee release/SHA256SUMS
           sudo chown -R "$(id -u)" release && ls -lh release
-      - name: Publish on the core-iso release
+      - name: Publish on the core-usb release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release delete core-iso --yes --cleanup-tag -R "${{ github.repository }}" || true
-          gh release create core-iso release/* -R "${{ github.repository }}" --prerelease \
-            --title "Gill-OSaab Core installer (test build)" \
-            --notes "Installer ISO for Gill-OSaab Core, built from ghcr.io/${{ github.repository_owner }}/gill-osaab-core:latest. Download every part, join them (Linux/macOS: cat gill-osaab-core.iso.part-* > gill-osaab-core.iso, Windows: copy /b gill-osaab-core.iso.part-00+gill-osaab-core.iso.part-01+... gill-osaab-core.iso), check SHA256SUMS, write it to a USB stick with Fedora Media Writer or Rufus (DD mode), boot from it."
+          gh release delete core-usb --yes --cleanup-tag -R "${{ github.repository }}" || true
+          gh release create core-usb release/* -R "${{ github.repository }}" --prerelease \
+            --title "Gill-OSaab Core bootable USB (test build)" \
+            --notes "Bootable USB image of Gill-OSaab Core. 1) Download every part and join them: Windows: copy /b gill-osaab-core-usb.img.xz.part-00+gill-osaab-core-usb.img.xz.part-01+... gill-osaab-core-usb.img.xz (Linux/macOS: cat gill-osaab-core-usb.img.xz.part-* > gill-osaab-core-usb.img.xz). 2) Check SHA256SUMS. 3) Write it to a 32 GB+ USB stick with balenaEtcher (it reads .xz directly). 4) Boot from the stick (GPD/ROG Ally: hold Volume Down + Power for the boot menu). Login: gill / gill, then run passwd. Pick Gill-OSaab or Game Mode at the login screen."
