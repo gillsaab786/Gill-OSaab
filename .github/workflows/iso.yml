@@ -40,17 +40,18 @@ jobs:
           password = "gill"
           groups = ["wheel"]
           TOML
-          sudo podman run --rm --privileged --pull=newer \
-            --security-opt label=type:unconfined_t \
-            -v ./output:/output -v ./config.toml:/config.toml:ro \
-            -v /var/lib/containers/storage:/var/lib/containers/storage \
-            quay.io/centos-bootc/bootc-image-builder:latest \
-            --type raw --rootfs btrfs \
-            ghcr.io/${{ github.repository_owner }}/gill-osaab-core:latest
-          sudo find output -type f -exec ls -lh {} \;
+      - name: bootc-image-builder
+        uses: osbuild/bootc-image-builder-action@main
+        with:
+          image: ghcr.io/${{ github.repository_owner }}/gill-osaab-core:latest
+          config-file: ./config.toml
+          types: raw
+          rootfs: btrfs
       - name: Compress, split and checksum
         run: |
           img=$(sudo find output -name '*.raw' | head -1)
+          [ -n "$img" ] || img=$(sudo find . -name '*.raw' -not -path './proc/*' | head -1)
+          echo "image: $img"
           sudo xz -T0 -6 -k "$img"
           mkdir -p release
           sudo split -b 1900M -d -a 2 "$img.xz" release/gill-osaab-core-usb.img.xz.part-
