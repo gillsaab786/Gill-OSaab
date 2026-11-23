@@ -1,0 +1,8 @@
+#!/bin/sh
+# Installs (or opens) EmuDeck: emulators set up for controllers, artwork and Steam/Game Mode.
+if [ -x "$HOME/Applications/EmuDeck.AppImage" ]; then
+  exec "$HOME/Applications/EmuDeck.AppImage"
+fi
+exec foot -T "Install EmuDeck" -e sh -c 'echo "Installing EmuDeck (emulators for Game Mode)..."; \
+  curl -fL https://raw.githubusercontent.com/dragoonDorise/EmuDeck/main/install.sh | bash; \
+  echo; read -p "Press Enter to close." x'

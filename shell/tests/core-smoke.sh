@@ -7,7 +7,7 @@ fail=0
 check() { if eval "$2"; then echo "PASS: $1"; else echo "FAIL: $1"; fail=1; fi; }
 
 for b in gosaab-wm gosaab-session gosaab-game-mode steamos-session-select qs swaybg xwayland-satellite \
-         foot nautilus firefox gamescope steam sddm grim wine waydroid distrobox flatpak gosaab-settings gosaab-updates; do
+         foot nautilus firefox gamescope steam sddm grim wine waydroid distrobox flatpak gosaab-settings gosaab-updates gosaab-emudeck vlc wg; do
   check "installed: $b" "command -v $b >/dev/null"
 done
 echo "wine files: $(ls -d /usr/bin/wine* /etc/alternatives/wine* 2>/dev/null | tr "\n" " ")"

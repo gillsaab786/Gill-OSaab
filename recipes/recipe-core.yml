@@ -53,6 +53,9 @@ modules:
         - foot
         - nautilus
         - firefox
+        - vlc
+        - wireguard-tools
+        - NetworkManager-openvpn
         - xdg-desktop-portal-wlr
         - xdg-desktop-portal-gtk
         - lxqt-policykit

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Emulation (EmuDeck)
+Comment=Install and set up emulators for Game Mode
+Exec=gosaab-emudeck
+Icon=applications-games
+Type=Application
+Categories=Game;
+Keywords=emulator;emudeck;retro;3ds;switch;
