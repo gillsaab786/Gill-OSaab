@@ -497,8 +497,10 @@ class Settings(QMainWindow):
         p.section("", [Row("Everything", "System, Android, Proton-GE, Windows app setups, apps, containers "
                                                 "and Game Mode plugins. The BIOS is never updated automatically.",
                            everything)])
+        base = "Fedora" if "gill-osaab-core" in self.versions.get("image", "") or not self.versions.get("image") \
+            and Path("/usr/share/wayland-sessions/gill-osaab.desktop").exists() else "Bazzite"
         p.section("Update now", [
-            Row("Gill-OSaab system", f"{self.v('gill_osaab', 'Gill-OSaab ')} · Bazzite {self.v('os')} · "
+            Row("Gill-OSaab system", f"{self.v('gill_osaab', 'Gill-OSaab ')} · {base} {self.v('os')} · "
                                      f"kernel {self.v('kernel')}. Includes graphics and Wi-Fi drivers and Wine.",
                 self.update_button("os")),
             Row("Android system", f"Waydroid {self.v('waydroid')} · Android image {self.v('android_image')}",

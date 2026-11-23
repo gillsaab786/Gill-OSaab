@@ -46,7 +46,11 @@ Singleton {
     // Helper entries apps ship that people never launch themselves
     readonly property var hiddenApps: ["footclient", "foot-server", "gosaab-open", "org.freedesktop.IBus.Setup",
         "nm-connection-editor", "lxqt-policykit-agent", "xdg-desktop-portal-gtk"]
-    function listed(e) { return !e.noDisplay && hiddenApps.indexOf(e.id) < 0 }
+    function listed(e) {
+        // Wine's own helper apps (Notepad, Regedit, WineMine...) stay out; Wine Configuration stays in
+        if (e.id.startsWith("wine-") && e.id !== "wine-winecfg") return false
+        return !e.noDisplay && hiddenApps.indexOf(e.id) < 0
+    }
 
     // Motion: quick, springy, never sluggish
     readonly property int fast: 140
