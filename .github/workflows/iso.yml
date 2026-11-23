@@ -25,6 +25,9 @@ jobs:
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
           sudo docker image prune -af >/dev/null || true
+          # AppArmor on the runner blocks osbuild's mounts ("mount: permission denied")
+          sudo aa-teardown || true
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
           df -h /
       - name: Pull the Core image
         run: |
