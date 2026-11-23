@@ -33,4 +33,12 @@ EOF
 # Game Mode switching needs no password for the person at the screen (polkit allow_active)
 chmod 0755 /usr/libexec/gill-osaab/gosaab-session-select-root 2>/dev/null || true
 
+# Wine: make sure the plain "wine" command exists (Fedora may only ship it via alternatives)
+if [ ! -e /usr/bin/wine ]; then
+    for c in /etc/alternatives/wine /usr/bin/wine64 /usr/bin/wine-stable /usr/lib64/wine/x86_64-unix/wine /usr/lib/wine/wine64; do
+        if [ -x "$c" ]; then ln -sf "$c" /usr/bin/wine; log "wine -> $c"; break; fi
+    done
+    [ -e /usr/bin/wine ] || log "warning: no wine binary found: $(ls /usr/bin | grep -i wine | tr '\n' ' ')"
+fi
+
 log "core setup complete"

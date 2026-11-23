@@ -20,7 +20,7 @@ PanelWindow {
     property int selected: 0
     readonly property string query: input.text.trim().toLowerCase()
     readonly property var apps: {
-        const all = DesktopEntries.applications.values.filter(e => !e.noDisplay)
+        const all = DesktopEntries.applications.values.filter(e => Theme.listed(e))
         if (query === "") return []
         const score = e => {
             const n = e.name.toLowerCase()

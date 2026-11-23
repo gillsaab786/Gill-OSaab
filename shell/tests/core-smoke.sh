@@ -10,6 +10,8 @@ for b in gosaab-wm gosaab-session gosaab-game-mode steamos-session-select qs swa
          foot nautilus firefox gamescope steam sddm grim wine waydroid distrobox flatpak gosaab-settings gosaab-updates; do
   check "installed: $b" "command -v $b >/dev/null"
 done
+echo "wine files: $(ls -d /usr/bin/wine* /etc/alternatives/wine* 2>/dev/null | tr "\n" " ")"
+check "Windows apps: wine runs" "wine --version >/dev/null 2>&1"
 check "shell config installed" "[ -f /etc/xdg/quickshell/gill-osaab/shell.qml ]"
 check "login theme installed" "[ -f /usr/share/sddm/themes/gill-osaab/Main.qml ]"
 check "desktop session listed" "[ -f /usr/share/wayland-sessions/gill-osaab.desktop ]"

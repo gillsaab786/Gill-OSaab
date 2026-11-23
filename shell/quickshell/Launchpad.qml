@@ -20,7 +20,7 @@ PanelWindow {
     readonly property int perPage: columns * rows
     readonly property string query: search.text.trim().toLowerCase()
     readonly property var apps: DesktopEntries.applications.values
-        .filter(e => !e.noDisplay && (query === "" || e.name.toLowerCase().includes(query)
+        .filter(e => Theme.listed(e) && (query === "" || e.name.toLowerCase().includes(query)
                  || e.keywords.some(k => k.toLowerCase().includes(query))))
         .sort((a, b) => a.name.localeCompare(b.name))
     readonly property int pages: Math.max(1, Math.ceil(apps.length / perPage))

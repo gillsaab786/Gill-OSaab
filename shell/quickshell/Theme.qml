@@ -42,6 +42,11 @@ Singleton {
         return ""
     }
 
+    // Helper entries apps ship that people never launch themselves
+    readonly property var hiddenApps: ["footclient", "foot-server", "gosaab-open", "org.freedesktop.IBus.Setup",
+        "nm-connection-editor", "lxqt-policykit-agent", "xdg-desktop-portal-gtk"]
+    function listed(e) { return !e.noDisplay && hiddenApps.indexOf(e.id) < 0 }
+
     // Motion: quick, springy, never sluggish
     readonly property int fast: 140
     readonly property int normal: 240
