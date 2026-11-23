@@ -13,6 +13,8 @@ modules:
   - type: dnf
     repos:
       nonfree: rpmfusion
+      copr:
+        - bieszczaders/kernel-cachyos-addons # gaming CPU schedulers (scx)
     install:
       skip-unavailable: true
       packages:
@@ -64,13 +66,12 @@ modules:
         - rsms-inter-fonts
         - papirus-icon-theme
         # --- gaming
-        - repo: rpmfusion-nonfree-steam
-          packages:
-            - steam
+        - steam
         - steam-devices
         - gamescope
         - mangohud
         - scx-scheds
+        - scx-tools
         # --- Windows, Android and Linux apps
         - wine
         - waydroid
