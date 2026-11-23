@@ -43,5 +43,8 @@ Qt Quick via Quickshell. Runs on the Gill-OSaab Core image (minimal Fedora bootc
 - [~] **M6 Ship**: done: Core image uses gosaab-wm + shell instead of KDE (`shell/install.sh`,
       `files/core-system`); CI boots the real image (core-smoke.yml); bootable USB image on the
       `core-usb` release (iso.yml; Anaconda ISO blocked: bootc-image-builder lacks Fedora 45
-      installer defs). Idle dim/lock via swayidle + idle-inhibit. Next: installer ISO, first-boot setup, test on GPD
+      installer defs). Idle dim/lock via swayidle + idle-inhibit. Liquid Glass panels (GlassRim). Settings > Game
+      Mode: start in Game Mode/Desktop/Ask, TDP via Handheld Daemon, frame generation (lsfg-vk),
+      Decky install. Next: Liquid Glass lens/refraction shader in gosaab-wm, workspaces,
+      controller navigation, multi-monitor; installer ISO, first-boot setup, test on GPD
       Win Max 2 and ROG Ally, performance pass (idle RAM/CPU, frame pacing).
