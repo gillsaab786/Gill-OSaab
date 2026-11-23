@@ -136,5 +136,79 @@ for name, good in ok:
 sys.exit(0 if all(g for _, g in ok) else 1)
 EOF2
 kill -TERM $WM 2>/dev/null; wait $WM 2>/dev/null
+
+# ---- M2: macOS-style title bar (traffic lights, title), clicked like a real user would
+pkill foot 2>/dev/null
+CLICKS=$XDG_RUNTIME_DIR/clicks; : >"$CLICKS"
+rm -f "$XDG_RUNTIME_DIR/gosaab-wm.socket"
+GOSAAB_TEST_CLICKS=$CLICKS "$BUILD/gosaab-wm" -s "swaybg -i $WALL -m fill" >"$OUT/gosaab-wm-chrome.log" 2>&1 &
+WM=$!
+for _ in $(seq 1 50); do [ -s "$XDG_RUNTIME_DIR/gosaab-wm.socket" ] && break; sleep 0.1; done
+export WAYLAND_DISPLAY=$(cat "$XDG_RUNTIME_DIR/gosaab-wm.socket")
+sleep 1; shot 11-empty
+# find the traffic lights in a screenshot -> "close_x close_y min_x min_y zoom_x zoom_y" (or nothing)
+lights() {
+python3 - "$OUT/$1.png" <<'EOF3'
+import sys
+from PIL import Image
+im = Image.open(sys.argv[1]).convert("RGB"); W, H = im.size; px = im.load()
+def find(rgb, tol=40):
+    xs = ys = n = 0
+    for y in range(0, H, 1):
+        for x in range(0, W, 2):
+            r, g, b = px[x, y]
+            if abs(r - rgb[0]) < tol and abs(g - rgb[1]) < tol and abs(b - rgb[2]) < tol:
+                xs += x; ys += y; n += 1
+    return (round(xs / n), round(ys / n), n) if n > 10 else None
+red, yel, grn = find((255, 95, 87)), find((254, 188, 46)), find((40, 200, 64))
+if red and yel and grn and abs(red[1] - grn[1]) < 4 and 14 < yel[0] - red[0] < 26 and 14 < grn[0] - yel[0] < 26:
+    print(red[0], red[1], yel[0], yel[1], grn[0], grn[1])
+EOF3
+}
+click() { echo "$1 $2" >>"$CLICKS"; }
+foot -W 100x30 -T "Gill-OSaab Terminal" -e sh -c 'sleep 300' &
+sleep 1.5; shot 12-titlebar
+L=($(lights 12-titlebar)); echo "traffic lights at: ${L[*]:-none}"
+check "title bar with traffic lights is drawn" "[ \${#L[@]} -eq 6 ]"
+python3 - "$OUT" ${L[@]:-0 0 0 0 0 0} <<'EOF4' || fail=1
+import sys
+from PIL import Image
+out = sys.argv[1]; rx, ry, gx = int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[6])
+im = Image.open(f"{out}/12-titlebar.png").convert("RGB")
+if rx == 0:
+    print("FAIL: title text is drawn"); sys.exit(1)
+# the title bar is dark grey; the centred title has light text pixels
+row = [im.getpixel((x, y)) for y in range(ry - 6, ry + 7) for x in range(gx + 30, im.size[0] - 30)]
+bar = im.getpixel((gx + 20, ry))
+text = sum(1 for p in row if p[0] > 150 and abs(p[0] - p[2]) < 30)
+print("title bar colour", bar, "light text pixels", text)
+ok = text > 40 and all(30 < c < 70 for c in bar)
+print(("PASS: " if ok else "FAIL: ") + "title text is drawn on a dark title bar")
+sys.exit(0 if ok else 1)
+EOF4
+if [ ${#L[@]} -eq 6 ]; then
+  click ${L[4]} ${L[5]}; sleep 1.0; shot 13-zoomed          # green: zoom
+  Z=($(lights 13-zoomed)); echo "after zoom: ${Z[*]:-none}"
+  check "zoom button fills the screen" "[ \${#Z[@]} -eq 6 ] && [ \${Z[0]} -lt 30 ] && [ \${Z[1]} -lt 30 ]"
+  click ${Z[4]:-0} ${Z[5]:-0}; sleep 1.0; shot 14-unzoomed  # green again: back to normal size
+  U=($(lights 14-unzoomed)); echo "after un-zoom: ${U[*]:-none}"
+  check "zoom again restores the window" "[ \${#U[@]} -eq 6 ] && [ \${U[0]} -eq ${L[0]} ] && [ \${U[1]} -eq ${L[1]} ]"
+  click ${U[2]:-0} ${U[3]:-0}; sleep 1.0; shot 15-minimized # yellow: minimise
+  M=($(lights 15-minimized))
+  check "minimise button hides the window" "[ \${#M[@]} -eq 0 ] && kill -0 $WM"
+  foot -W 80x20 -T "Second window" -e sh -c 'sleep 300' &
+  sleep 1.5; shot 16-second
+  S=($(lights 16-second)); echo "second window: ${S[*]:-none}"
+  kill -USR2 $WM; sleep 1.0; shot 17-usr2
+  check "minimise via shortcut hook" "[ -z \"\$(lights 17-usr2)\" ]"
+  foot -W 80x20 -T "Close me" -e sh -c 'sleep 300' &
+  sleep 1.5; shot 18-close-me; C=($(lights 18-close-me))
+  click ${C[0]:-0} ${C[1]:-0}; sleep 1.2; shot 19-closed   # red: close
+  check "close button closes the app" "[ -z \"\$(lights 19-closed)\" ] && [ \$(pgrep -c -f 'Close me') -eq 0 ]"
+fi
+check "compositor survived the clicks" "kill -0 $WM"
+kill -TERM $WM 2>/dev/null; wait $WM; rc=$?
+check "clean shutdown after window chrome tests" "[ $rc -eq 0 ]"
+pkill foot 2>/dev/null
 grep -E "\[ERROR\]|Assertion" "$OUT"/gosaab-wm*.log | head -5
 exit $fail

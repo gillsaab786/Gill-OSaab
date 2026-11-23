@@ -1,5 +1,5 @@
 project('gosaab-wm', 'c',
-  version: '0.1.0',
+  version: '0.2.0',
   license: 'MIT',
   default_options: ['c_std=c11', 'warning_level=2', 'werror=false', 'buildtype=release'])
 
@@ -16,6 +16,9 @@ wlroots = dependency('wlroots-0.20')
 scenefx = dependency('scenefx-0.5')
 xkbcommon = dependency('xkbcommon')
 math = cc.find_library('m')
+pangocairo = dependency('pangocairo')
+cairo = dependency('cairo')
+libdrm = dependency('libdrm')
 
 # Protocol headers that wlroots' public headers include
 wayland_scanner = find_program('wayland-scanner')
@@ -38,10 +41,13 @@ foreach xml : protocols
 endforeach
 
 executable('gosaab-wm',
-  ['gosaab-wm.c'] + protocol_headers,
+  ['gosaab-wm.c', 'text.c'] + protocol_headers,
   # scenefx must come before wlroots: both export wlr_scene_*, and scenefx's must win
-  dependencies: [scenefx, wayland_server, wlroots, xkbcommon, math],
+  dependencies: [scenefx, wayland_server, wlroots, xkbcommon, pangocairo, cairo, libdrm, math],
   install: true)
 
 test_anim = executable('test-anim', 'tests/test_anim.c', dependencies: [math])
 test('animation curves', test_anim)
+
+test_frame = executable('test-frame', 'tests/test_frame.c')
+test('window frame hit-testing', test_frame)

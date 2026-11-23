@@ -24,7 +24,8 @@ jobs:
               dnf -y -q install gcc meson ninja-build pkgconf wayland-devel wayland-protocols-devel \
                 wlroots-devel scenefx-devel libxkbcommon-devel pixman-devel \
                 mesa-dri-drivers mesa-libEGL mesa-libgbm grim foot swaybg \
-                dejavu-sans-mono-fonts python3-pillow procps-ng >/dev/null
+                dejavu-sans-mono-fonts python3-pillow procps-ng \
+                pango-devel cairo-devel libdrm-devel rsms-inter-fonts >/dev/null
               meson setup shell/compositor/build shell/compositor
               meson compile -C shell/compositor/build
               meson test -C shell/compositor/build --print-errorlogs
