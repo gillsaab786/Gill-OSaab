@@ -252,6 +252,7 @@ EOF7
   foot -W 70x16 -T "On space 2" -e sh -c 'sleep 300' & sleep 1.5; shot 34-space-2-window
   echo "ws 1" >>"$CLICKS"; sleep 1.2; shot 35-back-to-space-1
   echo "movews 3" >>"$CLICKS"; sleep 1.2; shot 36-moved-to-space-3
+  echo "ws 1" >>"$CLICKS"; sleep 1.2; shot 37-space-1-without-it
   python3 - "$OUT" <<'EOF9' || fail=1
 import sys
 from PIL import Image, ImageChops, ImageStat
@@ -260,7 +261,7 @@ def changed(a, b):
     d = ImageChops.difference(Image.open(f"{out}/{a}.png").convert("RGB"), Image.open(f"{out}/{b}.png").convert("RGB"))
     return ImageStat.Stat(d.convert("L").point(lambda v: 255 if v > 24 else 0)).mean[0] / 255
 r = {"space2 vs space1": changed("32-back-to-desktop", "33-space-2"), "space2 window": changed("33-space-2", "34-space-2-window"),
-     "back vs before": changed("32-back-to-desktop", "35-back-to-space-1"), "moved": changed("35-back-to-space-1", "36-moved-to-space-3")}
+     "back vs before": changed("32-back-to-desktop", "35-back-to-space-1"), "moved": changed("35-back-to-space-1", "37-space-1-without-it")}
 print("space changes", {k: round(v, 4) for k, v in r.items()})
 checks = [("switching space hides this space's windows", r["space2 vs space1"] > 0.05),
           ("a window opens on the new space", r["space2 window"] > 0.02),
