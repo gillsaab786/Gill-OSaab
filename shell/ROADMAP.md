@@ -31,13 +31,14 @@ Qt Quick via Quickshell. Runs on the Gill-OSaab Core image (minimal Fedora bootc
       Control Centre (Wi-Fi, Bluetooth, Focus, Dark Mode, Game Mode, VPN, Screen Off, Glasses,
       brightness + volume), Spotlight (apps + maths).
 - [~] **M4 Motion and spaces**: done: Launchpad, Mission Control (Super+Up / F3), minimise flies
-      into the app's Dock icon and back. Next: workspaces with swipe, touchpad gestures.
+      into the app's Dock icon and back. Spaces: 4 workspaces that slide (Super+1..4, Ctrl+Super+Left/Right,
+      Super+Shift+1..4 moves a window, 3-finger swipe; swipe up = Mission Control).
 - [~] **M5 System integration**: done: lock screen (ext-session-lock + PAM, Super+L), login
       screen (SDDM theme, Desktop/Game Mode choice), X11 apps via xwayland-satellite (with title
       bars), pointer lock + raw mouse for games, xdg-activation, Game Mode switch
       (`gosaab-game-mode`, SteamOS-compatible `steamos-session-select`). Next: idle lock/dim,
       multi-monitor arrangement, HiDPI scaling UI, controller navigation in the shell.
-- Shortcuts: Super+Space Spotlight, Super+G Launchpad, Super+Up Mission Control, Super+A Control
+- Shortcuts: Super+Space Spotlight, Super+G Launchpad, Super+Up Mission Control, Super+1..4 spaces, Super+A Control
   Centre, Super+N notifications, Super+L lock, Super+Q close, Super+M minimise, Super+F zoom,
   Super+Return terminal, Alt/Super+Tab switch.
 - [~] **M6 Ship**: done: Core image uses gosaab-wm + shell instead of KDE (`shell/install.sh`,

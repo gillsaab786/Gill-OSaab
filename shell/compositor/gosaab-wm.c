@@ -94,6 +94,8 @@
 #define DOUBLE_CLICK_MS 400
 #define MINIMIZE_MS 380.0
 #define OVERVIEW_MS 340.0
+#define WORKSPACE_MS 360.0
+#define WORKSPACES 4
 
 /* Colours (premultiplied alpha) */
 static const float COLOR_TITLE_ACTIVE[4] = { 0.165f, 0.165f, 0.180f, 1.0f };
@@ -164,6 +166,7 @@ struct gs_server {
 	struct wlr_xcursor_manager *cursor_mgr;
 	struct wlr_cursor_shape_manager_v1 *cursor_shape_mgr;
 	struct wl_listener cursor_motion, cursor_motion_absolute, cursor_button, cursor_axis, cursor_frame;
+	struct wl_listener swipe_begin, swipe_update, swipe_end;
 	struct wl_listener request_cursor_shape;
 
 	struct wlr_seat *seat;
@@ -180,6 +183,13 @@ struct gs_server {
 
 	bool shutting_down;         /* quitting: no animations or refocusing while clients go */
 	pid_t xwayland_pid;
+	/* workspaces (spaces): 0..WORKSPACES-1, slide sideways like macOS/iOS */
+	int ws;                     /* the current space */
+	double ws_view, ws_from;    /* animated position (ws_view == ws when still) */
+	struct gs_anim ws_anim;
+	double swipe_dx, swipe_dy;  /* three/four-finger touchpad swipe in progress */
+	uint32_t swipe_fingers;
+
 	bool overview;              /* Mission Control is showing */
 	bool overview_entering;
 	struct gs_anim overview_anim;
@@ -223,6 +233,7 @@ struct gs_toplevel {
 	struct wlr_box dock_rect;   /* where this app's Dock icon is (layout coords), for minimise */
 	struct gs_anim min_anim;    /* minimise into / restore out of the Dock */
 	struct gs_slot ov;          /* place in Mission Control */
+	int ws;                     /* which space this window lives on */
 	struct wl_listener request_move, request_resize, request_maximize, request_minimize, request_fullscreen;
 	bool mapped, placed, maximized, minimized, fullscreen, ssd, activated;
 	struct wlr_box saved; /* frame box before zoom/fullscreen */
@@ -348,7 +359,7 @@ static struct wlr_box output_usable_area(struct gs_server *server) {
 static struct gs_toplevel *focused_toplevel(struct gs_server *server) {
 	struct gs_toplevel *t;
 	wl_list_for_each(t, &server->toplevels, link) {
-		if (!t->minimized) {
+		if (!t->minimized && t->ws == server->ws) {
 			return t;
 		}
 	}
@@ -569,7 +580,13 @@ static bool update_toplevel_visual(struct gs_toplevel *t, double now) {
 			running = true;
 		}
 	}
-	if (server->overview_t > 0 && !t->minimized) {
+	/* spaces slide sideways; windows on spaces out of view are switched off */
+	double ws_off = (t->ws - server->ws_view);
+	struct wlr_box full = output_full_area(server);
+	ox += ws_off * full.width;
+	bool hidden = t->minimized && !t->min_anim.active;
+	wlr_scene_node_set_enabled(&t->tree->node, t->mapped && !hidden && fabs(ws_off) < 0.999);
+	if (server->overview_t > 0 && !t->minimized && t->ws == server->ws) {
 		double o = server->overview_t;
 		scale *= gs_lerp(1.0, t->ov.scale, o);
 		ox += (t->ov.cx - cx) * o;
@@ -601,9 +618,20 @@ static bool tick_animations(struct gs_server *server) {
 		wlr_scene_rect_set_color(server->layers.dim_rect, dim);
 		wlr_scene_node_set_enabled(&server->layers.dim_rect->node, server->overview_t > 0.001);
 	}
+	bool ws_moving = server->ws_anim.active;
+	if (ws_moving) {
+		double p = gs_anim_progress(&server->ws_anim, now);
+		server->ws_view = gs_lerp(server->ws_from, server->ws, gs_ease_spring(p));
+		if (p >= 1.0) {
+			server->ws_anim.active = false;
+			server->ws_view = server->ws;
+		} else {
+			running = true;
+		}
+	}
 	struct gs_toplevel *t;
 	wl_list_for_each(t, &server->toplevels, link) {
-		if (t->open.active || t->min_anim.active || overview_moving) {
+		if (t->open.active || t->min_anim.active || overview_moving || ws_moving) {
 			running = update_toplevel_visual(t, now) || running;
 		}
 	}
@@ -690,11 +718,16 @@ static void set_activated(struct gs_toplevel *t, bool activated) {
 	refresh_toplevel(t);
 }
 
+static void workspace_switch(struct gs_server *server, int ws);
+
 static void focus_toplevel(struct gs_toplevel *t) {
 	if (t == NULL) {
 		return;
 	}
 	struct gs_server *server = t->server;
+	if (t->ws != server->ws) {
+		workspace_switch(server, t->ws); /* e.g. picked from the Dock: go to its space */
+	}
 	if (t->minimized) {
 		t->minimized = false;
 		if (t->ftl) {
@@ -720,11 +753,13 @@ static void focus_toplevel(struct gs_toplevel *t) {
 }
 
 static void focus_next_toplevel(struct gs_server *server) {
-	if (wl_list_length(&server->toplevels) < 2) {
-		return;
+	struct gs_toplevel *t, *first = focused_toplevel(server);
+	wl_list_for_each_reverse(t, &server->toplevels, link) {
+		if (t != first && !t->minimized && t->ws == server->ws) {
+			focus_toplevel(t);
+			return;
+		}
 	}
-	struct gs_toplevel *last = wl_container_of(server->toplevels.prev, last, link);
-	focus_toplevel(last);
 }
 
 static void minimize_toplevel(struct gs_toplevel *t) {
@@ -752,6 +787,46 @@ static void minimize_toplevel(struct gs_toplevel *t) {
 	}
 }
 
+/* ------------------------------------------------------------------ spaces (workspaces) */
+
+static void workspace_switch(struct gs_server *server, int ws) {
+	if (ws < 0 || ws >= WORKSPACES || ws == server->ws) {
+		return;
+	}
+	server->ws_from = server->ws_view;
+	server->ws = ws;
+	gs_anim_start(&server->ws_anim, now_ms(), anim_ms(WORKSPACE_MS));
+	struct gs_toplevel *t;
+	wl_list_for_each(t, &server->toplevels, link) {
+		if (t->mapped && !t->minimized && (t->ws == ws || fabs(t->ws - server->ws_from) < 1)) {
+			wlr_scene_node_set_enabled(&t->tree->node, true); /* visible while sliding */
+		}
+	}
+	wlr_seat_keyboard_clear_focus(server->seat);
+	struct gs_toplevel *top = focused_toplevel(server);
+	if (top) {
+		wl_list_for_each(t, &server->toplevels, link) {
+			if (t != top && t->ws == ws) {
+				set_activated(t, false);
+			}
+		}
+		set_activated(top, true);
+		wlr_scene_node_raise_to_top(&top->tree->node);
+		focus_surface(server, top->xdg_toplevel->base->surface);
+	}
+	wlr_log(WLR_INFO, "space %d", ws + 1);
+	schedule_frames(server);
+}
+
+static void move_to_workspace(struct gs_toplevel *t, int ws) {
+	if (t == NULL || ws < 0 || ws >= WORKSPACES || ws == t->ws) {
+		return;
+	}
+	t->ws = ws;
+	workspace_switch(t->server, ws); /* follow the window, like macOS */
+	focus_toplevel(t);
+}
+
 /* ------------------------------------------------------------------ Mission Control */
 
 /* Show every window side by side (or go back). `pick` gets focus when leaving. */
@@ -764,7 +839,7 @@ static void overview_set(struct gs_server *server, bool on, struct gs_toplevel *
 		int w[64], h[64], n = 0;
 		struct gs_toplevel *t;
 		wl_list_for_each_reverse(t, &server->toplevels, link) { /* oldest first: stable places */
-			if (t->mapped && !t->minimized && n < 64) {
+			if (t->mapped && !t->minimized && t->ws == server->ws && n < 64) {
 				list[n] = t;
 				w[n] = frame_w(t);
 				h[n] = frame_h(t);
@@ -1354,6 +1429,7 @@ static void server_new_xdg_toplevel(struct wl_listener *listener, void *data) {
 	struct wlr_xdg_toplevel *xdg_toplevel = data;
 	struct gs_toplevel *t = calloc(1, sizeof(*t));
 	t->server = server;
+	t->ws = server->ws;
 	t->xdg_toplevel = xdg_toplevel;
 	t->tree = wlr_scene_tree_create(server->layers.toplevels);
 	t->tree->node.data = t;
@@ -1716,6 +1792,23 @@ static bool handle_keybinding(struct gs_server *server, uint32_t mods, xkb_keysy
 		overview_set(server, false, sym == XKB_KEY_Return ? focused_toplevel(server) : NULL);
 		return true;
 	}
+	if (super && (mods & WLR_MODIFIER_CTRL) && (sym == XKB_KEY_Left || sym == XKB_KEY_Right)) {
+		workspace_switch(server, server->ws + (sym == XKB_KEY_Right ? 1 : -1));
+		return true;
+	}
+	if (super && sym >= XKB_KEY_1 && sym <= XKB_KEY_1 + WORKSPACES - 1) {
+		workspace_switch(server, sym - XKB_KEY_1);
+		return true;
+	}
+	{ /* Super+Shift+1..4: take the window to that space */
+		static const xkb_keysym_t shifted[] = { XKB_KEY_exclam, XKB_KEY_at, XKB_KEY_numbersign, XKB_KEY_dollar };
+		for (int i = 0; super && i < WORKSPACES; i++) {
+			if (sym == shifted[i]) {
+				move_to_workspace(focused_toplevel(server), i);
+				return true;
+			}
+		}
+	}
 	if (sym == XKB_KEY_XF86LaunchA || (super && sym == XKB_KEY_Up)) { /* F3 / Super+Up: Mission Control */
 		overview_set(server, !server->overview, NULL);
 		return true;
@@ -1922,7 +2015,7 @@ static struct gs_hit hit_test(struct gs_server *server, double lx, double ly) {
 	/* Nothing drawn here: maybe just outside a server-side window's edge (resize grip) */
 	struct gs_toplevel *t;
 	wl_list_for_each(t, &server->toplevels, link) {
-		if (t->minimized || !t->mapped || t->maximized || t->fullscreen || title_h(t) == 0) {
+		if (t->minimized || !t->mapped || t->ws != server->ws || t->maximized || t->fullscreen || title_h(t) == 0) {
 			continue;
 		}
 		unsigned edges;
@@ -2111,6 +2204,38 @@ static void cursor_axis(struct wl_listener *listener, void *data) {
 		event->delta_discrete, event->source, event->relative_direction);
 }
 
+/* Touchpad: three/four fingers left/right change space, up shows Mission Control, down leaves it */
+static void swipe_begin(struct wl_listener *listener, void *data) {
+	struct gs_server *server = wl_container_of(listener, server, swipe_begin);
+	struct wlr_pointer_swipe_begin_event *event = data;
+	server->swipe_fingers = event->fingers;
+	server->swipe_dx = server->swipe_dy = 0;
+	user_activity(server);
+}
+
+static void swipe_update(struct wl_listener *listener, void *data) {
+	struct gs_server *server = wl_container_of(listener, server, swipe_update);
+	struct wlr_pointer_swipe_update_event *event = data;
+	server->swipe_dx += event->dx;
+	server->swipe_dy += event->dy;
+}
+
+static void swipe_end(struct wl_listener *listener, void *data) {
+	struct gs_server *server = wl_container_of(listener, server, swipe_end);
+	struct wlr_pointer_swipe_end_event *event = data;
+	if (event->cancelled || server->swipe_fingers < 3 || server->locked) {
+		return;
+	}
+	double dx = server->swipe_dx, dy = server->swipe_dy;
+	if (fabs(dx) > fabs(dy) && fabs(dx) > 80) {
+		workspace_switch(server, server->ws + (dx < 0 ? 1 : -1)); /* natural: swipe left = next space */
+	} else if (dy < -80) {
+		overview_set(server, true, NULL);
+	} else if (dy > 80) {
+		overview_set(server, false, NULL);
+	}
+}
+
 static void cursor_frame(struct wl_listener *listener, void *data) {
 	struct gs_server *server = wl_container_of(listener, server, cursor_frame);
 	wlr_seat_pointer_notify_frame(server->seat);
@@ -2238,8 +2363,13 @@ static int test_click_tick(void *data) {
 		char line[128];
 		while (fgets(line, sizeof(line), f) != NULL && strchr(line, '\n') != NULL) {
 			double x, y;
+			int n;
 			if (strncmp(line, "overview", 8) == 0) {
 				overview_set(server, !server->overview, NULL);
+			} else if (sscanf(line, "ws %d", &n) == 1) {
+				workspace_switch(server, n - 1);
+			} else if (sscanf(line, "movews %d", &n) == 1) {
+				move_to_workspace(focused_toplevel(server), n - 1);
 			} else if (sscanf(line, "%lf %lf", &x, &y) == 2) {
 				wlr_cursor_warp(server->cursor, NULL, x, y);
 				press_at(server, x, y);
@@ -2457,6 +2587,12 @@ int main(int argc, char *argv[]) {
 	wl_signal_add(&server.cursor->events.axis, &server.cursor_axis);
 	server.cursor_frame.notify = cursor_frame;
 	wl_signal_add(&server.cursor->events.frame, &server.cursor_frame);
+	server.swipe_begin.notify = swipe_begin;
+	wl_signal_add(&server.cursor->events.swipe_begin, &server.swipe_begin);
+	server.swipe_update.notify = swipe_update;
+	wl_signal_add(&server.cursor->events.swipe_update, &server.swipe_update);
+	server.swipe_end.notify = swipe_end;
+	wl_signal_add(&server.cursor->events.swipe_end, &server.swipe_end);
 
 	wl_list_init(&server.keyboards);
 	server.new_input.notify = server_new_input;
@@ -2515,6 +2651,7 @@ int main(int argc, char *argv[]) {
 		&server.cursor_frame, &server.request_cursor_shape, &server.new_input, &server.request_cursor,
 		&server.request_set_selection, &server.request_set_primary_selection, &server.new_output,
 		&server.new_constraint, &server.request_activate, &server.new_lock, &server.new_inhibitor,
+		&server.swipe_begin, &server.swipe_update, &server.swipe_end,
 	};
 	for (size_t i = 0; i < sizeof(server_listeners) / sizeof(server_listeners[0]); i++) {
 		wl_list_remove(&server_listeners[i]->link);

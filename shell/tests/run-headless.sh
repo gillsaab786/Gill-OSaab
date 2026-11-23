@@ -247,6 +247,29 @@ for name, ok in [("Mission Control spreads the windows out", a > 0.05), ("clicki
     print(("PASS: " if ok else "FAIL: ") + name)
 sys.exit(0 if a > 0.05 and b < 0.01 else 1)
 EOF7
+  # Spaces: slide to space 2 (empty), open a window there, slide back, send a window to space 3
+  echo "ws 2" >>"$CLICKS"; sleep 1.2; shot 33-space-2
+  foot -W 70x16 -T "On space 2" -e sh -c 'sleep 300' & sleep 1.5; shot 34-space-2-window
+  echo "ws 1" >>"$CLICKS"; sleep 1.2; shot 35-back-to-space-1
+  echo "movews 3" >>"$CLICKS"; sleep 1.2; shot 36-moved-to-space-3
+  python3 - "$OUT" <<'EOF9' || fail=1
+import sys
+from PIL import Image, ImageChops, ImageStat
+out = sys.argv[1]
+def changed(a, b):
+    d = ImageChops.difference(Image.open(f"{out}/{a}.png").convert("RGB"), Image.open(f"{out}/{b}.png").convert("RGB"))
+    return ImageStat.Stat(d.convert("L").point(lambda v: 255 if v > 24 else 0)).mean[0] / 255
+r = {"space2 vs space1": changed("32-back-to-desktop", "33-space-2"), "space2 window": changed("33-space-2", "34-space-2-window"),
+     "back vs before": changed("32-back-to-desktop", "35-back-to-space-1"), "moved": changed("35-back-to-space-1", "36-moved-to-space-3")}
+print("space changes", {k: round(v, 4) for k, v in r.items()})
+checks = [("switching space hides this space's windows", r["space2 vs space1"] > 0.05),
+          ("a window opens on the new space", r["space2 window"] > 0.02),
+          ("going back shows the first space exactly as it was", r["back vs before"] < 0.01),
+          ("a window can be sent to another space", r["moved"] > 0.005)]
+for name, ok in checks:
+    print(("PASS: " if ok else "FAIL: ") + name)
+sys.exit(0 if all(ok for _, ok in checks) else 1)
+EOF9
 fi
 check "compositor survived the clicks" "kill -0 $WM"
 kill -TERM $WM 2>/dev/null; wait $WM; rc=$?
