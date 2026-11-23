@@ -29,6 +29,11 @@ Qt Quick via Quickshell. Runs on the Gill-OSaab Core image (minimal Fedora bootc
    check 32-bit (new WoW64) apps and installers in CI with a test .exe.
 8. Android apps: Waydroid multi-window mode on by default (each app its own resizable window,
    full screen on maximise), ARM translation (libndk on AMD/Intel) for ARM-only apps, GPU accel.
+9. Every app sandboxed, up to 2 folders each: Settings > Privacy > App folders. Linux apps as
+   Flatpaks (Firefox, VLC, Files-picked via portal) with `flatpak override --nofilesystem=home
+   --filesystem=<folder>`; Windows apps: bwrap binds in gosaab-open; Android: Waydroid shared
+   folder. Default: each app gets only its own folder; picking a file in a dialog still works.
+   Steam stays outside the sandbox (games need full speed / controllers).
 
 ## Milestones
 - [x] **M1 Window manager core**: windows, popups, layer-shell (bar/dock/wallpaper), centred
