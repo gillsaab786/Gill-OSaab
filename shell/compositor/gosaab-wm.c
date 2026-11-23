@@ -48,6 +48,7 @@
 #include <wlr/types/wlr_data_control_v1.h>
 #include <wlr/types/wlr_data_device.h>
 #include <wlr/types/wlr_export_dmabuf_v1.h>
+#include <wlr/types/wlr_foreign_toplevel_management_v1.h>
 #include <wlr/types/wlr_fractional_scale_v1.h>
 #include <wlr/types/wlr_gamma_control_v1.h>
 #include <wlr/types/wlr_idle_inhibit_v1.h>
@@ -125,6 +126,8 @@ struct gs_server {
 	struct wlr_xdg_decoration_manager_v1 *decoration_mgr;
 	struct wl_listener new_decoration;
 
+	struct wlr_foreign_toplevel_manager_v1 *foreign_mgr; /* lets the dock list and control windows */
+
 	struct wlr_cursor *cursor;
 	struct wlr_xcursor_manager *cursor_mgr;
 	struct wlr_cursor_shape_manager_v1 *cursor_shape_mgr;
@@ -174,7 +177,9 @@ struct gs_toplevel {
 	struct wlr_scene_shadow *shadow;
 	struct wlr_scene_blur *blur;
 	struct gs_titlebar tb;
-	struct wl_listener map, unmap, commit, destroy, set_title;
+	struct wl_listener map, unmap, commit, destroy, set_title, set_app_id;
+	struct wlr_foreign_toplevel_handle_v1 *ftl;
+	struct wl_listener ftl_activate, ftl_close, ftl_maximize, ftl_minimize, ftl_fullscreen;
 	struct wl_listener request_move, request_resize, request_maximize, request_minimize, request_fullscreen;
 	bool mapped, placed, maximized, minimized, fullscreen, ssd, activated;
 	struct wlr_box saved; /* frame box before zoom/fullscreen */
@@ -212,6 +217,7 @@ struct gs_layer {
 	struct gs_server *server;
 	struct wlr_layer_surface_v1 *layer_surface;
 	struct wlr_scene_layer_surface_v1 *scene;
+	struct wlr_scene_blur *blur; /* frosted glass behind Gill-OSaab's own bar/dock/panels */
 	struct wl_listener map, unmap, commit, destroy;
 	bool mapped;
 };
@@ -234,6 +240,9 @@ struct gs_decoration {
 };
 
 static void focus_toplevel(struct gs_toplevel *t);
+static void set_maximized(struct gs_toplevel *t, bool maximized);
+static void set_fullscreen(struct gs_toplevel *t, bool fullscreen);
+static void close_toplevel(struct gs_toplevel *t);
 
 /* ------------------------------------------------------------------ helpers */
 
@@ -568,6 +577,9 @@ static void set_activated(struct gs_toplevel *t, bool activated) {
 	}
 	t->activated = activated;
 	wlr_xdg_toplevel_set_activated(t->xdg_toplevel, activated);
+	if (t->ftl) {
+		wlr_foreign_toplevel_handle_v1_set_activated(t->ftl, activated);
+	}
 	if (t->ssd && t->mapped) {
 		titlebar_render_title(t);
 	}
@@ -581,6 +593,9 @@ static void focus_toplevel(struct gs_toplevel *t) {
 	struct gs_server *server = t->server;
 	if (t->minimized) {
 		t->minimized = false;
+		if (t->ftl) {
+			wlr_foreign_toplevel_handle_v1_set_minimized(t->ftl, false);
+		}
 		wlr_scene_node_set_enabled(&t->tree->node, true);
 		gs_anim_start(&t->open, now_ms(), anim_ms(OPEN_MS));
 		schedule_frames(server);
@@ -614,6 +629,9 @@ static void minimize_toplevel(struct gs_toplevel *t) {
 	}
 	struct gs_server *server = t->server;
 	t->minimized = true;
+	if (t->ftl) {
+		wlr_foreign_toplevel_handle_v1_set_minimized(t->ftl, true);
+	}
 	set_activated(t, false);
 	wlr_scene_node_set_enabled(&t->tree->node, false);
 	if (server->seat->keyboard_state.focused_surface == t->xdg_toplevel->base->surface) {
@@ -667,6 +685,38 @@ static struct wlr_scene_tree *layer_tree(struct gs_server *server, enum zwlr_lay
 	}
 }
 
+static void find_surface_buffer(struct wlr_scene_buffer *buffer, int sx, int sy, void *data) {
+	struct wlr_scene_buffer **out = data;
+	if (*out == NULL && wlr_scene_surface_try_from_buffer(buffer) != NULL) {
+		*out = buffer;
+	}
+}
+
+/* Gill-OSaab's own panels (namespace "gosaab-*") get frosted glass behind them. The blur
+ * follows the panel's own shape (its transparent pixels mask it), so rounded docks work.
+ * An optional ":r<radius>" suffix in the namespace rounds the blur's corners too. */
+static void layer_update_blur(struct gs_layer *l) {
+	struct wlr_layer_surface_v1 *ls = l->layer_surface;
+	if (ls->namespace == NULL || strncmp(ls->namespace, "gosaab-", 7) != 0 ||
+			ls->current.layer == ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND) {
+		return;
+	}
+	if (l->blur == NULL) {
+		l->blur = wlr_scene_blur_create(l->scene->tree, 0, 0);
+		wlr_scene_node_lower_to_bottom(&l->blur->node);
+	}
+	wlr_scene_blur_set_size(l->blur, ls->surface->current.width, ls->surface->current.height);
+	const char *r = strstr(ls->namespace, ":r");
+	if (r) {
+		wlr_scene_blur_set_corner_radii(l->blur, corner_radii_all(atoi(r + 2)));
+	}
+	struct wlr_scene_buffer *buffer = NULL;
+	wlr_scene_node_for_each_buffer(&l->scene->tree->node, find_surface_buffer, &buffer);
+	if (buffer) {
+		wlr_scene_blur_set_transparency_mask_source(l->blur, buffer);
+	}
+}
+
 static void layer_commit(struct wl_listener *listener, void *data) {
 	struct gs_layer *l = wl_container_of(listener, l, commit);
 	struct wlr_layer_surface_v1 *ls = l->layer_surface;
@@ -676,12 +726,16 @@ static void layer_commit(struct wl_listener *listener, void *data) {
 	if (ls->initial_commit || ls->current.committed) {
 		arrange_layers(l->server);
 	}
+	if (l->mapped) {
+		layer_update_blur(l);
+	}
 }
 
 static void layer_map(struct wl_listener *listener, void *data) {
 	struct gs_layer *l = wl_container_of(listener, l, map);
 	l->mapped = true;
 	arrange_layers(l->server);
+	layer_update_blur(l);
 	if (l->layer_surface->current.keyboard_interactive != ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE &&
 			l->layer_surface->current.layer >= ZWLR_LAYER_SHELL_V1_LAYER_TOP) {
 		focus_surface(l->server, l->layer_surface->surface);
@@ -775,6 +829,9 @@ static void set_maximized(struct gs_toplevel *t, bool maximized) {
 		request_frame_size(t, t->saved.width, t->saved.height);
 	}
 	wlr_xdg_toplevel_set_maximized(t->xdg_toplevel, maximized);
+	if (t->ftl) {
+		wlr_foreign_toplevel_handle_v1_set_maximized(t->ftl, maximized);
+	}
 	refresh_toplevel(t);
 }
 
@@ -796,15 +853,105 @@ static void set_fullscreen(struct gs_toplevel *t, bool fullscreen) {
 		request_frame_size(t, t->saved.width, t->saved.height);
 	}
 	wlr_xdg_toplevel_set_fullscreen(t->xdg_toplevel, fullscreen);
+	if (t->ftl) {
+		wlr_foreign_toplevel_handle_v1_set_fullscreen(t->ftl, fullscreen);
+	}
 	refresh_toplevel(t);
 }
 
 static void toplevel_set_title(struct wl_listener *listener, void *data) {
 	struct gs_toplevel *t = wl_container_of(listener, t, set_title);
+	if (t->ftl && t->xdg_toplevel->title) {
+		wlr_foreign_toplevel_handle_v1_set_title(t->ftl, t->xdg_toplevel->title);
+	}
 	if (t->ssd && t->mapped) {
 		titlebar_render_title(t);
 		refresh_toplevel(t);
 	}
+}
+
+static void toplevel_set_app_id(struct wl_listener *listener, void *data) {
+	struct gs_toplevel *t = wl_container_of(listener, t, set_app_id);
+	if (t->ftl && t->xdg_toplevel->app_id) {
+		wlr_foreign_toplevel_handle_v1_set_app_id(t->ftl, t->xdg_toplevel->app_id);
+	}
+}
+
+/* ---- requests from the dock / task switcher (wlr-foreign-toplevel-management) */
+
+static void ftl_activate(struct wl_listener *listener, void *data) {
+	struct gs_toplevel *t = wl_container_of(listener, t, ftl_activate);
+	focus_toplevel(t);
+}
+
+static void ftl_close(struct wl_listener *listener, void *data) {
+	struct gs_toplevel *t = wl_container_of(listener, t, ftl_close);
+	close_toplevel(t);
+}
+
+static void ftl_maximize(struct wl_listener *listener, void *data) {
+	struct gs_toplevel *t = wl_container_of(listener, t, ftl_maximize);
+	struct wlr_foreign_toplevel_handle_v1_maximized_event *event = data;
+	set_maximized(t, event->maximized);
+	wlr_xdg_surface_schedule_configure(t->xdg_toplevel->base);
+}
+
+static void ftl_minimize(struct wl_listener *listener, void *data) {
+	struct gs_toplevel *t = wl_container_of(listener, t, ftl_minimize);
+	struct wlr_foreign_toplevel_handle_v1_minimized_event *event = data;
+	if (event->minimized) {
+		minimize_toplevel(t);
+	} else {
+		focus_toplevel(t);
+	}
+}
+
+static void ftl_fullscreen(struct wl_listener *listener, void *data) {
+	struct gs_toplevel *t = wl_container_of(listener, t, ftl_fullscreen);
+	struct wlr_foreign_toplevel_handle_v1_fullscreen_event *event = data;
+	set_fullscreen(t, event->fullscreen);
+	wlr_xdg_surface_schedule_configure(t->xdg_toplevel->base);
+}
+
+static void ftl_create(struct gs_toplevel *t) {
+	struct gs_server *server = t->server;
+	t->ftl = wlr_foreign_toplevel_handle_v1_create(server->foreign_mgr);
+	if (t->ftl == NULL) {
+		return;
+	}
+	if (t->xdg_toplevel->title) {
+		wlr_foreign_toplevel_handle_v1_set_title(t->ftl, t->xdg_toplevel->title);
+	}
+	if (t->xdg_toplevel->app_id) {
+		wlr_foreign_toplevel_handle_v1_set_app_id(t->ftl, t->xdg_toplevel->app_id);
+	}
+	struct gs_output *output = first_output(server);
+	if (output) {
+		wlr_foreign_toplevel_handle_v1_output_enter(t->ftl, output->wlr_output);
+	}
+	t->ftl_activate.notify = ftl_activate;
+	wl_signal_add(&t->ftl->events.request_activate, &t->ftl_activate);
+	t->ftl_close.notify = ftl_close;
+	wl_signal_add(&t->ftl->events.request_close, &t->ftl_close);
+	t->ftl_maximize.notify = ftl_maximize;
+	wl_signal_add(&t->ftl->events.request_maximize, &t->ftl_maximize);
+	t->ftl_minimize.notify = ftl_minimize;
+	wl_signal_add(&t->ftl->events.request_minimize, &t->ftl_minimize);
+	t->ftl_fullscreen.notify = ftl_fullscreen;
+	wl_signal_add(&t->ftl->events.request_fullscreen, &t->ftl_fullscreen);
+}
+
+static void ftl_destroy(struct gs_toplevel *t) {
+	if (t->ftl == NULL) {
+		return;
+	}
+	wl_list_remove(&t->ftl_activate.link);
+	wl_list_remove(&t->ftl_close.link);
+	wl_list_remove(&t->ftl_maximize.link);
+	wl_list_remove(&t->ftl_minimize.link);
+	wl_list_remove(&t->ftl_fullscreen.link);
+	wlr_foreign_toplevel_handle_v1_destroy(t->ftl);
+	t->ftl = NULL;
 }
 
 static void toplevel_commit(struct wl_listener *listener, void *data) {
@@ -855,6 +1002,7 @@ static void toplevel_map(struct wl_listener *listener, void *data) {
 		t->placed = true;
 	}
 	wl_list_insert(&t->server->toplevels, &t->link);
+	ftl_create(t);
 	gs_anim_start(&t->open, now_ms(), anim_ms(OPEN_MS));
 	focus_toplevel(t);
 	if (t->ssd) {
@@ -926,6 +1074,7 @@ static void toplevel_unmap(struct wl_listener *listener, void *data) {
 	struct gs_toplevel *t = wl_container_of(listener, t, unmap);
 	struct gs_server *server = t->server;
 	start_close_animation(t);
+	ftl_destroy(t);
 	t->mapped = false;
 	t->placed = false;
 	t->minimized = false;
@@ -949,7 +1098,9 @@ static void toplevel_unmap(struct wl_listener *listener, void *data) {
 
 static void toplevel_destroy(struct wl_listener *listener, void *data) {
 	struct gs_toplevel *t = wl_container_of(listener, t, destroy);
+	ftl_destroy(t);
 	struct wl_listener *listeners[] = { &t->map, &t->unmap, &t->commit, &t->destroy, &t->set_title,
+		&t->set_app_id,
 		&t->request_move, &t->request_resize, &t->request_maximize, &t->request_minimize,
 		&t->request_fullscreen };
 	for (size_t i = 0; i < sizeof(listeners) / sizeof(listeners[0]); i++) {
@@ -1053,6 +1204,8 @@ static void server_new_xdg_toplevel(struct wl_listener *listener, void *data) {
 	wl_signal_add(&xdg_toplevel->events.destroy, &t->destroy);
 	t->set_title.notify = toplevel_set_title;
 	wl_signal_add(&xdg_toplevel->events.set_title, &t->set_title);
+	t->set_app_id.notify = toplevel_set_app_id;
+	wl_signal_add(&xdg_toplevel->events.set_app_id, &t->set_app_id);
 	t->request_move.notify = toplevel_request_move;
 	wl_signal_add(&xdg_toplevel->events.request_move, &t->request_move);
 	t->request_resize.notify = toplevel_request_resize;
@@ -1178,6 +1331,14 @@ static void close_toplevel(struct gs_toplevel *t) {
 	}
 }
 
+/* Ask the Gill-OSaab shell (Quickshell) to do something, e.g. "spotlight toggle" */
+static void shell_ipc(const char *call) {
+	const char *ipc = getenv("GOSAAB_SHELL_IPC");
+	char cmd[512];
+	snprintf(cmd, sizeof(cmd), "%s %s", ipc ? ipc : "qs -c gill-osaab ipc call", call);
+	spawn(cmd);
+}
+
 static bool handle_keybinding(struct gs_server *server, uint32_t mods, xkb_keysym_t sym) {
 	bool super = mods & WLR_MODIFIER_LOGO;
 	bool alt = mods & WLR_MODIFIER_ALT;
@@ -1200,6 +1361,15 @@ static bool handle_keybinding(struct gs_server *server, uint32_t mods, xkb_keysy
 		if (t) {
 			set_maximized(t, !t->maximized);
 		}
+		return true;
+	case XKB_KEY_space:
+		shell_ipc("spotlight toggle");
+		return true;
+	case XKB_KEY_a:
+		shell_ipc("controlcenter toggle");
+		return true;
+	case XKB_KEY_n:
+		shell_ipc("notifications toggle");
 		return true;
 	case XKB_KEY_Return: {
 		const char *term = getenv("GOSAAB_TERMINAL");
@@ -1729,6 +1899,8 @@ int main(int argc, char *argv[]) {
 	/* Scene layers, bottom to top */
 	server.scene = wlr_scene_create();
 	server.scene_layout = wlr_scene_attach_output_layout(server.scene, server.output_layout);
+	/* macOS-like frosted glass: soft, slightly darkened, colours a little more vivid */
+	wlr_scene_set_blur_data(server.scene, 3, 6, 0.02f, 0.92f, 0.92f, 1.35f);
 	server.layers.background = wlr_scene_tree_create(&server.scene->tree);
 	server.layers.backdrop = wlr_scene_rect_create(server.layers.background, 0, 0,
 		(float[4]){ 0.04f, 0.05f, 0.10f, 1.0f });
@@ -1752,6 +1924,7 @@ int main(int argc, char *argv[]) {
 	server.new_layer_surface.notify = server_new_layer_surface;
 	wl_signal_add(&server.layer_shell->events.new_surface, &server.new_layer_surface);
 
+	server.foreign_mgr = wlr_foreign_toplevel_manager_v1_create(server.display);
 	server.decoration_mgr = wlr_xdg_decoration_manager_v1_create(server.display);
 	server.new_decoration.notify = handle_new_decoration;
 	wl_signal_add(&server.decoration_mgr->events.new_toplevel_decoration, &server.new_decoration);

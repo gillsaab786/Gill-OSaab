@@ -213,5 +213,69 @@ check "compositor survived the clicks" "kill -0 $WM"
 kill -TERM $WM 2>/dev/null; wait $WM; rc=$?
 check "clean shutdown after window chrome tests" "[ $rc -eq 0 ]"
 pkill foot 2>/dev/null
+
+# ---- M3: the Gill-OSaab shell (menu bar, Dock, notifications, Control Centre, Spotlight)
+if command -v qs >/dev/null; then
+  SHELLDIR=$(pwd)/shell/quickshell
+  export QT_QUICK_BACKEND=software QT_QPA_PLATFORM=wayland
+  export GOSAAB_SHELL_IPC="qs -p $SHELLDIR ipc call"
+  rm -f "$XDG_RUNTIME_DIR/gosaab-wm.socket"
+  "$BUILD/gosaab-wm" -s "swaybg -i $WALL -m fill" >"$OUT/gosaab-wm-shell.log" 2>&1 &
+  WM=$!
+  for _ in $(seq 1 50); do [ -s "$XDG_RUNTIME_DIR/gosaab-wm.socket" ] && break; sleep 0.1; done
+  export WAYLAND_DISPLAY=$(cat "$XDG_RUNTIME_DIR/gosaab-wm.socket")
+  qs -p "$SHELLDIR" >"$OUT/quickshell.log" 2>&1 &
+  QS=$!
+  for _ in $(seq 1 40); do qs -p "$SHELLDIR" ipc call shell ping 2>/dev/null | grep -q ok && break; sleep 0.5; done
+  sleep 2; shot 20-shell-desktop
+  check "shell starts and answers" "qs -p $SHELLDIR ipc call shell ping | grep -q ok"
+  foot -W 90x26 -T "Terminal" -e sh -c 'sleep 300' &
+  sleep 2; shot 21-shell-window
+  notify-send -a "Firefox" -i firefox -h int:value:42 "Downloading Gill-OSaab.iso" "1.2 GB of 2.9 GB — 3 min left"
+  sleep 0.15; shot 22a-banner-sliding
+  sleep 1.5; shot 22-notification
+  check "notification arrived" "[ \$(qs -p $SHELLDIR ipc call notifications count) -ge 1 ]"
+  qs -p "$SHELLDIR" ipc call controlcenter toggle; sleep 1.2; shot 23-control-center
+  qs -p "$SHELLDIR" ipc call controlcenter toggle; sleep 0.8
+  qs -p "$SHELLDIR" ipc call notifications toggle; sleep 1.2; shot 24-notification-center
+  qs -p "$SHELLDIR" ipc call notifications toggle; sleep 0.8
+  qs -p "$SHELLDIR" ipc call spotlight search "foo"; sleep 1.2; shot 25-spotlight
+  qs -p "$SHELLDIR" ipc call spotlight search "12*(3+4)"; sleep 0.8; shot 26-spotlight-maths
+  qs -p "$SHELLDIR" ipc call spotlight toggle; sleep 0.8; shot 27-after-spotlight
+  python3 - "$OUT" <<'EOF5' || fail=1
+import sys
+from PIL import Image, ImageChops, ImageStat
+out = sys.argv[1]
+L = lambda n: Image.open(f"{out}/{n}.png").convert("RGB")
+def changed(a, b, box=None):
+    A, B = L(a), L(b)
+    if box: A, B = A.crop(box), B.crop(box)
+    d = ImageChops.difference(A, B).convert("L").point(lambda v: 255 if v > 24 else 0)
+    return ImageStat.Stat(d).mean[0] / 255
+desk = L("20-shell-desktop"); W, H = desk.size
+bar = ImageStat.Stat(desk.crop((0, 0, W, 30))).stddev
+wall = ImageStat.Stat(L("01-wallpaper").crop((0, 0, W, 30)))
+checks = [
+  ("menu bar is drawn", changed("01-wallpaper", "20-shell-desktop", (0, 0, W, 30)) > 0.02),
+  ("dock is drawn", changed("01-wallpaper", "20-shell-desktop", (W // 4, H - 110, 3 * W // 4, H)) > 0.02),
+  ("notification banner shows (top right)", changed("21-shell-window", "22-notification", (W - 400, 30, W, 200)) > 0.05),
+  ("control centre opens", changed("22-notification", "23-control-center", (W - 360, 30, W, 500)) > 0.05),
+  ("notification centre opens", changed("23-control-center", "24-notification-center", (W - 400, 30, W, 400)) > 0.03),
+  ("spotlight opens", changed("27-after-spotlight", "25-spotlight", (W // 2 - 320, int(H * 0.2), W // 2 + 320, int(H * 0.2) + 80)) > 0.1),
+  ("spotlight closes", changed("21-shell-window", "27-after-spotlight", (W // 2 - 320, int(H * 0.2), W // 2 + 320, int(H * 0.2) + 80)) < 0.02),
+]
+bad = 0
+for name, ok in checks:
+    print(("PASS: " if ok else "FAIL: ") + name); bad += not ok
+sys.exit(1 if bad else 0)
+EOF5
+  check "shell has no QML errors" "! grep -E 'ERROR|TypeError|ReferenceError|is not a type|is not defined|Cannot assign' $OUT/quickshell.log"
+  grep -E "WARN|ERROR|TypeError|ReferenceError|is not|Cannot" "$OUT/quickshell.log" | sort | uniq -c | sort -rn | head -15
+  check "compositor survived the shell" "kill -0 $WM"
+  kill $QS 2>/dev/null; pkill foot 2>/dev/null
+  kill -TERM $WM 2>/dev/null; wait $WM 2>/dev/null
+else
+  echo "FAIL: quickshell (qs) is not installed"; fail=1
+fi
 grep -E "\[ERROR\]|Assertion" "$OUT"/gosaab-wm*.log | head -5
 exit $fail
