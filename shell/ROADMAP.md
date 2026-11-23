@@ -41,5 +41,7 @@ Qt Quick via Quickshell. Runs on the Gill-OSaab Core image (minimal Fedora bootc
   Centre, Super+N notifications, Super+L lock, Super+Q close, Super+M minimise, Super+F zoom,
   Super+Return terminal, Alt/Super+Tab switch.
 - [~] **M6 Ship**: done: Core image uses gosaab-wm + shell instead of KDE (`shell/install.sh`,
-      `files/core-system`). Next: installer ISO, first-boot setup, test on GPD
+      `files/core-system`); CI boots the real image (core-smoke.yml); bootable USB image on the
+      `core-usb` release (iso.yml; Anaconda ISO blocked: bootc-image-builder lacks Fedora 45
+      installer defs). Idle dim/lock via swayidle + idle-inhibit. Next: installer ISO, first-boot setup, test on GPD
       Win Max 2 and ROG Ally, performance pass (idle RAM/CPU, frame pacing).
