@@ -1,0 +1,64 @@
+#!/usr/bin/env python3
+"""Runs the updates that are switched on in /etc/gill-osaab/updates.conf.
+
+Called daily by gosaab-update.timer, or now with:  gosaab-updates now
+"""
+import os
+import pwd
+import shutil
+import subprocess
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+from gosaab_common import ETC, is_on, log, read_conf  # noqa: E402
+
+
+def human_users():
+    """Real login users (uid >= 1000 with a home under /home or /var/home)."""
+    users = []
+    for entry in pwd.getpwall():
+        if entry.pw_uid >= 1000 and entry.pw_dir.startswith(("/home/", "/var/home/")):
+            users.append(entry.pw_name)
+    return users
+
+
+def plan_updates(conf, which=shutil.which, users=None):
+    """Return the list of commands to run for the current switches."""
+    if not is_on(conf, "all", default=True):
+        return []
+    users = human_users() if users is None else users
+    steps = []
+    if is_on(conf, "os", default=True):
+        if which("rpm-ostree"):
+            steps.append(["rpm-ostree", "upgrade"])
+        elif which("bootc"):
+            steps.append(["bootc", "upgrade"])
+    if is_on(conf, "apps", default=True) and which("flatpak"):
+        steps.append(["flatpak", "update", "--system", "-y", "--noninteractive"])
+        for user in users:
+            steps.append(["runuser", "-u", user, "--", "flatpak", "update", "--user", "-y", "--noninteractive"])
+    if is_on(conf, "containers", default=True) and which("distrobox"):
+        for user in users:
+            steps.append(["runuser", "-u", user, "--", "distrobox", "upgrade", "--all"])
+    return steps
+
+
+def main():
+    conf = read_conf(ETC / "updates.conf")
+    steps = plan_updates(conf)
+    if not steps:
+        log("updates", "all updates switched off; nothing to do")
+        print("Gill-OSaab: updates are switched off.")
+        return 0
+    failed = 0
+    for cmd in steps:
+        log("updates", "run: " + " ".join(cmd))
+        result = subprocess.run(cmd, check=False)
+        if result.returncode != 0:
+            failed += 1
+            log("updates", f"failed ({result.returncode}): " + " ".join(cmd))
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

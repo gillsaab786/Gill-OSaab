@@ -1,0 +1,12 @@
+[Unit]
+Description=Gill-OSaab notifications and progress in Game Mode
+PartOf=gamescope-session-plus@steam.service
+After=gamescope-session-plus@steam.service
+
+[Service]
+ExecStart=/usr/libexec/gill-osaab/gosaab-notify-hub
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=gamescope-session-plus@steam.service

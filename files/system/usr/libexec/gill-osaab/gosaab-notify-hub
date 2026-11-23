@@ -1,0 +1,392 @@
+#!/usr/bin/env python3
+"""Gill-OSaab notification hub (Game Mode).
+
+Steam's Game Mode has no system notification panel, so this hub takes the
+standard Linux notification and progress services there and keeps a live list
+that the Gill-OSaab Decky plugin shows as pop-ups and a Quick Access tab:
+
+  org.freedesktop.Notifications     normal notifications (+ "value" progress hint)
+  org.kde.JobViewServer (V1 + V2)   progress jobs: file copies, downloads, installs
+  com.canonical.Unity.LauncherEntry app progress bars (e.g. Chromium downloads)
+
+State is written to $XDG_RUNTIME_DIR/gill-osaab/notifications.json.
+Control API: org.gillosaab.NotifyHub (List, Dismiss, Cancel, Clear).
+
+In desktop mode KDE Plasma provides all of this itself, so the hub steps aside.
+"""
+import json
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+import gi
+
+gi.require_version("Gio", "2.0")
+from gi.repository import Gio, GLib  # noqa: E402
+
+MAX_ITEMS = 50
+STATE_DIR = Path(os.environ.get("XDG_RUNTIME_DIR", f"/tmp/gosaab-{os.getuid()}")) / "gill-osaab"
+STATE_FILE = STATE_DIR / "notifications.json"
+
+NOTIFY_XML = """
+<node>
+  <interface name="org.freedesktop.Notifications">
+    <method name="GetCapabilities"><arg type="as" direction="out"/></method>
+    <method name="Notify">
+      <arg type="s" direction="in"/><arg type="u" direction="in"/><arg type="s" direction="in"/>
+      <arg type="s" direction="in"/><arg type="s" direction="in"/><arg type="as" direction="in"/>
+      <arg type="a{sv}" direction="in"/><arg type="i" direction="in"/><arg type="u" direction="out"/>
+    </method>
+    <method name="CloseNotification"><arg type="u" direction="in"/></method>
+    <method name="GetServerInformation">
+      <arg type="s" direction="out"/><arg type="s" direction="out"/>
+      <arg type="s" direction="out"/><arg type="s" direction="out"/>
+    </method>
+    <signal name="NotificationClosed"><arg type="u"/><arg type="u"/></signal>
+    <signal name="ActionInvoked"><arg type="u"/><arg type="s"/></signal>
+  </interface>
+</node>"""
+
+SERVER_XML = """
+<node>
+  <interface name="org.kde.JobViewServer">
+    <method name="requestView">
+      <arg type="s" direction="in"/><arg type="s" direction="in"/><arg type="i" direction="in"/>
+      <arg type="o" direction="out"/>
+    </method>
+  </interface>
+  <interface name="org.kde.JobViewServerV2">
+    <method name="requestView">
+      <arg type="s" direction="in"/><arg type="i" direction="in"/><arg type="a{sv}" direction="in"/>
+      <arg type="o" direction="out"/>
+    </method>
+  </interface>
+</node>"""
+
+JOB_XML = """
+<node>
+  <interface name="org.kde.JobViewV2">
+    <method name="terminate"><arg type="s" direction="in"/></method>
+    <method name="setSuspended"><arg type="b" direction="in"/></method>
+    <method name="setTotalAmount"><arg type="t" direction="in"/><arg type="s" direction="in"/></method>
+    <method name="setProcessedAmount"><arg type="t" direction="in"/><arg type="s" direction="in"/></method>
+    <method name="setPercent"><arg type="u" direction="in"/></method>
+    <method name="setSpeed"><arg type="t" direction="in"/></method>
+    <method name="setInfoMessage"><arg type="s" direction="in"/></method>
+    <method name="setDescriptionField">
+      <arg type="u" direction="in"/><arg type="s" direction="in"/><arg type="s" direction="in"/>
+      <arg type="b" direction="out"/>
+    </method>
+    <method name="clearDescriptionField"><arg type="u" direction="in"/></method>
+    <method name="setDestUrl"><arg type="v" direction="in"/></method>
+    <method name="setError"><arg type="u" direction="in"/></method>
+    <signal name="cancelRequested"/><signal name="suspendRequested"/><signal name="resumeRequested"/>
+  </interface>
+  <interface name="org.kde.JobViewV3">
+    <method name="terminate">
+      <arg type="u" direction="in"/><arg type="s" direction="in"/><arg type="a{sv}" direction="in"/>
+    </method>
+    <method name="update"><arg type="a{sv}" direction="in"/></method>
+    <signal name="cancelRequested"/><signal name="suspendRequested"/><signal name="resumeRequested"/>
+  </interface>
+</node>"""
+
+HUB_XML = """
+<node>
+  <interface name="org.gillosaab.NotifyHub">
+    <method name="List"><arg type="s" direction="out"/></method>
+    <method name="Dismiss"><arg type="u" direction="in"/></method>
+    <method name="Cancel"><arg type="u" direction="in"/></method>
+    <method name="Clear"/>
+  </interface>
+</node>"""
+
+
+def human_bytes(n):
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if n < 1024 or unit == "TB":
+            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
+        n /= 1024
+    return str(n)
+
+
+class Store:
+    """The live list of notifications and progress items."""
+
+    def __init__(self, path=STATE_FILE, on_change=None):
+        self.path = Path(path)
+        self.items = {}
+        self.next_id = 1
+        self.on_change = on_change
+
+    def new_id(self):
+        i = self.next_id
+        self.next_id += 1
+        return i
+
+    def upsert(self, item_id, **fields):
+        item = self.items.get(item_id)
+        if item is None:
+            item = {"id": item_id, "app": "", "icon": "", "title": "", "body": "", "percent": None,
+                    "state": "info", "kind": "notification", "cancellable": False, "created": time.time()}
+            self.items[item_id] = item
+        item.update({k: v for k, v in fields.items() if v is not None or k == "percent"})
+        item["updated"] = time.time()
+        self.trim()
+        self.changed()
+        return item
+
+    def remove(self, item_id):
+        if self.items.pop(item_id, None) is not None:
+            self.changed()
+
+    def clear(self):
+        self.items = {k: v for k, v in self.items.items() if v["state"] == "active"}
+        self.changed()
+
+    def trim(self):
+        if len(self.items) <= MAX_ITEMS:
+            return
+        finished = sorted((v for v in self.items.values() if v["state"] != "active"), key=lambda v: v["updated"])
+        for old in finished[: len(self.items) - MAX_ITEMS]:
+            del self.items[old["id"]]
+
+    def snapshot(self):
+        items = sorted(self.items.values(), key=lambda v: (v["state"] != "active", -v["updated"]))
+        return {"version": 1, "updated": time.time(), "items": items}
+
+    def changed(self):
+        if self.on_change:
+            self.on_change()
+
+    def write(self):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(self.snapshot()))
+        os.replace(tmp, self.path)
+
+
+def unpack(variant_dict):
+    out = {}
+    for k, v in variant_dict.items():
+        out[k] = v.unpack() if isinstance(v, GLib.Variant) else v
+    return out
+
+
+class Hub:
+    def __init__(self, store=None):
+        self.store = store or Store(on_change=self.schedule_write)
+        if store is not None:
+            store.on_change = self.schedule_write
+        self.conn = None
+        self.jobs = {}  # object path -> (item id, registration id, interface)
+        self.launchers = {}  # app uri -> item id
+        self.write_pending = False
+        self.infos = {name: Gio.DBusNodeInfo.new_for_xml(xml) for name, xml in
+                      (("notify", NOTIFY_XML), ("server", SERVER_XML), ("job", JOB_XML), ("hub", HUB_XML))}
+
+    # ------------------------------------------------------------ plumbing
+    def schedule_write(self):
+        if not self.write_pending:
+            self.write_pending = True
+            GLib.timeout_add(250, self.flush)
+
+    def flush(self):
+        self.write_pending = False
+        try:
+            self.store.write()
+        except OSError as exc:
+            print(f"gosaab-notify-hub: cannot write state: {exc}", file=sys.stderr)
+        return False
+
+    def start(self, conn):
+        self.conn = conn
+        conn.register_object("/org/freedesktop/Notifications",
+                             self.infos["notify"].interfaces[0], self.on_notify_call, None, None)
+        for iface in self.infos["server"].interfaces:
+            conn.register_object("/JobViewServer", iface, self.on_server_call, None, None)
+        conn.register_object("/org/gillosaab/NotifyHub", self.infos["hub"].interfaces[0],
+                             self.on_hub_call, None, None)
+        conn.signal_subscribe(None, "com.canonical.Unity.LauncherEntry", "Update", None, None,
+                              Gio.DBusSignalFlags.NONE, self.on_launcher_update)
+        flags = Gio.BusNameOwnerFlags.ALLOW_REPLACEMENT | Gio.BusNameOwnerFlags.DO_NOT_QUEUE
+        for name in ("org.freedesktop.Notifications", "org.kde.JobViewServer", "org.kde.kuiserver"):
+            Gio.bus_own_name_on_connection(conn, name, flags, None, None)
+        Gio.bus_own_name_on_connection(conn, "org.gillosaab.NotifyHub", Gio.BusNameOwnerFlags.NONE, None, None)
+        self.flush()
+
+    # ------------------------------------------------------------ notifications
+    def notify(self, app, replaces_id, icon, summary, body, actions, hints, timeout):
+        hints = unpack(hints)
+        item_id = replaces_id if replaces_id in self.store.items else self.store.new_id()
+        percent = hints.get("value")
+        state = "active" if percent is not None and int(percent) < 100 else "info"
+        if percent is not None and int(percent) >= 100:
+            state = "done"
+        self.store.upsert(item_id, app=app, icon=icon, title=summary, body=body,
+                          percent=int(percent) if percent is not None else None, state=state,
+                          urgency=int(hints.get("urgency", 1)))
+        return item_id
+
+    def on_notify_call(self, conn, sender, path, iface, method, params, inv):
+        if method == "GetCapabilities":
+            inv.return_value(GLib.Variant("(as)", (["body", "icon-static", "persistence", "x-gosaab-progress"],)))
+        elif method == "GetServerInformation":
+            inv.return_value(GLib.Variant("(ssss)", ("Gill-OSaab", "GILL-Saab", "1.0", "1.2")))
+        elif method == "Notify":
+            item_id = self.notify(*params.unpack())
+            inv.return_value(GLib.Variant("(u)", (item_id,)))
+        elif method == "CloseNotification":
+            (item_id,) = params.unpack()
+            item = self.store.items.get(item_id)
+            if item and item["state"] == "active":
+                self.store.upsert(item_id, state="done")
+            conn.emit_signal(None, path, iface, "NotificationClosed", GLib.Variant("(uu)", (item_id, 3)))
+            inv.return_value(None)
+
+    # ------------------------------------------------------------ progress jobs
+    def on_server_call(self, conn, sender, path, iface, method, params, inv):
+        args = params.unpack()
+        if iface == "org.kde.JobViewServer":
+            app, icon, caps = args
+            v3 = False
+        else:
+            app, caps, hints = args
+            icon = ""
+            v3 = True
+        item_id = self.store.new_id()
+        job_path = f"/JobView/{item_id}"
+        interfaces = self.infos["job"].interfaces
+        iface_info = interfaces[1] if v3 else interfaces[0]
+        reg = conn.register_object(job_path, iface_info, self.on_job_call, None, None)
+        self.jobs[job_path] = (item_id, reg, iface_info.name)
+        self.store.upsert(item_id, app=app.removesuffix(".desktop"), icon=icon, title=app.removesuffix(".desktop"),
+                          kind="job", state="active", cancellable=bool(caps & 1), sender=sender)
+        inv.return_value(GLib.Variant("(o)", (job_path,)))
+
+    def on_job_call(self, conn, sender, path, iface, method, params, inv):
+        item_id = self.jobs.get(path, (None,))[0]
+        args = params.unpack()
+        item = self.store.items.get(item_id)
+        result = None
+        if item is not None:
+            if method == "update":
+                self.apply_v3(item_id, args[0])
+            elif method == "terminate":
+                error = args[1] if iface.endswith("V3") else args[0]
+                self.store.upsert(item_id, state="failed" if error else "done",
+                                  percent=100 if not error else item["percent"], body=error or item["body"])
+                GLib.timeout_add_seconds(2, self.drop_job, path)
+            elif method == "setPercent":
+                self.store.upsert(item_id, percent=int(args[0]))
+            elif method == "setInfoMessage":
+                self.store.upsert(item_id, title=args[0])
+            elif method == "setDescriptionField":
+                label, value = args[1], args[2]
+                self.store.upsert(item_id, body=f"{label}: {value}" if label else value)
+                result = GLib.Variant("(b)", (True,))
+            elif method == "setSuspended":
+                self.store.upsert(item_id, state="paused" if args[0] else "active")
+            elif method == "setProcessedAmount" and args[1] == "bytes":
+                self.store.upsert(item_id, detail=human_bytes(args[0]))
+            elif method == "setError" and args[0]:
+                self.store.upsert(item_id, state="failed")
+        if result is None and method == "setDescriptionField":
+            result = GLib.Variant("(b)", (False,))
+        inv.return_value(result)
+
+    def apply_v3(self, item_id, props):
+        props = unpack(props)
+        fields = {}
+        if "title" in props:
+            fields["title"] = props["title"]
+        if "infoMessage" in props:
+            fields["body"] = props["infoMessage"]
+        if "percent" in props:
+            fields["percent"] = int(props["percent"])
+        if "descriptionLabel1" in props or "descriptionValue1" in props:
+            label, value = props.get("descriptionLabel1", ""), props.get("descriptionValue1", "")
+            fields["body"] = f"{label}: {value}" if label else value
+        if "processedBytes" in props:
+            total = props.get("totalBytes")
+            fields["detail"] = human_bytes(props["processedBytes"]) + (f" of {human_bytes(total)}" if total else "")
+        if "suspended" in props:
+            fields["state"] = "paused" if props["suspended"] else "active"
+        if fields:
+            self.store.upsert(item_id, **fields)
+
+    def drop_job(self, path):
+        entry = self.jobs.pop(path, None)
+        if entry and self.conn:
+            self.conn.unregister_object(entry[1])
+        return False
+
+    # ------------------------------------------------------------ launcher progress
+    def on_launcher_update(self, conn, sender, path, iface, signal, params):
+        app_uri, props = params.unpack()
+        props = unpack(props)
+        if "progress" not in props and "progress-visible" not in props:
+            return
+        app = app_uri.removeprefix("application://").removesuffix(".desktop")
+        item_id = self.launchers.get(app_uri)
+        visible = props.get("progress-visible", True)
+        if item_id is None:
+            if not visible:
+                return
+            item_id = self.store.new_id()
+            self.launchers[app_uri] = item_id
+        if visible:
+            percent = int(round(float(props.get("progress", 0)) * 100))
+            self.store.upsert(item_id, app=app, title=f"{app}: working", kind="launcher",
+                              state="active", percent=percent)
+        else:
+            self.store.upsert(item_id, state="done", percent=100, title=f"{app}: finished")
+            del self.launchers[app_uri]
+
+    # ------------------------------------------------------------ control API
+    def on_hub_call(self, conn, sender, path, iface, method, params, inv):
+        if method == "List":
+            inv.return_value(GLib.Variant("(s)", (json.dumps(self.store.snapshot()),)))
+            return
+        if method == "Clear":
+            self.store.clear()
+        else:
+            (item_id,) = params.unpack()
+            if method == "Cancel":
+                self.cancel(item_id)
+            else:
+                self.store.remove(item_id)
+        inv.return_value(None)
+
+    def cancel(self, item_id):
+        for path, (jid, _reg, iface) in list(self.jobs.items()):
+            if jid == item_id:
+                self.conn.emit_signal(self.store.items.get(item_id, {}).get("sender"), path, iface,
+                                      "cancelRequested", None)
+                self.store.upsert(item_id, body="Cancelling…")
+                return
+
+
+def plasma_running():
+    return subprocess.run(["pgrep", "-x", "plasmashell"], capture_output=True, check=False).returncode == 0
+
+
+def main(argv):
+    if "--force" not in argv and plasma_running():
+        print("gosaab-notify-hub: KDE Plasma handles notifications here; exiting.")
+        return 0
+    loop = GLib.MainLoop()
+    hub = Hub()
+
+    def acquired(conn, name):
+        hub.start(conn)
+
+    Gio.bus_get(Gio.BusType.SESSION, None, lambda _src, res: acquired(Gio.bus_get_finish(res), None))
+    loop.run()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

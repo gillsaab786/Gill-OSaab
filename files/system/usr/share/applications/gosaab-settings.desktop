@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Gill-OSaab Settings
+Comment=Updates, sandbox, screen-off and appearance switches
+Exec=gosaab-settings
+Icon=gill-osaab
+Terminal=false
+Categories=Settings;System;
+Keywords=updates;sandbox;screen;dark;night;gill;osaab;

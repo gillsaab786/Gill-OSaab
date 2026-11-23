@@ -1,0 +1,56 @@
+#!/usr/bin/env python3
+"""Change a Gill-OSaab system setting (used by Gill-OSaab Settings).
+
+  gosaab-config set <updates.conf|features.conf> <key> <value>
+
+Only known keys and values are accepted.
+"""
+import os
+import sys
+
+sys.path.insert(0, "/usr/libexec/gill-osaab")
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "../libexec/gill-osaab"))
+from gosaab_common import ETC, write_conf_value  # noqa: E402
+
+ONOFF = ("on", "off")
+OPTIONAL = ("phone_link", "shared_game_library", "vpn", "cloud_drives", "night_light", "auto_dark_mode_sunset",
+            "vrr", "suspend_then_hibernate", "undervolt", "smart_updates", "pause_downloads_while_gaming")
+ALLOWED = {
+    "updates.conf": {k: ONOFF for k in ("all", "os", "apps", "containers")},
+    "features.conf": {
+        "sandbox_windows_apps": ONOFF,
+        "screen_off_overnight": ONOFF,
+        "screen_off_idle_seconds": "int:5:600",
+        **{k: ONOFF for k in OPTIONAL},
+    },
+}
+
+
+def validate(filename, key, value):
+    rules = ALLOWED.get(filename)
+    if rules is None or key not in rules:
+        return False
+    rule = rules[key]
+    if isinstance(rule, str) and rule.startswith("int:"):
+        _, lo, hi = rule.split(":")
+        return value.isdigit() and int(lo) <= int(value) <= int(hi)
+    return value in rule
+
+
+def main(argv):
+    if len(argv) != 4 or argv[0] != "set":
+        print(__doc__.strip(), file=sys.stderr)
+        return 2
+    _, filename, key, value = argv
+    if not validate(filename, key, value):
+        print(f"Not allowed: {filename} {key}={value}", file=sys.stderr)
+        return 2
+    if os.geteuid() != 0 and not os.environ.get("GOSAAB_ETC"):
+        print("Needs admin rights (run through pkexec).", file=sys.stderr)
+        return 1
+    write_conf_value(ETC / filename, key, value)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

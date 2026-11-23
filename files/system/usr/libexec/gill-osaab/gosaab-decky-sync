@@ -1,0 +1,19 @@
+#!/usr/bin/bash
+# Installs/updates the Gill-OSaab Notifications Decky plugin for every user
+# who has Decky Loader, then restarts Decky if anything changed.
+set -euo pipefail
+SRC=/usr/share/gill-osaab/decky/gill-osaab-notify
+changed=0
+for plugins in /home/*/homebrew/plugins /var/home/*/homebrew/plugins; do
+    [[ -d "$plugins" ]] || continue
+    dest="$plugins/gill-osaab-notify"
+    if ! diff -rq "$SRC" "$dest" >/dev/null 2>&1; then
+        rm -rf "$dest"
+        cp -r "$SRC" "$dest"
+        changed=1
+        echo "gill-osaab: installed notifications plugin in $dest"
+    fi
+done
+if [[ $changed -eq 1 ]] && systemctl list-unit-files plugin_loader.service >/dev/null 2>&1; then
+    systemctl try-restart plugin_loader.service || true
+fi

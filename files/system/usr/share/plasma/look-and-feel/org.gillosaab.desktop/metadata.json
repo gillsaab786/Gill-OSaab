@@ -1,0 +1,11 @@
+{
+    "KPackageStructure": "Plasma/LookAndFeel",
+    "KPlugin": {
+        "Authors": [{ "Name": "GILL-Saab" }],
+        "Description": "Gill-OSaab: top bar, floating dock, dark glass look",
+        "Id": "org.gillosaab.desktop",
+        "License": "GPL-2.0-or-later",
+        "Name": "Gill-OSaab",
+        "Version": "1.0"
+    }
+}

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+  <vendor>Gill-OSaab</vendor>
+  <action id="org.gillosaab.config">
+    <description>Change Gill-OSaab settings</description>
+    <message>Gill-OSaab Settings needs permission to change a system setting</message>
+    <icon_name>gill-osaab</icon_name>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/bin/gosaab-config</annotate>
+  </action>
+  <action id="org.gillosaab.updates-now">
+    <description>Run Gill-OSaab updates now</description>
+    <message>Gill-OSaab needs permission to run updates</message>
+    <icon_name>gill-osaab</icon_name>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/bin/gosaab-updates</annotate>
+  </action>
+</policyconfig>

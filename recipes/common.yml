@@ -1,0 +1,28 @@
+# yaml-language-server: $schema=https://schema.blue-build.org/module-list-v1.json
+# Modules shared by every Gill-OSaab edition.
+modules:
+  # Gill-OSaab tools, configs and defaults -> image root
+  - type: files
+    files:
+      - source: system
+        destination: /
+
+  # Windows app layer (Bazzite already ships Waydroid and distrobox)
+  - type: dnf
+    install:
+      skip-unavailable: true # a missing package never breaks the build
+      packages:
+        - wine
+        - libnotify
+        - brightnessctl
+        - bubblewrap
+        - rsms-inter-fonts
+        - papirus-icon-theme
+        - python3-pyside6
+        - python3-gobject
+
+  # Enables Gill-OSaab services, disables stock updaters, refreshes app/MIME databases
+  - type: script
+    scripts:
+      - gosaab-setup.sh
+

@@ -1,0 +1,11 @@
+# yaml-language-server: $schema=https://schema.blue-build.org/recipe-v1.json
+# Gill-OSaab for desktops and laptops (Intel/AMD). Boots to the KDE desktop.
+# Published to ghcr.io/<owner>/gill-osaab-desktop
+name: gill-osaab-desktop
+description: Gill-OSaab desktop edition, built on Bazzite.
+
+base-image: ghcr.io/ublue-os/bazzite
+image-version: stable
+
+modules:
+  - from-file: common.yml
