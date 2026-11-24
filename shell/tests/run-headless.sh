@@ -316,6 +316,7 @@ if command -v qs >/dev/null; then
   printf '[Desktop Entry]\nType=Application\nName=YouTube\nExec=waydroid app launch com.google.android.youtube\nIcon=youtube\n' > "$APPS/waydroid.com.google.android.youtube.desktop"
   printf '[Desktop Entry]\nType=Application\nName=YouTube\nExec=gosaab-open --wine-run "/x" "C:/YouTube.exe"\nIcon=youtube\n' > "$APPS/wine-youtube.desktop"
   printf '[Desktop Entry]\nType=Application\nName=Netflix\nExec=waydroid app launch com.netflix.mediaclient\nIcon=netflix\n' > "$APPS/waydroid.com.netflix.mediaclient.desktop"
+  export USER=${USER:-$(id -un)} # the lock screen checks this account's password
   qs -p "$SHELLDIR" >"$OUT/quickshell.log" 2>&1 &
   QS=$!
   for _ in $(seq 1 40); do qs -p "$SHELLDIR" ipc call shell ping 2>/dev/null | grep -q ok && break; sleep 0.5; done
