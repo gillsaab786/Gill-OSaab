@@ -415,6 +415,7 @@ EOF5
   qs -p "$SHELLDIR" ipc call lock lock; sleep 1.5; shot 40-locked
   qs -p "$SHELLDIR" ipc call lock keyboard; sleep 0.8; shot 40b-lock-touch-keyboard
   qs -p "$SHELLDIR" ipc call lock keyboard; sleep 0.5
+  [ -f /etc/pam.d/gill-osaab-lock ] || cp files/system/etc/pam.d/gill-osaab-lock /etc/pam.d/ 2>/dev/null
   qs -p "$SHELLDIR" ipc call lock typeForTest wrong-password; sleep 2.5; shot 40c-wrong-password
   check "a wrong password keeps the screen locked" "[ \"\$(qs -p $SHELLDIR ipc call lock isLocked)\" = true ]"
   check "lock screen engages" "[ \"\$(qs -p $SHELLDIR ipc call lock isLocked)\" = true ]"
