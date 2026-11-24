@@ -472,5 +472,71 @@ class SmartPowerLogic(unittest.TestCase):
         self.assertIsNone(activity.gpu_change_message(True, True, "a", "b", []))
 
 
+class BatteryAndPanels(unittest.TestCase):
+    def test_time_left_from_energy(self):
+        n = pw.battery_numbers({"status": "Discharging", "capacity": "80", "power_now": "12000000",
+                                "energy_now": "48000000", "energy_full": "60000000"})
+        self.assertEqual((n["watts"], n["now_wh"], n["percent"]), (12.0, 48.0, 80))
+        self.assertEqual(pw.time_left(n, 12.0), 240)
+        self.assertEqual(pw.format_minutes(240), "4 h 00 min")
+        self.assertEqual(pw.format_minutes(45), "45 min")
+
+    def test_time_left_from_charge_and_charging(self):
+        n = pw.battery_numbers({"status": "Charging", "capacity": "50", "current_now": "2000000",
+                                "voltage_now": "15000000", "charge_now": "2000000", "charge_full": "4000000"})
+        self.assertEqual(n["watts"], 30.0)
+        self.assertTrue(n["charging"])
+        self.assertEqual(pw.time_left(n, 30.0), 60)  # 30 Wh missing at 30 W
+        self.assertIsNone(pw.time_left(n, 0))
+
+    def test_read_battery(self):
+        with tempfile.TemporaryDirectory() as d:
+            b = Path(d) / "BAT0"
+            b.mkdir()
+            for k, v in {"type": "Battery", "capacity": "77", "status": "Discharging"}.items():
+                (b / k).write_text(v)
+            ac = Path(d) / "ADP1"
+            ac.mkdir()
+            (ac / "type").write_text("Mains")
+            self.assertEqual(pw.read_battery(Path(d))["capacity"], "77")
+
+    def test_decky_panel_parsing(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("decky_main", ROOT / "decky/gill-osaab-notify/main.py")
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        self.assertEqual(m.parse_volume("Volume: 0.45"), (45, False))
+        self.assertEqual(m.parse_volume("Volume: 0.30 [MUTED]"), (30, True))
+        self.assertEqual(m.parse_brightness("amdgpu_bl1,backlight,120,47%,255"), 47)
+        self.assertIsNone(m.parse_brightness(""))
+
+    def test_haptic_patterns(self):
+        h = load("usr/libexec/gill-osaab/gosaab-haptic", "gosaab_haptic")
+        for kind in ("tick", "toggle", "success", "error"):
+            for ms, strong, weak, gap in h.PATTERNS[kind]:
+                self.assertTrue(5 <= ms <= 80 and 0 <= strong <= 0xFFFF and 0 <= weak <= 0xFFFF)
+
+
+class FaceUnlock(unittest.TestCase):
+    face = load_core("usr/bin/gosaab-face", "gosaab_face")
+
+    def test_pam_face_step(self):
+        base = "#%PAM-1.0\nauth       include      system-auth\naccount    include      system-auth\n"
+        on = self.face.pam_with_face(base, True)
+        lines = on.splitlines()
+        self.assertEqual(lines[1], self.face.HOWDY_LINE)  # face first, then the password
+        self.assertEqual(self.face.pam_with_face(on, True).count("pam_howdy"), 1)
+        self.assertEqual(self.face.pam_with_face(on, False), base)
+
+    def test_only_infrared_cameras(self):
+        with tempfile.TemporaryDirectory() as d:
+            for i, name in enumerate(["Integrated Camera: Integrated C", "Integrated Camera: Integrated I"]):
+                (Path(d) / f"video{i}").mkdir()
+                (Path(d) / f"video{i}" / "name").write_text(name)
+            self.assertEqual(self.face.ir_camera(Path(d)), ("/dev/video1", "Integrated Camera: Integrated I"))
+            (Path(d) / "video1" / "name").write_text("USB Webcam")
+            self.assertEqual(self.face.ir_camera(Path(d)), (None, None))
+
+
 if __name__ == "__main__":
     unittest.main()

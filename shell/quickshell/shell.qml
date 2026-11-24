@@ -33,6 +33,7 @@ ShellRoot {
     Spotlight {}
     Launchpad {}
     Switcher {}
+    OSD {}
     LockScreen {}
     GlassesProfiles {}
     BluetoothBatteries {}

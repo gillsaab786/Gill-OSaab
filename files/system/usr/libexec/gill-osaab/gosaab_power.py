@@ -175,3 +175,52 @@ def dgpu_users(slot, proc="/proc"):
         except OSError:
             continue
     return users
+
+
+# --------------------------------------------------------------------------- battery time left
+def read_battery(root=Path("/sys/class/power_supply")):
+    """Raw numbers of the first battery (µW, µWh, µA, µAh, µV) or None."""
+    for bat in sorted(Path(root).glob("*")):
+        if (bat / "type").exists() and (bat / "type").read_text().strip() == "Battery":
+            vals = {}
+            for f in ("status", "capacity", "power_now", "energy_now", "energy_full", "current_now",
+                      "charge_now", "charge_full", "voltage_now", "voltage_min_design"):
+                try:
+                    vals[f] = (bat / f).read_text().strip()
+                except OSError:
+                    pass
+            return vals
+    return None
+
+
+def battery_numbers(raw):
+    """Watts being drawn (or charged), Wh stored, Wh when full, percent, charging?"""
+    def num(k):
+        v = raw.get(k, "")
+        return int(v) if v.lstrip("-").isdigit() else None
+    volts = (num("voltage_now") or num("voltage_min_design") or 0) / 1e6
+    watts = abs(num("power_now")) / 1e6 if num("power_now") is not None else \
+        (abs(num("current_now") or 0) / 1e6 * volts)
+    if num("energy_now") is not None:
+        now_wh, full_wh = num("energy_now") / 1e6, (num("energy_full") or 0) / 1e6
+    else:
+        now_wh, full_wh = (num("charge_now") or 0) / 1e6 * volts, (num("charge_full") or 0) / 1e6 * volts
+    return {"watts": watts, "now_wh": now_wh, "full_wh": full_wh, "percent": num("capacity"),
+            "charging": raw.get("status") in ("Charging", "Full", "Not charging")}
+
+
+def time_left(nums, avg_watts):
+    """Minutes left at the current (smoothed) power draw; or minutes to full when charging."""
+    if not avg_watts or avg_watts < 0.3:
+        return None
+    if nums["charging"]:
+        missing = max(0.0, nums["full_wh"] - nums["now_wh"])
+        return int(missing / avg_watts * 60) if missing > 0 else 0
+    return int(nums["now_wh"] / avg_watts * 60)
+
+
+def format_minutes(m):
+    if m is None:
+        return ""
+    h, mm = divmod(int(m), 60)
+    return f"{h} h {mm:02d} min" if h else f"{mm} min"

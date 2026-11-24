@@ -36,6 +36,13 @@ PanelWindow {
             id: inner
             anchors { left: parent.left; right: parent.right; top: parent.top; margins: 14 }
             spacing: 10
+            // contents settle in just after the glass (macOS-style)
+            opacity: popup.open ? 1 : 0
+            Behavior on opacity { NumberAnimation { duration: Theme.normal; easing.type: Easing.OutCubic } }
+            transform: Translate {
+                y: popup.open ? 0 : -10
+                Behavior on y { SpringAnimation { spring: 4; damping: 0.42; epsilon: 0.05 } }
+            }
         }
     }
 }

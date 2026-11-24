@@ -2131,6 +2131,15 @@ static bool handle_keybinding(struct gs_server *server, uint32_t mods, xkb_keysy
 			}
 		}
 	}
+	/* volume and brightness keys (and handhelds' volume rocker): change it and show the bezel */
+	switch (sym) {
+	case XKB_KEY_XF86AudioRaiseVolume: shell_ipc("osd volume up"); return true;
+	case XKB_KEY_XF86AudioLowerVolume: shell_ipc("osd volume down"); return true;
+	case XKB_KEY_XF86AudioMute: shell_ipc("osd volume mute"); return true;
+	case XKB_KEY_XF86MonBrightnessUp: shell_ipc("osd brightness up"); return true;
+	case XKB_KEY_XF86MonBrightnessDown: shell_ipc("osd brightness down"); return true;
+	default: break;
+	}
 	if (sym == XKB_KEY_XF86LaunchA || (super && sym == XKB_KEY_Up)) { /* F3 / Super+Up: Mission Control */
 		overview_set(server, !server->overview, NULL);
 		return true;

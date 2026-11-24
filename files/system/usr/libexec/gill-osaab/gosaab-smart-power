@@ -146,6 +146,7 @@ def main():
     pair = pw.hybrid(gpus)
     mode, changed_at, removed, gpu_msg, applied = "desktop", time.monotonic(), False, "", None
     last_gpu_mode = None
+    avg_watts = None  # smoothed battery draw (about a minute)
     while True:
         conf = read_conf(ETC / "features.conf")
         smart = is_on(conf, "smart_tdp", default=True)
@@ -169,7 +170,16 @@ def main():
         else:
             backend = apply_tdp(backends if smart else [], watts[mode] if smart else 0, mode)
             applied = (key, backend, time.monotonic())
-        status = {"mode": mode, "label": pw.LABELS[mode], "smart_tdp": smart, "watts": watts[mode] if smart else 0,
+        battery = None
+        raw = pw.read_battery()
+        if raw:
+            nums = pw.battery_numbers(raw)
+            if nums["watts"] > 0:
+                avg_watts = nums["watts"] if avg_watts is None else avg_watts * 0.9 + nums["watts"] * 0.1
+            left = pw.time_left(nums, avg_watts)
+            battery = {"percent": nums["percent"], "charging": nums["charging"],
+                       "watts": round(avg_watts or 0, 1), "minutes": left, "text": pw.format_minutes(left)}
+        status = {"mode": mode, "battery": battery, "label": pw.LABELS[mode], "smart_tdp": smart, "watts": watts[mode] if smart else 0,
                   "watts_all": watts, "device": device, "backend": backend or "power-profile",
                   "backends": [b for b, _ in backends], "signals": signals,
                   "hybrid": {"integrated": pair[0], "dedicated": pair[1]} if pair else None,

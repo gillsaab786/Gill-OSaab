@@ -15,9 +15,30 @@ Scope {
     // compositor then fades the desktop back in
     property bool cover: true
     property bool keyboard: false // touch keyboard (handhelds have no keyboard)
+    // Face unlock (Settings > Apps & Security): the lock screen looks for you as soon as it shows
+    FileView { id: faceConf; path: "/etc/gill-osaab/face.conf"; blockLoading: true }
+    readonly property bool faceUnlock: faceConf.text().indexOf("enabled=on") >= 0
+    property bool lookingForFace: false
+    function tryFace() {
+        if (!faceUnlock || pam.active || !sessionLock.locked) return
+        lookingForFace = true
+        pam.messageText = ""
+        pam.start()
+    }
+    // typed password: answer the waiting prompt, or start a new check
+    // Each screen has its own password field; they share what's typed through these:
+    property string typed: ""
+    signal clearPassword()
+    signal shake()
+    function submit() {
+        if (typed === "") return
+        if (pam.active && pam.responseRequired) pam.respond(typed)
+        else if (!pam.active) pam.start()
+    }
     function unlock() { cover = true; unlockTimer.start() }
     Timer { id: unlockTimer; interval: 300; onTriggered: sessionLock.locked = false }
-    Timer { id: revealTimer; interval: 30; onTriggered: root.cover = false }
+    Timer { id: revealTimer; interval: 30; onTriggered: { root.cover = false; faceTimer.start() } }
+    Timer { id: faceTimer; interval: 400; onTriggered: root.tryFace() }
 
     WlSessionLock {
         id: sessionLock
@@ -90,6 +111,7 @@ Scope {
                     border { color: Qt.rgba(1, 1, 1, 0.25); width: 1 }
                     property real shake: 0
                     transform: Translate { x: pill.shake }
+                    Connections { target: root; function onShake() { shakeAnim.restart() } }
                     SequentialAnimation { // "wrong password" shake, like macOS
                         id: shakeAnim
                         NumberAnimation { target: pill; property: "shake"; to: -14; duration: 50 }
@@ -101,6 +123,8 @@ Scope {
                     TapHandler { onTapped: root.keyboard = true } // touching the field brings up the keyboard
                     TextInput {
                         id: password
+                        onTextChanged: root.typed = text
+                        Connections { target: root; function onClearPassword() { password.text = "" } }
                         anchors { fill: parent; leftMargin: 16; rightMargin: 16 }
                         verticalAlignment: TextInput.AlignVCenter
                         echoMode: TextInput.Password
@@ -108,14 +132,25 @@ Scope {
                         color: "white"
                         font { family: Theme.font; pixelSize: 14 }
                         focus: true
-                        enabled: !pam.active
+                        enabled: !pam.active || pam.responseRequired
                         Text { anchors.verticalCenter: parent.verticalCenter; visible: !password.text
-                            text: pam.active ? "Checking…" : "Enter Password"; color: Qt.rgba(1, 1, 1, 0.6); font: password.font }
-                        onAccepted: {
-                            if (text === "") return
-                            pam.start()
-                        }
+                            text: pam.active && !pam.responseRequired ? "Checking…" : "Enter Password"; color: Qt.rgba(1, 1, 1, 0.6); font: password.font }
+                        onAccepted: root.submit()
                     }
+                }
+                Text { // face unlock: looking / try again
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    visible: root.faceUnlock
+                    text: root.lookingForFace ? "Looking for you…" : "Try Face Unlock again"
+                    color: Qt.rgba(1, 1, 1, root.lookingForFace ? 0.95 : 0.75)
+                    font { family: Theme.font; pixelSize: 13; weight: Font.DemiBold }
+                    SequentialAnimation on opacity { // gentle pulse while looking
+                        running: root.lookingForFace; loops: Animation.Infinite
+                        NumberAnimation { to: 0.45; duration: 600; easing.type: Easing.InOutSine }
+                        NumberAnimation { to: 1; duration: 600; easing.type: Easing.InOutSine }
+                    }
+                    MouseArea { anchors.fill: parent; anchors.margins: -10; enabled: !root.lookingForFace
+                        onClicked: { if (pam.active) pam.abort(); root.tryFace() } }
                 }
                 Text { // show/hide the touch keyboard
                     anchors.horizontalCenter: parent.horizontalCenter
@@ -139,7 +174,7 @@ Scope {
                 target: password
                 fontName: Theme.font
                 anchors { horizontalCenter: parent.horizontalCenter; bottom: parent.bottom; bottomMargin: 16 }
-                onAccepted: if (password.text !== "" && !pam.active) pam.start()
+                onAccepted: root.submit()
             }
         }
     }
@@ -149,16 +184,25 @@ Scope {
         config: "gill-osaab-lock"
         user: root.user
         property string messageText: ""
-        onResponseRequiredChanged: if (responseRequired) { respond(password.text) }
+        // the face step ran first; now it wants the password: send it if typed, else wait for it
+        onResponseRequiredChanged: if (responseRequired) {
+            root.lookingForFace = false
+            if (root.typed !== "") respond(root.typed)
+            else if (root.faceUnlock) pam.messageText = "Not recognised – enter your password"
+        }
         onCompleted: result => {
+            const wasFace = root.lookingForFace && root.typed === ""
+            root.lookingForFace = false
             if (result === PamResult.Success) {
-                password.text = ""
+                root.clearPassword()
                 pam.messageText = ""
+                ShellState.haptic("success")
                 root.unlock()
-            } else {
-                password.text = ""
+            } else if (!wasFace) {
+                root.clearPassword()
                 pam.messageText = "Incorrect password"
-                shakeAnim.restart()
+                ShellState.haptic("error")
+                root.shake()
             }
         }
         onError: pam.messageText = "Could not check the password"
@@ -170,5 +214,6 @@ Scope {
         function isLocked(): bool { return sessionLock.locked }
         function unlockForTest(): void { if (root.testMode) root.unlock() }
         function keyboard(): void { root.keyboard = !root.keyboard }
+        function typeForTest(text: string): void { if (root.testMode) { root.typed = text; root.submit() } }
     }
 }

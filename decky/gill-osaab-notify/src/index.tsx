@@ -4,6 +4,7 @@ import {
   PanelSection,
   PanelSectionRow,
   ProgressBarWithInfo,
+  SliderField,
   staticClasses,
 } from "@decky/ui";
 import { addEventListener, callable, definePlugin, removeEventListener, toaster } from "@decky/api";
@@ -29,7 +30,27 @@ interface HubState {
   items: Item[];
 }
 
+interface Battery {
+  percent: number | null;
+  charging: boolean;
+  watts: number;
+  minutes: number | null;
+  text: string;
+}
+
+interface Device {
+  volume: number;
+  muted: boolean;
+  brightness: number | null;
+  battery: Battery | null;
+  mode: string;
+  watts: number;
+}
+
 const getState = callable<[], HubState>("get_state");
+const getDevice = callable<[], Device>("get_device");
+const setVolume = callable<[value: number], void>("set_volume");
+const setBrightness = callable<[value: number], void>("set_brightness");
 const dismiss = callable<[id: number], void>("dismiss");
 const cancel = callable<[id: number], void>("cancel");
 const clearAll = callable<[], void>("clear");
@@ -89,14 +110,69 @@ function useHubState(): HubState {
   return state;
 }
 
+// ------------------------------------------------------------ volume, brightness, battery
+function useDevice(): Device | null {
+  const [dev, setDev] = useState<Device | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const load = () => getDevice().then((d) => alive && setDev(d)).catch(() => undefined);
+    load();
+    const timer = setInterval(load, 5000);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, []);
+  return dev;
+}
+
+function batteryLine(b: Battery): string {
+  if (b.charging) return b.text ? `Charging · full in ${b.text}` : "Charging";
+  return b.text ? `${b.text} left` : "Estimating…";
+}
+
+function QuickSettings({ dev }: { dev: Device | null }) {
+  if (!dev) return null;
+  return (
+    <PanelSection title="Quick settings">
+      <PanelSectionRow>
+        <SliderField label="Volume" value={dev.muted ? 0 : dev.volume} min={0} max={100} step={5}
+          showValue onChange={(v: number) => setVolume(v)} />
+      </PanelSectionRow>
+      {dev.brightness != null && (
+        <PanelSectionRow>
+          <SliderField label="Brightness" value={dev.brightness} min={5} max={100} step={5}
+            showValue onChange={(v: number) => setBrightness(v)} />
+        </PanelSectionRow>
+      )}
+    </PanelSection>
+  );
+}
+
+function BatterySection({ dev }: { dev: Device | null }) {
+  const b = dev?.battery;
+  if (!b) return null;
+  const how = [dev?.mode, dev?.watts ? `${dev.watts} W` : "", b.watts ? `using ${b.watts} W now` : ""]
+    .filter(Boolean).join(" · ");
+  return (
+    <PanelSection title="Battery">
+      <PanelSectionRow>
+        <Field label={`${b.percent ?? "?"}% · ${batteryLine(b)}`} description={`At this power and load. ${how}`} />
+      </PanelSectionRow>
+    </PanelSection>
+  );
+}
+
 // ------------------------------------------------------------ Quick Access tab
 function Content() {
   const { items } = useHubState();
+  const dev = useDevice();
   const running = items.filter(isRunning);
   const recent = items.filter((i) => !isRunning(i));
 
   return (
     <>
+      <QuickSettings dev={dev} />
       <PanelSection title="In progress">
         {running.length === 0 && (
           <PanelSectionRow>
@@ -147,6 +223,7 @@ function Content() {
           </PanelSectionRow>
         )}
       </PanelSection>
+      <BatterySection dev={dev} />
     </>
   );
 }
@@ -162,8 +239,8 @@ export default definePlugin(() => {
   getState().then(onState).catch(() => undefined);
 
   return {
-    name: "Gill-OSaab Notifications",
-    titleView: <div className={staticClasses.Title}>Notifications</div>,
+    name: "Gill-OSaab",
+    titleView: <div className={staticClasses.Title}>Gill-OSaab</div>,
     content: <Content />,
     icon: <FaBell />,
     onDismount() {

@@ -38,6 +38,15 @@ systemctl enable gosaab-android-folders.service || log "warning: android folders
 # printers/scanners appear by themselves (driverless IPP, USB printers), firmware updates
 for unit in cups.socket ipp-usb.service fwupd-refresh.timer; do systemctl enable "$unit" 2>/dev/null || true; done
 
+# Face unlock for the lock screen (Howdy; infrared "Windows Hello" cameras). Optional: its unofficial
+# Fedora packages sometimes lag behind a new Fedora, so a failure here never breaks the build.
+repo=/etc/yum.repos.d/gosaab-howdy.repo
+if curl -fsSL --retry 2 -o "$repo" \
+    "https://copr.fedorainfracloud.org/coprs/ronnypfannschmidt/howdy-beta/repo/fedora-$(rpm -E %fedora)/ronnypfannschmidt-howdy-beta-fedora-$(rpm -E %fedora).repo"; then
+    dnf -y install howdy >/dev/null 2>&1 && log "face unlock: howdy installed" || log "note: howdy not installable on this Fedora yet"
+fi
+rm -f "$repo"
+
 # Button/combo shortcuts (handheld buttons, Windows+R -> Game Mode) in both sessions
 systemctl enable gosaab-hotkeyd.service || log "warning: shortcut service not enabled"
 systemctl enable thermald.service 2>/dev/null || true  # Intel only (see its drop-in)

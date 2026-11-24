@@ -49,7 +49,9 @@ Scope {
         margins { top: 8; right: 8 }
         implicitWidth: 372
         implicitHeight: Math.max(1, column.height + 4)
-        visible: root.banners.length > 0 && !ShellState.notificationCenter && !ShellState.controlCenter
+        // banners step aside (fade) when Control Centre or Notification Centre opens
+        readonly property bool show: root.banners.length > 0 && !ShellState.notificationCenter && !ShellState.controlCenter
+        visible: show || column.opacity > 0.01
         color: "transparent"
         exclusionMode: ExclusionMode.Normal
         WlrLayershell.namespace: "gosaab-notifications:r24"
@@ -58,6 +60,8 @@ Scope {
         Column {
             id: column
             width: parent.width
+            opacity: bannerWindow.show ? 1 : 0
+            Behavior on opacity { NumberAnimation { duration: Theme.fast; easing.type: Easing.OutCubic } }
             spacing: 8
             Repeater {
                 model: root.banners

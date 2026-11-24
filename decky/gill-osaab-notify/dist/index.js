@@ -1,4 +1,4 @@
-const manifest = {"name":"Gill-OSaab Notifications"};
+const manifest = {"name":"Gill-OSaab"};
 const API_VERSION = 2;
 const internalAPIConnection = window.__DECKY_SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED_deckyLoaderAPIInit;
 if (!internalAPIConnection) {
@@ -86,6 +86,9 @@ function FaBell (props) {
 }
 
 const getState = callable("get_state");
+const getDevice = callable("get_device");
+const setVolume = callable("set_volume");
+const setBrightness = callable("set_brightness");
 const dismiss = callable("dismiss");
 const cancel = callable("cancel");
 const clearAll = callable("clear");
@@ -142,12 +145,46 @@ function useHubState() {
     }, []);
     return state;
 }
+// ------------------------------------------------------------ volume, brightness, battery
+function useDevice() {
+    const [dev, setDev] = SP_REACT.useState(null);
+    SP_REACT.useEffect(() => {
+        let alive = true;
+        const load = () => getDevice().then((d) => alive && setDev(d)).catch(() => undefined);
+        load();
+        const timer = setInterval(load, 5000);
+        return () => {
+            alive = false;
+            clearInterval(timer);
+        };
+    }, []);
+    return dev;
+}
+function batteryLine(b) {
+    if (b.charging)
+        return b.text ? `Charging · full in ${b.text}` : "Charging";
+    return b.text ? `${b.text} left` : "Estimating…";
+}
+function QuickSettings({ dev }) {
+    if (!dev)
+        return null;
+    return (SP_JSX.jsxs(DFL.PanelSection, { title: "Quick settings", children: [SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.SliderField, { label: "Volume", value: dev.muted ? 0 : dev.volume, min: 0, max: 100, step: 5, showValue: true, onChange: (v) => setVolume(v) }) }), dev.brightness != null && (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.SliderField, { label: "Brightness", value: dev.brightness, min: 5, max: 100, step: 5, showValue: true, onChange: (v) => setBrightness(v) }) }))] }));
+}
+function BatterySection({ dev }) {
+    const b = dev?.battery;
+    if (!b)
+        return null;
+    const how = [dev?.mode, dev?.watts ? `${dev.watts} W` : "", b.watts ? `using ${b.watts} W now` : ""]
+        .filter(Boolean).join(" · ");
+    return (SP_JSX.jsx(DFL.PanelSection, { title: "Battery", children: SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.Field, { label: `${b.percent ?? "?"}% · ${batteryLine(b)}`, description: `At this power and load. ${how}` }) }) }));
+}
 // ------------------------------------------------------------ Quick Access tab
 function Content() {
     const { items } = useHubState();
+    const dev = useDevice();
     const running = items.filter(isRunning);
     const recent = items.filter((i) => !isRunning(i));
-    return (SP_JSX.jsxs(SP_JSX.Fragment, { children: [SP_JSX.jsxs(DFL.PanelSection, { title: "In progress", children: [running.length === 0 && (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.Field, { label: "Nothing running", description: "Downloads, copies and installs show here." }) })), running.map((i) => (SP_JSX.jsxs(DFL.PanelSectionRow, { children: [SP_JSX.jsx(DFL.ProgressBarWithInfo, { label: i.title || i.app, description: [i.body, i.detail].filter(Boolean).join(" · "), nProgress: i.percent ?? 0, indeterminate: i.percent == null, sOperationText: i.state === "paused" ? "Paused" : i.percent != null ? `${i.percent}%` : "Working…" }), i.cancellable && (SP_JSX.jsx(DFL.ButtonItem, { layout: "below", onClick: () => cancel(i.id), children: "Cancel" }))] }, i.id)))] }), SP_JSX.jsxs(DFL.PanelSection, { title: "Notifications", children: [recent.length === 0 && (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.Field, { label: "No notifications" }) })), recent.map((i) => (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "inline", label: i.title || i.app, description: i.state === "failed" ? `Failed${i.body ? ": " + i.body : ""}` : i.body, onClick: () => dismiss(i.id), children: "Dismiss" }) }, i.id))), recent.length > 0 && (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", onClick: () => clearAll(), children: "Clear all" }) }))] })] }));
+    return (SP_JSX.jsxs(SP_JSX.Fragment, { children: [SP_JSX.jsx(QuickSettings, { dev: dev }), SP_JSX.jsxs(DFL.PanelSection, { title: "In progress", children: [running.length === 0 && (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.Field, { label: "Nothing running", description: "Downloads, copies and installs show here." }) })), running.map((i) => (SP_JSX.jsxs(DFL.PanelSectionRow, { children: [SP_JSX.jsx(DFL.ProgressBarWithInfo, { label: i.title || i.app, description: [i.body, i.detail].filter(Boolean).join(" · "), nProgress: i.percent ?? 0, indeterminate: i.percent == null, sOperationText: i.state === "paused" ? "Paused" : i.percent != null ? `${i.percent}%` : "Working…" }), i.cancellable && (SP_JSX.jsx(DFL.ButtonItem, { layout: "below", onClick: () => cancel(i.id), children: "Cancel" }))] }, i.id)))] }), SP_JSX.jsxs(DFL.PanelSection, { title: "Notifications", children: [recent.length === 0 && (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.Field, { label: "No notifications" }) })), recent.map((i) => (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "inline", label: i.title || i.app, description: i.state === "failed" ? `Failed${i.body ? ": " + i.body : ""}` : i.body, onClick: () => dismiss(i.id), children: "Dismiss" }) }, i.id))), recent.length > 0 && (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", onClick: () => clearAll(), children: "Clear all" }) }))] }), SP_JSX.jsx(BatterySection, { dev: dev })] }));
 }
 var index = definePlugin(() => {
     let firstLoad = true;
@@ -159,8 +196,8 @@ var index = definePlugin(() => {
     const listener = addEventListener("gosaab_state", onState);
     getState().then(onState).catch(() => undefined);
     return {
-        name: "Gill-OSaab Notifications",
-        titleView: SP_JSX.jsx("div", { className: DFL.staticClasses.Title, children: "Notifications" }),
+        name: "Gill-OSaab",
+        titleView: SP_JSX.jsx("div", { className: DFL.staticClasses.Title, children: "Gill-OSaab" }),
         content: SP_JSX.jsx(Content, {}),
         icon: SP_JSX.jsx(FaBell, {}),
         onDismount() {

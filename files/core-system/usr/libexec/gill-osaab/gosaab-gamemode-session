@@ -9,6 +9,7 @@ fps_env="$HOME/.config/environment.d/60-gill-osaab-fps.conf"
 # two graphics chips: Game Mode (Steam and its games) runs on the dedicated one
 eval "$(gosaab-gpu env-sh 2>/dev/null)"
 /usr/libexec/gill-osaab/gosaab-activity watch &
+/usr/libexec/gill-osaab/gosaab-haptic serve & # controller buzz for switches and sliders
 # notifications + progress for the Decky plugin (Steam's Game Mode has no notification panel)
 /usr/libexec/gill-osaab/gosaab-notify-hub --force &
 exec gamescope -e -f --adaptive-sync --mangoapp -- steam -gamepadui -steamos3 -steampal -steamdeck

@@ -70,7 +70,68 @@ def run_hub(method, *args):
         pass
 
 
+def user_env(uid):
+    env = clean_env(uid)
+    env["XDG_RUNTIME_DIR"] = f"/run/user/{uid}"
+    return env
+
+
+def run_user(cmd, timeout=5):
+    """Run a tool as the person signed in (Decky may run as admin)."""
+    uid = user_uid()
+    if os.getuid() == 0 and uid != 0:
+        cmd = ["runuser", "-u", pwd.getpwuid(uid).pw_name, "--"] + cmd
+    try:
+        return subprocess.run(cmd, env=user_env(uid), capture_output=True, text=True, timeout=timeout,
+                              check=False).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+
+
+def parse_volume(text):
+    """wpctl get-volume -> (0-100, muted)."""
+    parts = text.split()
+    try:
+        vol = round(float(parts[1]) * 100)
+    except (IndexError, ValueError):
+        vol = 50
+    return max(0, min(100, vol)), "MUTED" in text
+
+
+def parse_brightness(text):
+    """brightnessctl -m -> 0-100 (None when the screen has no adjustable backlight)."""
+    parts = text.strip().split(",")
+    if len(parts) >= 4 and parts[3].endswith("%"):
+        return int(parts[3][:-1])
+    return None
+
+
+def read_power(path="/run/gill-osaab/power.json"):
+    try:
+        with open(path) as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return {}
+
+
 class Plugin:
+    async def get_device(self):
+        vol, muted = parse_volume(await asyncio.to_thread(run_user, ["wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@"]))
+        bright = parse_brightness(await asyncio.to_thread(run_user, ["brightnessctl", "-m"]))
+        power = read_power()
+        return {"volume": vol, "muted": muted, "brightness": bright, "battery": power.get("battery"),
+                "mode": power.get("label", ""), "watts": power.get("watts", 0)}
+
+    async def set_volume(self, value):
+        v = max(0, min(100, int(value)))
+        await asyncio.to_thread(run_user, ["wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", f"{v}%"])
+        await asyncio.to_thread(run_user, ["/usr/libexec/gill-osaab/gosaab-haptic", "tick"])
+
+    async def set_brightness(self, value):
+        v = max(1, min(100, int(value)))
+        await asyncio.to_thread(run_user, ["brightnessctl", "-q", "set", f"{v}%"])
+        await asyncio.to_thread(run_user, ["/usr/libexec/gill-osaab/gosaab-haptic", "tick"])
+
     async def get_state(self):
         return read_state(state_path())
 

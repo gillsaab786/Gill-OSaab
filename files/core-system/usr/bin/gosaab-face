@@ -1,0 +1,127 @@
+#!/usr/bin/python3
+"""Face unlock for the lock screen (Howdy with an infrared "Windows Hello" camera).
+
+  gosaab-face status     JSON: available, camera, enrolled, enabled
+  gosaab-face add        learn your face (look at the camera)
+  gosaab-face remove     forget your face and turn face unlock off
+  gosaab-face on|off     use your face to unlock the screen
+
+Only the lock screen uses it: signing in after a restart and approving admin changes still need
+your password. Only infrared cameras are used, because a photo can fool an ordinary camera.
+"""
+import json
+import os
+import pwd
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+PAM = Path("/etc/pam.d/gill-osaab-lock")
+CONF = Path("/etc/gill-osaab/face.conf")
+HOWDY_LINE = "auth       sufficient   pam_howdy.so"
+IR_NAME = re.compile(r"\bIR\b|infrared|Integrated I\b|Hello", re.I)
+
+
+def ir_camera(root=Path("/sys/class/video4linux")):
+    for dev in sorted(root.glob("video*")):
+        try:
+            name = (dev / "name").read_text().strip()
+        except OSError:
+            continue
+        if IR_NAME.search(name):
+            return f"/dev/{dev.name}", name
+    return None, None
+
+
+def howdy_conf():
+    for p in ("/etc/howdy/config.ini", "/usr/lib64/security/howdy/config.ini", "/lib/security/howdy/config.ini"):
+        if Path(p).exists():
+            return Path(p)
+    return None
+
+
+def target_user():
+    uid = os.environ.get("PKEXEC_UID") or os.environ.get("SUDO_UID") or str(os.getuid())
+    return pwd.getpwuid(int(uid)).pw_name
+
+
+def enrolled(user):
+    if not shutil.which("howdy"):
+        return False
+    out = subprocess.run(["howdy", "-U", user, "list"], capture_output=True, text=True, check=False)
+    return out.returncode == 0 and bool(re.search(r"^\s*\d+", out.stdout, re.M))
+
+
+def pam_with_face(text, on):
+    """The lock screen's PAM file with or without the face step (before the password)."""
+    lines = [ln for ln in text.splitlines() if "pam_howdy.so" not in ln]
+    if on:
+        i = next((n for n, ln in enumerate(lines) if ln.startswith("auth")), len(lines))
+        lines.insert(i, HOWDY_LINE)
+    return "\n".join(lines) + "\n"
+
+
+def set_enabled(on):
+    PAM.write_text(pam_with_face(PAM.read_text(), on))
+    CONF.parent.mkdir(parents=True, exist_ok=True)
+    CONF.write_text(f"enabled={'on' if on else 'off'}\n")
+
+
+def is_enabled():
+    try:
+        return "enabled=on" in CONF.read_text()
+    except OSError:
+        return False
+
+
+def as_root(argv):
+    if os.geteuid() != 0:
+        os.execvp("pkexec", ["pkexec", os.path.realpath(__file__), *argv])
+
+
+def main(argv):
+    cmd = argv[0] if argv else "status"
+    cam, cam_name = ir_camera()
+    if cmd == "status":
+        user = pwd.getpwuid(os.getuid()).pw_name
+        print(json.dumps({"available": bool(shutil.which("howdy")), "camera": cam_name, "enabled": is_enabled(),
+                          "enrolled": enrolled(user) if os.geteuid() == 0 else None}))
+        return 0
+    if cmd not in ("add", "remove", "on", "off"):
+        print(__doc__.strip(), file=sys.stderr)
+        return 2
+    as_root(argv)
+    user = target_user()
+    if cmd in ("add", "on"):
+        if not shutil.which("howdy"):
+            print("Face unlock isn't installed in this build.")
+            return 3
+        if not cam:
+            print("No infrared (Windows Hello) camera found. Face unlock needs one: an ordinary camera can be "
+                  "fooled by a photo.")
+            return 3
+    if cmd == "add":
+        conf = howdy_conf()
+        if conf:  # point Howdy at the infrared camera
+            text = conf.read_text()
+            conf.write_text(re.sub(r"(?m)^device_path\s*=.*$", f"device_path = {cam}", text))
+        print("Look at the camera…")
+        rc = subprocess.run(["howdy", "-U", user, "-y", "add"], check=False).returncode
+        if rc == 0:
+            set_enabled(True)
+            print("Done: your face now unlocks the screen.")
+        return rc
+    if cmd == "remove":
+        if shutil.which("howdy"):
+            subprocess.run(["howdy", "-U", user, "-y", "clear"], check=False)
+        set_enabled(False)
+        print("Face removed; face unlock is off.")
+        return 0
+    set_enabled(cmd == "on")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

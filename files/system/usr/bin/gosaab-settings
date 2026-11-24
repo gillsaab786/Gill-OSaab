@@ -301,6 +301,9 @@ class Backend:
     def remove_hotkey(self, combo):
         return subprocess.run(["gosaab-hotkeys", "remove", combo], check=False).returncode == 0
 
+    def face_status(self):
+        return self._json(["gosaab-face", "status"], {})
+
     def secure_boot(self):
         return self._json(["gosaab-secureboot", "status"], {})
 
@@ -532,7 +535,21 @@ class UpdateButton(QPushButton):
         self.last_code = code
         self.setEnabled(True)
         self.setText(RESULT_TEXT.get(code, RESULT_TEXT[1]))
+        haptic("success" if code in (0, 4) else "error")
         self.window.on_update_finished(self.part, code)
+
+
+def haptic(kind="toggle"):
+    """A light buzz from the built-in controller (gosaab-haptic service); silent if there isn't one."""
+    import socket
+    path = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")) / "gosaab-haptic.sock"
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+            s.settimeout(0.2)
+            s.connect(str(path))
+            s.sendall(kind.encode() + b"\n")
+    except OSError:
+        pass
 
 
 class Row(QWidget):
@@ -584,6 +601,10 @@ class Page(QScrollArea):
         self.keywords = [title.lower()]
         self.setWidgetResizable(True)
         self.setFrameShape(QFrame.NoFrame)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        # flick to scroll with a finger, with momentum and a soft bounce at the ends (like iOS)
+        from PySide6.QtWidgets import QScroller
+        QScroller.grabGesture(self.viewport(), QScroller.TouchGesture)
         body = QWidget()
         body.setObjectName("page")
         self.lay = QVBoxLayout(body)
@@ -685,6 +706,8 @@ class Settings(QMainWindow):
         self.nav = QListWidget()
         self.nav.setObjectName("nav")
         self.nav.setIconSize(QSize(28, 28))
+        self.nav.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)  # no stray scroll bar under the list
+        self.nav.setVerticalScrollMode(QListWidget.ScrollPerPixel)  # smooth, like macOS
         sl.addWidget(self.search)
         sl.addWidget(self.nav, 1)
 
@@ -759,6 +782,7 @@ class Settings(QMainWindow):
     def on_toggle(self, filename, key, on, sw):
         value = "on" if on else "off"
         if self.backend.set_value(filename, key, value):
+            haptic("toggle")
             self.changed.emit(filename, key, value)
             if filename == "updates.conf":
                 self.update_master_state()
@@ -1230,11 +1254,34 @@ class Settings(QMainWindow):
             rows[0].subtitle.setStyleSheet("color: #ff453a;")
         p.section("Security checkup", rows)
         self.encryption_section(p, sec.get("encryption", {}))
+        self.face_section(p, self.backend.face_status())
         self.secureboot_section(p, self.backend.secure_boot(), sec.get("encryption", {}))
 
     def terminal(self, title, cmd):
         return lambda: self.backend.run(["foot", "-T", title, "-e", "sh", "-c",
                                          cmd + "; echo; read -p 'Press Enter to close.' x"], wait=False)
+
+    def face_section(self, p, face):
+        if not face.get("available") and not face.get("camera"):
+            p.section("Face unlock", [Row("Not available on this device", "Face unlock needs an infrared "
+                                          "(Windows Hello) camera; an ordinary camera can be fooled by a photo.")])
+            return
+        if not face.get("camera"):
+            p.section("Face unlock", [Row("No infrared camera found", "Face unlock needs an infrared (Windows "
+                                          "Hello) camera, for safety.")])
+            return
+        on = face.get("enabled")
+        b1 = QPushButton("Set up again…" if on else "Set up…")
+        b1.setObjectName("pill" if on else "primary")
+        b1.clicked.connect(self.terminal("Face unlock", "gosaab-face add"))
+        rows = [Row("Unlock with your face", f"Camera: {face.get('camera')}. Look at the screen to unlock it. "
+                    "Signing in after a restart and admin approvals still need your password.", b1)]
+        if on:
+            b2 = QPushButton("Turn off and forget face")
+            b2.setObjectName("pill")
+            b2.clicked.connect(self.terminal("Face unlock", "gosaab-face remove"))
+            rows.append(Row("Face unlock is on", "", b2))
+        p.section("Face unlock", rows)
 
     def secureboot_section(self, p, sb, enc):
         if not sb.get("supported"):
@@ -1353,13 +1400,13 @@ class Settings(QMainWindow):
         self.night = Switch()
         self.night.set_quiet(self.backend.kde_night_light())
         self.night.toggled.connect(self.apply_night_light)
-        auto = Switch()
-        auto.setEnabled(False)
         p.section("", [
             Row("Mode", "Dark is the default.", mode),
             Row("Night light", "Warmer screen in the evening.", self.night),
-            Row("Auto dark mode at sunset", "Coming in a later update.", auto),
         ])
+        p.section("Feedback", [Row("Haptic feedback", "A light buzz from the built-in controller when you flip a "
+                                   "switch, move a slider or something finishes.",
+                                   self.switch("features.conf", "haptics", default=True))])
         rows = []
         for key, title, sub in [("tap_to_click", "Tap to click", "Tap the touchpad instead of pressing it."),
                                 ("natural_scroll", "Natural scrolling", "Content follows your fingers, like a phone.")]:
@@ -1743,6 +1790,7 @@ QScrollArea { background: transparent; }
 QScrollBar:vertical { width: 8px; background: transparent; }
 QScrollBar::handle:vertical { background: #44444a; border-radius: 4px; }
 QScrollBar::add-line, QScrollBar::sub-line { height: 0; }
+QScrollBar:horizontal { height: 0; background: transparent; }
 """
 
 

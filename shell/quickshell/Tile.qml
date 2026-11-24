@@ -18,9 +18,17 @@ Rectangle {
         anchors { left: parent.left; leftMargin: 10; verticalCenter: parent.verticalCenter }
         spacing: 9
         Rectangle {
+            id: bubble
             width: 40; height: 40; radius: 20
             color: tile.on ? Theme.accent : Qt.rgba(1, 1, 1, 0.14)
             Behavior on color { ColorAnimation { duration: Theme.normal } }
+            // a little "pop" when it turns on, like iOS Control Centre
+            SequentialAnimation on scale {
+                id: pop
+                running: false
+                NumberAnimation { to: 1.16; duration: 110; easing.type: Easing.OutQuad }
+                SpringAnimation { to: 1; spring: 5; damping: 0.3; epsilon: 0.002 }
+            }
             Icon { anchors.centerIn: parent; name: tile.icon; width: 21; height: 21; color: "white" }
         }
         Column {
@@ -30,5 +38,7 @@ Rectangle {
         }
     }
     GlassRim { radius: 34; strength: 0.6 }
-    MouseArea { id: mouse; anchors.fill: parent; hoverEnabled: true; onClicked: tile.toggled() }
+    onOnChanged: if (on) pop.restart()
+    MouseArea { id: mouse; anchors.fill: parent; hoverEnabled: true
+        onClicked: { ShellState.haptic("toggle"); tile.toggled() } }
 }

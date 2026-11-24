@@ -1,0 +1,142 @@
+#!/usr/bin/python3
+"""Haptic feedback: a short buzz from the built-in controller (ROG Ally, Legion Go, GPD, Steam Deck…)
+when you flip a switch, move a slider or something succeeds.
+
+  gosaab-haptic serve          (your session) listens on $XDG_RUNTIME_DIR/gosaab-haptic.sock (one word per line)
+  gosaab-haptic tick|toggle|success|error   one buzz (talks to the running service, or plays directly)
+Off in Settings > Appearance > Haptic feedback (features.conf haptics=off).
+"""
+import os
+import socket
+import sys
+import time
+from pathlib import Path
+
+PATTERNS = {  # (milliseconds, strong 0-65535, weak 0-65535, gap before the next)
+    "tick": [(12, 0, 0x3000, 0)],
+    "toggle": [(22, 0x1800, 0x5000, 0)],
+    "success": [(18, 0, 0x5000, 70), (28, 0x2000, 0x7000, 0)],
+    "error": [(60, 0x6000, 0x6000, 60), (60, 0x6000, 0x6000, 0)],
+}
+SOCK = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")) / "gosaab-haptic.sock"
+MIN_GAP = 0.035  # slider drags send many ticks: don't turn them into a hum
+
+
+def enabled():
+    try:
+        for line in Path("/etc/gill-osaab/features.conf").read_text().splitlines():
+            if line.strip() == "haptics=off":
+                return False
+    except OSError:
+        pass
+    return True
+
+
+def find_motor():
+    """The controller that can rumble (built-in pads first; never our own virtual devices)."""
+    try:
+        import evdev
+        from evdev import ecodes
+    except ImportError:
+        return None
+    best = None
+    for path in evdev.list_devices():
+        try:
+            dev = evdev.InputDevice(path)
+        except OSError:
+            continue
+        caps = dev.capabilities()
+        if ecodes.FF_RUMBLE in caps.get(ecodes.EV_FF, []) and not dev.name.startswith("gosaab"):
+            if best is None or "handheld" in dev.name.lower() or "built" in dev.name.lower():
+                best = dev
+                continue
+        dev.close()
+    return best
+
+
+def play(dev, kind):
+    from evdev import ecodes, ff
+    for ms, strong, weak, gap in PATTERNS.get(kind, PATTERNS["tick"]):
+        effect = ff.Effect(ecodes.FF_RUMBLE, -1, 0, ff.Trigger(0, 0), ff.Replay(ms, 0),
+                           ff.EffectType(ff_rumble_effect=ff.Rumble(strong_magnitude=strong, weak_magnitude=weak)))
+        eid = dev.upload_effect(effect)
+        dev.write(ecodes.EV_FF, eid, 1)
+        time.sleep((ms + gap) / 1000)
+        dev.erase_effect(eid)
+
+
+def serve():
+    """Line-based: each line (tick, toggle, success, error) is one buzz. The shell keeps one connection
+    open; other apps connect, send a line and go."""
+    import selectors
+    try:
+        SOCK.unlink()
+    except FileNotFoundError:
+        pass
+    srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    srv.bind(str(SOCK))
+    os.chmod(SOCK, 0o600)
+    srv.listen(8)
+    sel = selectors.DefaultSelector()
+    sel.register(srv, selectors.EVENT_READ)
+    bufs = {}
+    dev, last, checked = None, 0.0, 0.0
+    while True:
+        for key, _ in sel.select():
+            if key.fileobj is srv:
+                conn, _ = srv.accept()
+                conn.setblocking(False)
+                sel.register(conn, selectors.EVENT_READ)
+                bufs[conn] = b""
+                continue
+            conn = key.fileobj
+            try:
+                data = conn.recv(256)
+            except OSError:
+                data = b""
+            if not data:
+                sel.unregister(conn)
+                bufs.pop(conn, None)
+                conn.close()
+                continue
+            bufs[conn] = (bufs[conn] + data)[-256:]
+            *lines, bufs[conn] = bufs[conn].split(b"\n")
+            for raw in lines:
+                kind = raw.decode(errors="ignore").strip()
+                now = time.monotonic()
+                if kind not in PATTERNS or now - last < MIN_GAP or not enabled():
+                    continue
+                if dev is None and now - checked > 10:  # a controller may connect later
+                    dev, checked = find_motor(), now
+                if dev is None:
+                    continue
+                try:
+                    play(dev, kind)
+                    last = time.monotonic()
+                except OSError:
+                    dev = None
+
+
+def send(kind):
+    try:
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.connect(str(SOCK))
+        s.sendall(kind.encode() + b"\n")
+        s.close()
+        return 0
+    except OSError:
+        dev = find_motor() if enabled() else None
+        if dev:
+            play(dev, kind)
+        return 0
+
+
+if __name__ == "__main__":
+    arg = sys.argv[1] if len(sys.argv) > 1 else ""
+    if arg == "serve":
+        serve()
+    elif arg in PATTERNS:
+        sys.exit(send(arg))
+    else:
+        print(__doc__.strip(), file=sys.stderr)
+        sys.exit(2)

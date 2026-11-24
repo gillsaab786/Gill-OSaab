@@ -1,6 +1,7 @@
 pragma Singleton
 import QtQuick
 import Quickshell
+import Quickshell.Io
 
 // Which panels are open, shared by the bar, dock and keyboard shortcuts.
 Singleton {
@@ -12,6 +13,18 @@ Singleton {
     property bool launchpad: false
     property bool doNotDisturb: false
     readonly property bool anyPopup: controlCenter || notificationCenter || systemMenu
+
+    // Haptic feedback from the built-in controller (gosaab-haptic): tick, toggle, success, error
+    Socket {
+        id: hapticSocket
+        path: (Quickshell.env("XDG_RUNTIME_DIR") || "/tmp") + "/gosaab-haptic.sock"
+        connected: true
+    }
+    function haptic(kind) {
+        if (!hapticSocket.connected) { hapticSocket.connected = true; return }
+        hapticSocket.write(kind + "\n")
+        hapticSocket.flush()
+    }
 
     function closeAll() {
         controlCenter = false

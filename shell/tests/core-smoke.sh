@@ -126,6 +126,12 @@ echo "power: $(cat /run/gill-osaab/power.json 2>/dev/null | python3 -c 'import j
 check "Smart TDP decides a power mode" "python3 -c 'import json;d=json.load(open(\"/run/gill-osaab/power.json\"));assert d[\"mode\"] in (\"idle\",\"video\",\"desktop\",\"game\")'"
 check "graphics switching tool" "gosaab-gpu status | python3 -c 'import json,sys;assert \"hybrid\" in json.load(sys.stdin)'"
 check "Smart TDP settings can be changed" "gosaab-config set features.conf tdp_game 28 && gosaab-config set features.conf gpu_mode integrated && gosaab-config set features.conf gpu_mode auto && ! gosaab-config set features.conf gpu_mode turbo 2>/dev/null"
+# face unlock, haptics, Game Mode panel
+echo "face unlock: $(gosaab-face status 2>&1) howdy: $(rpm -q howdy 2>&1 | tail -1)"
+check "face unlock status" "gosaab-face status | python3 -c 'import json,sys;json.load(sys.stdin)'"
+check "haptic feedback runs without a controller" "XDG_RUNTIME_DIR=/tmp /usr/libexec/gill-osaab/gosaab-haptic tick"
+check "Game Mode panel: volume, brightness, battery" "grep -q 'Quick settings' /usr/share/gill-osaab/decky/gill-osaab-notify/dist/index.js && grep -q 'def set_brightness' /usr/share/gill-osaab/decky/gill-osaab-notify/main.py"
+check "battery time left is estimated" "python3 -c 'import json;d=json.load(open(\"/run/gill-osaab/power.json\"));assert \"battery\" in d'"
 timeout 3 /usr/libexec/gill-osaab/gosaab-hotkeyd; rc=$?
 check "shortcut service starts (Desktop and Game Mode)" "[ $rc -eq 124 ]"
 

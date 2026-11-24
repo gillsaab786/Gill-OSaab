@@ -28,6 +28,7 @@ ALLOWED = {
         "fps_upgrade": ONOFF,
         "fps_smooth_motion": ONOFF,
         "smart_tdp": ONOFF,
+        "haptics": ONOFF,
         "tdp_idle": "int:0:120",
         "tdp_video": "int:0:120",
         "tdp_desktop": "int:0:120",

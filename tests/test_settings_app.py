@@ -180,6 +180,9 @@ class FakeBackend:
     def gpu_status(self):
         return getattr(self, "gpu", {"hybrid": False})
 
+    def face_status(self):
+        return getattr(self, "face", {"available": False, "camera": None})
+
     def secure_boot(self):
         return getattr(self, "sb", {"supported": True, "enabled": False, "nvidia_edition": False, "pending": ""})
 
@@ -536,3 +539,18 @@ class SmartPower(unittest.TestCase):
         w = self.gs.Settings(b)
         w.gpu_pick.setCurrentIndex(1)
         self.assertIn(("set", "features.conf", "gpu_mode", "integrated"), b.calls)
+
+
+@unittest.skipUnless(HAVE_QT, "PySide6 not installed")
+class FaceUnlockPage(unittest.TestCase):
+    def test_states(self):
+        from PySide6.QtWidgets import QApplication
+        gs = load("usr/bin/gosaab-settings")
+        QApplication.instance() or QApplication([])
+        b = FakeBackend()
+        names = lambda: [x.text() for x in gs.Settings(b).findChildren(gs.QPushButton)]
+        self.assertNotIn("Set up…", names())
+        b.face = {"available": True, "camera": "Integrated IR Camera", "enabled": False}
+        self.assertIn("Set up…", names())
+        b.face["enabled"] = True
+        self.assertIn("Turn off and forget face", names())

@@ -90,6 +90,43 @@ Popup {
             onClicked: { ShellState.closeAll(); ShellState.run("gosaab-settings") } }
     }
 
+    // battery at the end: how long it lasts at the power the device uses right now (Smart TDP)
+    FileView {
+        id: powerFile
+        path: "/run/gill-osaab/power.json"
+        blockLoading: true
+    }
+    Timer { interval: 5000; repeat: true; running: ShellState.controlCenter; triggeredOnStart: true
+        onTriggered: powerFile.reload() }
+    property var power: { try { return JSON.parse(powerFile.text()) } catch (e) { return ({}) } }
+    property var battery: power && power.battery ? power.battery : null
+    Rectangle {
+        visible: cc.battery !== null
+        width: parent.width; height: 58; radius: 22
+        color: Theme.tile
+        Row {
+            anchors { left: parent.left; leftMargin: 14; verticalCenter: parent.verticalCenter }
+            spacing: 12
+            Icon { anchors.verticalCenter: parent.verticalCenter; width: 30; height: 30; name: "battery"
+                level: cc.battery ? (cc.battery.percent || 0) / 100 : 0
+                color: cc.battery && !cc.battery.charging && cc.battery.percent <= 20 ? "#ff453a" : Theme.text }
+            Column {
+                anchors.verticalCenter: parent.verticalCenter
+                Text {
+                    color: Theme.text; font { family: Theme.font; pixelSize: 14; weight: Font.DemiBold }
+                    text: !cc.battery ? "" : cc.battery.percent + "%  ·  " + (cc.battery.charging
+                          ? (cc.battery.text ? "full in " + cc.battery.text : "charging")
+                          : (cc.battery.text ? cc.battery.text + " left" : "estimating…"))
+                }
+                Text {
+                    color: Theme.subtext; font { family: Theme.font; pixelSize: 12 }
+                    text: !cc.battery ? "" : (cc.power.label || "Everyday") + (cc.power.watts ? " · " + cc.power.watts + " W" : "")
+                          + (cc.battery.watts ? " · using " + cc.battery.watts + " W now" : "")
+                }
+            }
+        }
+    }
+
     IpcHandler {
         target: "controlcenter"
         function toggle(): void { ShellState.toggle("controlCenter") }

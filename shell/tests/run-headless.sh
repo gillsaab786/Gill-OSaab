@@ -342,6 +342,10 @@ if command -v qs >/dev/null; then
   kill $HUBPID 2>/dev/null
   qs -p "$SHELLDIR" ipc call controlcenter toggle; sleep 1.2; shot 23-control-center
   qs -p "$SHELLDIR" ipc call controlcenter toggle; sleep 0.8
+  # volume / brightness bezel (keys and handheld volume rocker)
+  qs -p "$SHELLDIR" ipc call osd volume up; sleep 0.5; shot 23c-volume-bezel
+  check "volume key shows the bezel" "[ \"\$(qs -p $SHELLDIR ipc call osd isShown)\" = true ]"
+  sleep 2
   # on-screen keyboard (Control Centre > Keyboard)
   if command -v wvkbd-mobintl >/dev/null; then
     qs -p "$SHELLDIR" ipc call shell keyboard; sleep 1.5; shot 23b-onscreen-keyboard
@@ -411,6 +415,8 @@ EOF5
   qs -p "$SHELLDIR" ipc call lock lock; sleep 1.5; shot 40-locked
   qs -p "$SHELLDIR" ipc call lock keyboard; sleep 0.8; shot 40b-lock-touch-keyboard
   qs -p "$SHELLDIR" ipc call lock keyboard; sleep 0.5
+  qs -p "$SHELLDIR" ipc call lock typeForTest wrong-password; sleep 2.5; shot 40c-wrong-password
+  check "a wrong password keeps the screen locked" "[ \"\$(qs -p $SHELLDIR ipc call lock isLocked)\" = true ]"
   check "lock screen engages" "[ \"\$(qs -p $SHELLDIR ipc call lock isLocked)\" = true ]"
   foot -W 60x10 -T "Sneaky" -e sh -c 'sleep 300' & sleep 1.2; shot 41-locked-new-window
   qs -p "$SHELLDIR" ipc call lock unlockForTest; sleep 1.2; shot 42-unlocked
