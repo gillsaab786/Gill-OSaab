@@ -46,6 +46,7 @@ if curl -fsSL --retry 2 -o "$repo" \
     dnf -y install howdy >/dev/null 2>&1 && log "face unlock: howdy installed" || log "note: howdy not installable on this Fedora yet"
 fi
 rm -f "$repo"
+bash "$(dirname "$(readlink -f "$0")")/gosaab-howdy.sh" || true
 
 # Button/combo shortcuts (handheld buttons, Windows+R -> Game Mode) in both sessions
 systemctl enable gosaab-hotkeyd.service || log "warning: shortcut service not enabled"
