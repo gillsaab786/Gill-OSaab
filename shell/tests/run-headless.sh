@@ -171,14 +171,15 @@ export WAYLAND_DISPLAY=$(cat "$XDG_RUNTIME_DIR/gosaab-wm.socket")
 sleep 1; shot 11-empty
 # find the traffic lights in a screenshot -> "close_x close_y min_x min_y zoom_x zoom_y" (or nothing)
 lights() {
-python3 - "$OUT/$1.png" <<'EOF3'
+python3 - "$OUT/$1.png" "${2:-0}" <<'EOF3'
 import sys
 from PIL import Image
 im = Image.open(sys.argv[1]).convert("RGB"); W, H = im.size; px = im.load()
+X0 = int(sys.argv[2])  # skip a left column (the shell's desktop widgets use red for the date)
 def find(rgb, tol=40):
     xs = ys = n = 0
     for y in range(0, H, 1):
-        for x in range(0, W, 2):
+        for x in range(X0, W, 2):
             r, g, b = px[x, y]
             if abs(r - rgb[0]) < tol and abs(g - rgb[1]) < tol and abs(b - rgb[2]) < tol:
                 xs += x; ys += y; n += 1
@@ -468,7 +469,7 @@ EOF8
     pkill foot; sleep 1
     DISPLAY=$(cat "$XDG_RUNTIME_DIR/gosaab-wm.display") xclock -geometry 300x300 &
     sleep 3; shot 43-x11-app
-    check "X11 app opens with a Gill-OSaab title bar" "[ -n \"\$(lights 43-x11-app)\" ] && ! pgrep -x foot >/dev/null"
+    check "X11 app opens with a Gill-OSaab title bar" "[ -n \"\$(lights 43-x11-app 400)\" ] && ! pgrep -x foot >/dev/null"
   else
     echo "FAIL: X11 support (xwayland-satellite) not available"; fail=1
   fi
