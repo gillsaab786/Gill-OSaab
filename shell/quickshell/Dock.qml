@@ -228,7 +228,7 @@ PanelWindow {
                         required property bool fileIsDir
                         visible: index < 8
                         readonly property real t: index / 7
-                        width: card.width; height: 56
+                        width: card.width - 84; height: 56 // room for the fan's curve and tilt
                         x: (ShellState.dockPopup === "downloads" ? 1 : 0) * (index * index * 1.6)
                         y: card.height - 60 - (ShellState.dockPopup === "downloads" ? index * 60 : 0)
                         rotation: -index * 1.2
@@ -270,7 +270,8 @@ PanelWindow {
                     }
                 }
                 Rectangle { // "Open in Files" at the top of the fan
-                    anchors { right: parent.right; top: parent.top }
+                    x: card.width - 84 - width - 4 + Math.min(8, fan.count) * Math.min(8, fan.count) * 1.2
+                    y: card.height - 60 - Math.min(8, fan.count) * 60 + 18
                     width: 140; height: 30; radius: 15
                     color: openAll.containsMouse ? Theme.accent : Theme.panel
                     GlassRim { radius: 15; strength: 0.7 }
