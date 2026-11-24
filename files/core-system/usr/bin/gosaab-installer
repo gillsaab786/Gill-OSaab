@@ -83,7 +83,7 @@ class Installer(QStackedWidget):
         p = Page("Install Gill-OSaab on this PC",
                  "Copies Gill-OSaab from this USB stick to the PC's own drive, so it starts faster and keeps your "
                  "files. Your account comes along. Takes about 10–20 minutes with internet.")
-        kb = self.nav("⌨  Keyboard", self.toggle_keyboard, primary=False)
+        kb = self.nav("Keyboard", self.toggle_keyboard, primary=False)
         p.buttons(kb, self.nav("Continue", 1))
         return p
 
@@ -138,7 +138,7 @@ class Installer(QStackedWidget):
         self.pw_note = QLabel("")
         self.pw_note.setObjectName("note")
         p.lay.addWidget(self.pw_note)
-        p.buttons(self.nav("⌨  Keyboard", self.toggle_keyboard, False), self.nav("Back", 2, False),
+        p.buttons(self.nav("Keyboard", self.toggle_keyboard, False), self.nav("Back", 2, False),
                   self.nav("Continue", self.check_password))
         return p
 

@@ -133,7 +133,7 @@ Rectangle {
         }
         Text { // show/hide the touch keyboard
             anchors.horizontalCenter: parent.horizontalCenter
-            text: root.keyboard ? "Hide keyboard" : "⌨  Keyboard"
+            text: root.keyboard ? "Hide keyboard" : "Show keyboard"
             color: Qt.rgba(1, 1, 1, 0.75); font { family: root.fontName; pixelSize: 13 }
             MouseArea { anchors.fill: parent; anchors.margins: -10; onClicked: root.keyboard = !root.keyboard }
         }
