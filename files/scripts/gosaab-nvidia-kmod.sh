@@ -18,6 +18,8 @@ dnf install -y akmod-nvidia xorg-x11-drv-nvidia xorg-x11-drv-nvidia-cuda xorg-x1
     xorg-x11-drv-nvidia-cuda-libs nvidia-modprobe libva-nvidia-driver
 dnf install -y --skip-unavailable nvidia-settings xorg-x11-drv-nvidia-power
 
+# akmods builds as its own unprivileged user: the build container's temp folders must be writable
+mkdir -p /tmp /var/tmp && chmod 1777 /tmp /var/tmp
 akmods --force --kernels "$kver" --kmod nvidia || true
 if ! find "/usr/lib/modules/$kver" -name 'nvidia.ko*' | grep -q .; then
     log "ERROR: nvidia module not built; build log:"
