@@ -1197,9 +1197,9 @@ class Settings(QMainWindow):
         sec = self.backend.security()
         user = os.environ.get("USER", "")
 
-        def state(good, good_text, bad_text):
+        def state(good, good_text, bad_text, neutral=False):
             lab = QLabel(f"●  {good_text if good else bad_text}")
-            lab.setObjectName("ok" if good else "bad")
+            lab.setObjectName("ok" if good else ("note" if neutral else "bad"))
             return lab
         weak = user in sec.get("weak_password_users", [])
         change = QPushButton("Change password…")
@@ -1213,8 +1213,8 @@ class Settings(QMainWindow):
                     state(not sec.get("ssh", {}).get("active", False), "Off", "On")),
                 Row("Apps sandboxed", "Browser, VLC and Windows apps only see the folders you allow.",
                     state(is_on(self.backend.features(), "sandbox_windows_apps", True), "On", "Off")),
-                Row("Secure Boot", "Firmware only starts signed system software.",
-                    state(sec.get("secure_boot", False), "On", "Off (normal for a test USB)")),
+                Row("Secure Boot", "Firmware only starts signed system software (see Secure Boot below).",
+                    state(sec.get("secure_boot", False), "On", "Off", neutral=True)),
                 Row("Disk encryption", "Your files can't be read if the drive or the device is stolen.",
                     state(sec.get("encrypted", False), "On", "Off"))]
         if weak:
@@ -1570,7 +1570,7 @@ class Settings(QMainWindow):
         self.fg.set_quiet(b.frame_gen_enabled())
         self.fg.toggled.connect(lambda on: b.set_frame_gen(on))
         fg_ready = Path("/usr/share/vulkan/implicit_layer.d").exists() and any(
-            "lsfg" in f.name for f in Path("/usr/share/vulkan/implicit_layer.d").glob("*.json"))
+            "lsfg" in f.name.lower() for f in Path("/usr/share/vulkan/implicit_layer.d").glob("*.json"))
         p.section("Performance", [
             Row("TDP, fans and buttons", "In Game Mode press the ··· (Quick Access) button: Handheld Daemon "
                 "sets TDP, fan curve and charge limit." if b.have("hhd") else "Handheld Daemon is not installed.",
