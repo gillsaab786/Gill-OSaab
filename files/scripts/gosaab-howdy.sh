@@ -5,8 +5,25 @@ set -uo pipefail
 log() { echo "[gill-osaab howdy] $*"; }
 command -v howdy >/dev/null && { log "already installed"; exit 0; }
 HOWDY_COMMIT=a8a3b29c53c430f6ffdbf6cc742be5eac325b94e # boltgolt/howdy master (3.0.2), reviewed
-dnf -y install gcc-c++ meson ninja-build pam-devel libevdev-devel inih-devel python3-opencv python3-dlib \
-    python3-numpy bzip2 >/dev/null || { log "dependencies missing on this Fedora: face unlock left out"; exit 0; }
+missing=()
+for pkg in gcc-c++ meson ninja-build pam-devel libevdev-devel inih-devel python3-devel cmake bzip2 \
+           python3-numpy python3-opencv python3-dlib; do
+    dnf -y install "$pkg" >/dev/null 2>&1 || missing+=("$pkg")
+done
+log "not packaged on this Fedora: ${missing[*]:-none}"
+# face libraries not packaged yet: build them for this Python (dlib takes a few minutes)
+need_pip=()
+python3 -c "import dlib" 2>/dev/null || need_pip+=(dlib)
+python3 -c "import cv2" 2>/dev/null || need_pip+=(opencv-python-headless)
+python3 -c "import numpy" 2>/dev/null || need_pip+=(numpy)
+if [ ${#need_pip[@]} -gt 0 ]; then
+    log "building with pip: ${need_pip[*]}"
+    pip3 install --quiet --break-system-packages --prefix /usr --no-cache-dir "${need_pip[@]}" ||
+        { log "face libraries could not be built: face unlock left out"; exit 0; }
+fi
+for pkg in gcc-c++ meson pam-devel libevdev-devel; do
+    rpm -q "$pkg" >/dev/null 2>&1 || { log "missing $pkg: face unlock left out"; exit 0; }
+done
 src=/tmp/howdy-src
 rm -rf "$src"
 for try in 1 2 3; do
