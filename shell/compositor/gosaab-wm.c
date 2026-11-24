@@ -1755,10 +1755,31 @@ static void server_new_xdg_toplevel(struct wl_listener *listener, void *data) {
 	wl_signal_add(&xdg_toplevel->events.request_fullscreen, &t->request_fullscreen);
 }
 
+/* A popup's parent can be unknown when it is created: layer-shell popups (menus of the shell,
+ * key previews of the on-screen keyboard) get their parent right after. Resolve it at commit. */
+static struct wlr_scene_tree *popup_parent_tree(struct wlr_xdg_popup *xdg_popup) {
+	if (xdg_popup->parent == NULL) {
+		return NULL;
+	}
+	struct wlr_xdg_surface *parent = wlr_xdg_surface_try_from_wlr_surface(xdg_popup->parent);
+	if (parent != NULL) {
+		return parent->data;
+	}
+	struct wlr_layer_surface_v1 *ls = wlr_layer_surface_v1_try_from_wlr_surface(xdg_popup->parent);
+	return ls != NULL ? ls->data : NULL;
+}
+
 static void popup_commit(struct wl_listener *listener, void *data) {
 	struct gs_popup *popup = wl_container_of(listener, popup, commit);
-	if (popup->xdg_popup->base->initial_commit) {
-		wlr_xdg_surface_schedule_configure(popup->xdg_popup->base);
+	struct wlr_xdg_surface *base = popup->xdg_popup->base;
+	if (base->data == NULL) {
+		struct wlr_scene_tree *tree = popup_parent_tree(popup->xdg_popup);
+		if (tree != NULL) {
+			base->data = wlr_scene_xdg_surface_create(tree, base);
+		}
+	}
+	if (base->initial_commit) {
+		wlr_xdg_surface_schedule_configure(base);
 	}
 }
 
@@ -1771,22 +1792,10 @@ static void popup_destroy(struct wl_listener *listener, void *data) {
 
 static void server_new_xdg_popup(struct wl_listener *listener, void *data) {
 	struct wlr_xdg_popup *xdg_popup = data;
-	struct wlr_scene_tree *parent_tree = NULL;
-	struct wlr_xdg_surface *parent = wlr_xdg_surface_try_from_wlr_surface(xdg_popup->parent);
-	if (parent != NULL) {
-		parent_tree = parent->data;
-	} else {
-		struct wlr_layer_surface_v1 *ls = wlr_layer_surface_v1_try_from_wlr_surface(xdg_popup->parent);
-		if (ls != NULL) {
-			parent_tree = ls->data;
-		}
-	}
-	if (parent_tree == NULL) {
-		return;
-	}
+	struct wlr_scene_tree *parent_tree = popup_parent_tree(xdg_popup);
 	struct gs_popup *popup = calloc(1, sizeof(*popup));
 	popup->xdg_popup = xdg_popup;
-	xdg_popup->base->data = wlr_scene_xdg_surface_create(parent_tree, xdg_popup->base);
+	xdg_popup->base->data = parent_tree ? wlr_scene_xdg_surface_create(parent_tree, xdg_popup->base) : NULL;
 	popup->commit.notify = popup_commit;
 	wl_signal_add(&xdg_popup->base->surface->events.commit, &popup->commit);
 	popup->destroy.notify = popup_destroy;
