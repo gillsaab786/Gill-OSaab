@@ -14,7 +14,7 @@ from gosaab_common import ETC, is_on, read_conf  # noqa: E402
 from PySide6.QtCore import (QEasingCurve, QProcess, QPropertyAnimation, QRectF, QSize, Qt,  # noqa: E402
                             Property, Signal)
 from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPainterPath, QPixmap  # noqa: E402
-from PySide6.QtWidgets import (QAbstractButton, QApplication, QButtonGroup, QComboBox, QFrame,  # noqa: E402
+from PySide6.QtWidgets import (QAbstractButton, QApplication, QButtonGroup, QComboBox, QFrame, QSlider,  # noqa: E402
                                QGraphicsOpacityEffect, QHBoxLayout, QLabel, QLineEdit, QListWidget,
                                QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QScrollArea, QSpinBox,
                                QStackedWidget, QVBoxLayout, QWidget)
@@ -182,6 +182,40 @@ class Backend:
                          " rclone config; echo; read -p 'Done. Press Enter to close.' x"], wait=False)
 
     GLASSES_CONF = Path.home() / ".config/gill-osaab/glasses.conf"
+
+    # 3DS emulators keep their 3D depth in their own config ("factor_3d", 0-100)
+    DEPTH_FILES = [Path.home() / p for p in (
+        ".config/azahar-emu/qt-config.ini", ".config/citra-emu/qt-config.ini", ".config/lime3ds-emu/qt-config.ini",
+        ".var/app/org.azahar_emu.Azahar/config/azahar-emu/qt-config.ini",
+        ".var/app/io.github.lime3ds.Lime3DS/config/lime3ds-emu/qt-config.ini")]
+
+    def depth_3d(self):
+        for f in self.DEPTH_FILES:
+            try:
+                for line in f.read_text().splitlines():
+                    if line.startswith("factor_3d=") or line.startswith("factor_3d\\default=false"):
+                        if line.startswith("factor_3d="):
+                            return int(line.split("=", 1)[1] or 50)
+            except (OSError, ValueError):
+                pass
+        return 50
+
+    def set_depth_3d(self, value):
+        import re
+        changed = 0
+        for f in self.DEPTH_FILES:
+            try:
+                text = f.read_text()
+            except OSError:
+                continue
+            text = re.sub(r"(?m)^factor_3d\\default=.*$", "factor_3d\\\\default=false", text)
+            if re.search(r"(?m)^factor_3d=", text):
+                text = re.sub(r"(?m)^factor_3d=.*$", f"factor_3d={int(value)}", text)
+            else:
+                text = text.replace("[Renderer]", f"[Renderer]\nfactor_3d={int(value)}\nfactor_3d\\default=false", 1)
+            f.write_text(text)
+            changed += 1
+        return changed
 
     def glasses_status(self):
         out = subprocess.run(["gosaab-glasses", "status"], capture_output=True, text=True, check=False).stdout
@@ -935,6 +969,13 @@ class Settings(QMainWindow):
         p.section("XREAL and other glasses", [Row("Status", "", self.glasses_label), Row("Mode", "", modes)],
                   "Plug the glasses into USB-C. 3D shows games side by side (3840x1080); Glasses only turns "
                   "the built-in screen off to save battery.")
+        depth = QSlider(Qt.Horizontal)
+        depth.setRange(0, 100)
+        depth.setValue(b.depth_3d())
+        depth.setMinimumWidth(220)
+        depth.valueChanged.connect(lambda v: b.set_depth_3d(v))
+        p.section("3D depth", [Row("Depth", "How deep 3DS games look in 3D (applies to Azahar/Citra/Lime3DS "
+                                   "next time a game starts).", depth)])
         rows = []
         self.glasses_combo = {}
         profiles = {**b.glasses_profiles()}

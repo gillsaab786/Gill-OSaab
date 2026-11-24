@@ -44,6 +44,12 @@ class FakeBackend:
     def kde_night_light(self):
         return False
 
+    def depth_3d(self):
+        return 50
+
+    def set_depth_3d(self, value):
+        return 0
+
     def glasses_status(self):
         return "No glasses connected"
 
@@ -266,3 +272,20 @@ class SettingsUpdates(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DepthSetting(unittest.TestCase):
+    def test_writes_3ds_emulator_depth(self):
+        import tempfile
+        from pathlib import Path
+        gs = load("usr/bin/gosaab-settings")
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / "qt-config.ini"
+            f.write_text("[Renderer]\nfactor_3d\\default=true\nfactor_3d=0\nresolution_factor=2\n")
+            b = gs.Backend()
+            b.DEPTH_FILES = [f]
+            self.assertEqual(b.set_depth_3d(70), 1)
+            text = f.read_text()
+            self.assertIn("factor_3d=70", text)
+            self.assertIn("factor_3d\\default=false", text)
+            self.assertEqual(b.depth_3d(), 70)
