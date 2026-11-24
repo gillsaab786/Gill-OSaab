@@ -132,11 +132,20 @@ def security_problems(sec, user=None):
                     "detail": "Other devices on the network can try to sign in. Turn it off if you don't use it: "
                               "sudo systemctl disable --now sshd", "source": "security", "time": now, "state": True})
     enc = sec.get("encryption", {})
-    if enc.get("encrypted") and enc.get("tpm") and not enc.get("pin"):
+    if enc.get("encrypted") and enc.get("tpm") and not enc.get("pin") and not sec.get("secure_boot"):
         out.append({"kind": "security", "title": "Add a start-up PIN",
                     "detail": "Your drive is encrypted but unlocks by itself when the device starts. Add a PIN so "
                               "a stolen device stays locked: Settings > Apps & Security > Start-up PIN.",
                     "source": "security", "time": now, "state": True})
+    try:
+        pending = Path("/var/lib/gill-osaab/secureboot-pending").read_text().strip()
+    except OSError:
+        pending = ""
+    if pending:
+        out.append({"kind": "security", "title": "Finish the Secure Boot change",
+                    "detail": f"Secure Boot is being turned {pending}. Press Finish in Settings > Apps & Security "
+                              "so your drive key is locked to it again.", "source": "security", "time": now,
+                    "state": True})
     if enc.get("encrypted") and not enc.get("recovery"):
         out.append({"kind": "security", "title": "Create a recovery key",
                     "detail": "Without one, a forgotten PIN or a BIOS update can lock you out of your files: "

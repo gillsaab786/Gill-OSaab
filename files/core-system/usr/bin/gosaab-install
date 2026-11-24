@@ -3,7 +3,8 @@
 
   gosaab-install                       guided install (asks which drive, then for a password)
   gosaab-install --list                drives you can install to (JSON)
-  gosaab-install DISK [--no-encrypt] [--dry-run] [--yes]
+  gosaab-install --live                exit 0 when running from a USB stick
+  gosaab-install DISK [--no-encrypt] [--dry-run] [--yes] [--password-stdin]
 
 The whole system drive is encrypted (LUKS2). It unlocks with this device's security chip (TPM2);
 after the first start you add a start-up PIN and a recovery key (Settings > Apps & Security), so
@@ -99,12 +100,28 @@ def account_record(name, password_hash):
     return {"name": name, "hash": password_hash, "full_name": gecos}
 
 
-def image_ref():
+def image_ref(nvidia=None):
+    """The edition to install: this one, or the Nvidia edition when an RTX/GTX 16 card is present."""
     try:
         st = json.loads(out(["bootc", "status", "--json"]))
-        return st["status"]["booted"]["image"]["image"]["image"]
+        ref = st["status"]["booted"]["image"]["image"]["image"]
     except (ValueError, KeyError, TypeError):
-        return "ghcr.io/gillsaab786/gill-osaab-core:latest"
+        ref = "ghcr.io/gillsaab786/gill-osaab-core:latest"
+    if nvidia is None:
+        try:
+            sys.path.insert(0, "/usr/libexec/gill-osaab")
+            import gosaab_gpu
+            nvidia = gosaab_gpu.nvidia_needs_driver(gosaab_gpu.gpus())
+        except Exception:
+            nvidia = False
+    return nvidia_variant(ref) if nvidia else ref
+
+
+def nvidia_variant(ref):
+    head, _, tag = ref.rpartition(":")
+    if not head or "/" in tag:
+        head, tag = ref, "latest"
+    return ref if head.endswith("-nvidia") else f"{head}-nvidia:{tag}"
 
 
 def install_command(image, disk, encrypt):
@@ -172,6 +189,10 @@ def main(argv):
     if argv and argv[0] in ("-h", "--help"):
         print(__doc__.strip())
         return 0
+    if argv and argv[0] == "--live":  # running from a USB stick (offer to install)?
+        disk = boot_disk()
+        info = out(["lsblk", "-dno", "TRAN,RM", disk]).split() if disk else []
+        return 0 if info and (info[0] == "usb" or info[-1] == "1") else 1
     if argv and argv[0] == "--list":
         print(json.dumps(list_disks()))
         return 0
@@ -195,7 +216,14 @@ def main(argv):
     if not yes:
         if input(f"\nErase {disk} and install Gill-OSaab{' (encrypted)' if encrypt else ''}? Type YES: ") != "YES":
             return 1
-    record = account_record(user, "$y$dry$run" if dry else hash_password(ask_password(user)))
+    if "--password-stdin" in argv:  # the graphical installer passes it this way (never on the command line)
+        password = sys.stdin.readline().rstrip("\n")
+        if len(password) < 8:
+            print("password too short")
+            return 2
+    else:
+        password = "dry-run" if dry else ask_password(user)
+    record = account_record(user, "$y$dry$run" if dry else hash_password(password))
     rc = sh(install_command(image_ref(), disk, encrypt), dry)
     if rc != 0:
         print("\nThe install failed; nothing else was changed. See Settings > Problems.")

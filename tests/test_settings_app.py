@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 
 from helpers import load
 
@@ -171,6 +172,9 @@ class FakeBackend:
 
     def last_update_text(self):
         return "Not yet"
+
+    def secure_boot(self):
+        return getattr(self, "sb", {"supported": True, "enabled": False, "nvidia_edition": False, "pending": ""})
 
     def fps_status(self):
         return {"main": {"vendor": "nvidia", "name": "AD107 [GeForce RTX 4060]", "family": "rtx40"},
@@ -455,3 +459,50 @@ class Fps(unittest.TestCase):
         self.assertIn("nvidia", w.update_buttons)
         names = [x.text() for x in w.findChildren(self.gs.QPushButton)]
         self.assertIn("Install", names)
+
+
+@unittest.skipUnless(HAVE_QT, "PySide6 not installed")
+class SecureBootPage(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        from PySide6.QtWidgets import QApplication
+        cls.gs = load("usr/bin/gosaab-settings")
+        cls.app = QApplication.instance() or QApplication([])
+
+    def buttons(self, b):
+        return [x.text() for x in self.gs.Settings(b).findChildren(self.gs.QPushButton)]
+
+    def test_turn_on_off_finish(self):
+        b = FakeBackend()
+        self.assertIn("Turn on…", self.buttons(b))
+        b.sb = {"supported": True, "enabled": True, "ms_2023_ca": False, "pending": ""}
+        names = self.buttons(b)
+        self.assertIn("Turn off…", names)
+        self.assertIn("Install", names)  # missing 2023 certificate
+        b.sb = {"supported": True, "enabled": True, "ms_2023_ca": True, "pending": "on"}
+        self.assertIn("Finish…", self.buttons(b))
+
+
+@unittest.skipUnless(HAVE_QT, "PySide6 not installed")
+class GraphicalInstaller(unittest.TestCase):
+    def test_flow_and_command(self):
+        import runpy
+        from PySide6.QtWidgets import QApplication
+        QApplication.instance() or QApplication([])
+        g = runpy.run_path(str(Path(__file__).resolve().parent.parent / "files/core-system/usr/bin/gosaab-installer"))
+        w = g["Installer"](disks=[{"path": "/dev/nvme0n1", "size": 1e12, "model": "SSD", "transport": "nvme",
+                                   "removable": False, "big_enough": True}])
+        w.disk = "/dev/nvme0n1"
+        for weak in ("short", "gill", "password"):
+            w.pw1.setText(weak)
+            w.pw2.setText(weak)
+            self.assertTrue(w.password_problem())
+        w.pw1.setText("correct horse")
+        w.pw2.setText("correct horsf")
+        self.assertIn("match", w.password_problem())
+        w.pw2.setText("correct horse")
+        w.check_password()
+        self.assertEqual(w.currentIndex(), 4)
+        self.assertEqual(w.command(), ["pkexec", "/usr/bin/gosaab-install", "/dev/nvme0n1", "--yes", "--password-stdin"])
+        w.encrypt = False
+        self.assertIn("--no-encrypt", w.command())

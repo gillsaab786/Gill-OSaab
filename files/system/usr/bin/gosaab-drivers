@@ -206,7 +206,7 @@ def cmd_auto(install):
     if allowed and (install or first):
         if shutil.which("fwupdmgr"):
             subprocess.run(["fwupdmgr", "refresh", "--force"], capture_output=True, check=False, timeout=300)
-            for u in drv.fwupd_updates(fwupd_json()):
+            for u in drv.fwupd_updates(fwupd_json(), allow_sb_keys=drv.secure_boot_on()):
                 if not on_ac_power():
                     skipped.append(f"{u['name']} firmware {u['to']} (waiting for the charger)")
                     continue

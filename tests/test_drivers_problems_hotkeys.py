@@ -1,5 +1,6 @@
 import json
 import os
+import subprocess
 import tempfile
 import time
 import unittest
@@ -318,6 +319,78 @@ class Installer(unittest.TestCase):
         except OSError:
             self.skipTest("no libcrypt")
         self.assertTrue(h.startswith("$y$"))
+
+
+import gosaab_gpu  # noqa: E402
+
+fps = load("usr/bin/gosaab-fps", "gosaab_fps")
+
+
+class FpsProfiles(unittest.TestCase):
+    def dev(self, vendor, name, cls="VGA compatible controller"):
+        return {"Class": cls, "Vendor": vendor, "Device": name, "Driver": ""}
+
+    def test_families(self):
+        cases = [("NVIDIA Corporation", "AD107M [GeForce RTX 4060 Max-Q / Mobile]", "rtx40"),
+                 ("NVIDIA Corporation", "GB203 [GeForce RTX 5080]", "rtx50"),
+                 ("NVIDIA Corporation", "GP107 [GeForce GTX 1050 Ti]", "nvidia-old"),
+                 ("Advanced Micro Devices, Inc. [AMD/ATI]", "Navi 48 [Radeon RX 9070 XT]", "rdna4"),
+                 ("Advanced Micro Devices, Inc. [AMD/ATI]", "Navi 31 [Radeon RX 7900 XTX]", "rdna3"),
+                 ("Advanced Micro Devices, Inc. [AMD/ATI]", "Phoenix1", "rdna3-apu"),
+                 ("Advanced Micro Devices, Inc. [AMD/ATI]", "Van Gogh [AMD Custom GPU 0405]", "rdna2"),
+                 ("Intel Corporation", "DG2 [Arc A770]", "arc"),
+                 ("Intel Corporation", "Meteor Lake-P [Intel Arc Graphics]", "xe-igpu"),
+                 ("Intel Corporation", "Alder Lake-P GT2 [Iris Xe Graphics]", "intel-igpu")]
+        for vendor, name, fam in cases:
+            self.assertEqual(gosaab_gpu.gpus([self.dev(vendor, name)])[0]["family"], fam, name)
+
+    def test_best_setup_per_gpu(self):
+        def env(name, vendor="NVIDIA Corporation", smooth=False):
+            g = gosaab_gpu.gpus([self.dev(vendor, name)])[0]
+            return gosaab_gpu.environment(gosaab_gpu.recommendation(g), True, smooth)
+        self.assertEqual(env("AD104 [GeForce RTX 4070]", smooth=True),
+                         {"PROTON_DLSS_UPGRADE": "1", "PROTON_ENABLE_NVAPI": "1", "NVPRESENT_ENABLE_SMOOTH_MOTION": "1"})
+        self.assertNotIn("NVPRESENT_ENABLE_SMOOTH_MOTION", env("TU106 [GeForce RTX 2060]", smooth=True))
+        self.assertEqual(env("Navi 48 [Radeon RX 9070 XT]", "AMD"), {"PROTON_FSR4_UPGRADE": "1"})
+        self.assertEqual(env("Navi 32", "AMD"), {"PROTON_FSR4_RDNA3_UPGRADE": "1"})
+        self.assertEqual(env("DG2 [Arc A770]", "Intel"), {"PROTON_XESS_UPGRADE": "1"})
+        self.assertEqual(env("Phoenix1", "AMD"), {"PROTON_FSR3_UPGRADE": "1"})
+
+    def test_discrete_preferred_and_nvidia_edition(self):
+        gs = gosaab_gpu.gpus([self.dev("Intel Corporation", "Raptor Lake-P [Iris Xe Graphics]"),
+                              self.dev("NVIDIA Corporation", "AD106M [GeForce RTX 4070 Max-Q]", "3D controller")])
+        self.assertEqual(gosaab_gpu.main_gpu(gs)["vendor"], "nvidia")
+        self.assertTrue(gosaab_gpu.nvidia_needs_driver(gs))
+        self.assertFalse(gosaab_gpu.nvidia_needs_driver(gosaab_gpu.gpus([self.dev("NVIDIA", "GP107")])))
+
+    def test_steam_default_tool(self):
+        vdf = '"InstallConfigStore"\n{\n\t"Software"\n\t{\n\t\t"Valve"\n\t\t{\n\t\t\t"Steam"\n\t\t\t{\n\t\t\t\t"x"\t\t"1"\n\t\t\t}\n\t\t}\n\t}\n}\n'
+        out = fps.add_default_tool(vdf, "GE-Proton10-30")
+        self.assertIn('"CompatToolMapping"', out)
+        self.assertIn('"GE-Proton10-30"', out)
+        self.assertEqual(out.count("{"), out.count("}"))
+        self.assertEqual(fps.add_default_tool("garbage", "x"), "garbage")
+
+
+class SecureBootFirmware(unittest.TestCase):
+    def test_certificate_updates_only_with_secure_boot(self):
+        data = json.dumps({"Devices": [{"Name": "UEFI db", "Plugin": "uefi_db", "DeviceId": "d" * 40,
+                                        "Releases": [{"Version": "2023"}]},
+                                       {"Name": "System Firmware", "Plugin": "uefi_capsule", "DeviceId": "e" * 40,
+                                        "Releases": [{"Version": "2"}]}]})
+        self.assertEqual(drv.fwupd_updates(data), [])
+        self.assertEqual([u["name"] for u in drv.fwupd_updates(data, allow_sb_keys=True)], ["UEFI db"])
+
+    def test_installer_picks_nvidia_edition(self):
+        self.assertEqual(Installer.inst.nvidia_variant("ghcr.io/x/gill-osaab-core:latest"),
+                         "ghcr.io/x/gill-osaab-core-nvidia:latest")
+        self.assertEqual(Installer.inst.nvidia_variant("ghcr.io/x/gill-osaab-core-nvidia:latest"),
+                         "ghcr.io/x/gill-osaab-core-nvidia:latest")
+
+    def test_secureboot_script(self):
+        out = subprocess.run(["bash", str(ROOT / "files/core-system/usr/bin/gosaab-secureboot"), "status"],
+                             capture_output=True, text=True).stdout
+        self.assertIn('"enabled"', json.dumps(json.loads(out)))
 
 
 if __name__ == "__main__":

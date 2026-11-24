@@ -1,0 +1,91 @@
+#!/bin/bash
+# Secure Boot: see it, and turn it on or off safely.
+#   gosaab-secureboot status       JSON for Settings
+#   gosaab-secureboot turn on|off  (asks your password) gets the encrypted drive ready so it still opens
+#                                  after the change, then restarts into the BIOS settings where you flip
+#                                  Secure Boot (a PC only lets its own BIOS change it)
+#   gosaab-secureboot finish       after the change: lock the drive key to the new Secure Boot state again
+set -u
+EFI=/sys/firmware/efi/efivars
+PENDING=/var/lib/gill-osaab/secureboot-pending
+
+efi_flag() { # last byte of an EFI variable = 1 ?
+  f=$(ls "$EFI"/"$1"-* 2>/dev/null | head -1)
+  [ -n "$f" ] && [ "$(od -An -tu1 -j4 "$f" 2>/dev/null | tr -d ' \n' | tail -c1)" = 1 ]
+}
+json_bool() { if "$@"; then echo true; else echo false; fi; }
+has_2023_ca() { mokutil --db 2>/dev/null | grep -q "Microsoft UEFI CA 2023"; }
+nvidia_edition() { [ -f /usr/share/gill-osaab/edition-gpu ]; }
+enc() { gosaab-encryption status 2>/dev/null; }
+
+case "${1:-status}" in
+status)
+  lockdown=$(sed -n 's/.*\[\(.*\)\].*/\1/p' /sys/kernel/security/lockdown 2>/dev/null)
+  printf '{"supported": %s, "enabled": %s, "setup_mode": %s, "ms_2023_ca": %s, "lockdown": "%s", "nvidia_edition": %s, "pending": "%s"}\n' \
+    "$(json_bool test -d "$EFI")" "$(json_bool efi_flag SecureBoot)" "$(json_bool efi_flag SetupMode)" \
+    "$(json_bool has_2023_ca)" "${lockdown:-none}" "$(json_bool nvidia_edition)" "$(cat "$PENDING" 2>/dev/null)"
+  ;;
+turn)
+  want=${2:-}
+  case "$want" in on|off) ;; *) echo "usage: gosaab-secureboot turn on|off" >&2; exit 2 ;; esac
+  [ "$(id -u)" -eq 0 ] || exec pkexec "$0" "$@"
+  [ -d "$EFI" ] || { echo "This PC doesn't start in UEFI mode, so it has no Secure Boot."; exit 3; }
+  if [ "$want" = on ] && nvidia_edition && [ "${3:-}" != --force ]; then
+    echo "Nvidia's own driver isn't signed for Secure Boot: with Secure Boot on it won't load and games"
+    echo "lose Nvidia acceleration. Keep Secure Boot off on the Nvidia edition (your drive stays encrypted)."
+    exit 4
+  fi
+  dev=$(enc | sed -n 's/.*"device": "\([^"]*\)".*/\1/p')
+  if [ -n "$dev" ] && enc | grep -q '"tpm": true'; then
+    echo "Getting your encrypted drive ready: for the next start it opens without checking Secure Boot."
+    if enc | grep -q '"pin": true'; then
+      echo "Type your current start-up PIN, then choose it again (it can stay the same)."
+      systemd-cryptenroll "$dev" --unlock-tpm2-device=auto --wipe-slot=tpm2 --tpm2-device=auto \
+        --tpm2-with-pin=yes --tpm2-pcrs= || exit 1
+    else
+      systemd-cryptenroll "$dev" --unlock-tpm2-device=auto --wipe-slot=tpm2 --tpm2-device=auto --tpm2-pcrs= || exit 1
+    fi
+  fi
+  mkdir -p "$(dirname "$PENDING")"; echo "$want" > "$PENDING"
+  cat <<EOF
+
+The PC now restarts into its BIOS settings.
+  1. Open the Security (or Boot) page and set Secure Boot to $( [ "$want" = on ] && echo Enabled || echo Disabled ).
+$( [ "$want" = on ] && echo "  2. If there is an option \"Allow Microsoft 3rd-party UEFI CA\", turn it on (Linux needs it)." )
+  3. Save and exit (usually F10). Gill-OSaab starts again; then press "Finish" in
+     Settings > Apps & Security.
+EOF
+  read -r -p "Press Enter to restart now (Ctrl+C to cancel)." _ || exit 1
+  systemctl reboot --firmware-setup || systemctl reboot
+  ;;
+finish)
+  [ "$(id -u)" -eq 0 ] || exec pkexec "$0" "$@"
+  want=$(cat "$PENDING" 2>/dev/null)
+  [ -n "$want" ] || { echo "Nothing to finish."; exit 0; }
+  now=$(efi_flag SecureBoot && echo on || echo off)
+  if [ "$now" != "$want" ]; then
+    echo "Secure Boot is still $now. Restart into the BIOS and change it, or cancel with: gosaab-secureboot cancel"
+    exit 1
+  fi
+  dev=$(enc | sed -n 's/.*"device": "\([^"]*\)".*/\1/p')
+  if [ -n "$dev" ] && enc | grep -q '"tpm": true'; then
+    if [ "$now" = off ] && ! enc | grep -q '"pin": true'; then
+      echo "Secure Boot is off, so your drive needs a start-up PIN to stay safe."
+    fi
+    if [ "$now" = off ] || enc | grep -q '"pin": true'; then
+      echo "Choose your start-up PIN (type the current one first if asked)."
+      systemd-cryptenroll "$dev" --unlock-tpm2-device=auto --wipe-slot=tpm2 --tpm2-device=auto \
+        --tpm2-with-pin=yes --tpm2-pcrs=7 || exit 1
+    else
+      systemd-cryptenroll "$dev" --unlock-tpm2-device=auto --wipe-slot=tpm2 --tpm2-device=auto --tpm2-pcrs=7 || exit 1
+    fi
+  fi
+  rm -f "$PENDING"
+  echo "Done: Secure Boot is $now and your drive is locked to it."
+  ;;
+cancel)
+  [ "$(id -u)" -eq 0 ] || exec pkexec "$0" "$@"
+  rm -f "$PENDING"; echo "Cancelled. Run 'gosaab-encryption pin' to lock the drive key to Secure Boot again."
+  ;;
+*) sed -n '2,8p' "$0"; exit 2 ;;
+esac

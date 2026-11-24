@@ -105,6 +105,20 @@ check "installer lists drives (JSON)" "gosaab-install --list | python3 -c 'impor
 gosaab-install /dev/nvme9n9 --dry-run --yes > /tmp/install.txt 2>&1; grep '^+' /tmp/install.txt | head -3
 check "encrypted install: whole drive LUKS2 + security chip" "grep -q 'bootc install to-disk --wipe --filesystem btrfs --block-setup tpm2-luks /dev/nvme9n9' /tmp/install.txt"
 check "first start after install creates your account" "systemctl is-enabled gosaab-firstboot-user.service >/dev/null 2>&1"
+# graphics, FPS, Secure Boot, installer, touch keyboard
+for pkg in microcode_ctl amd-ucode-firmware thermald intel-media-driver mesa-vulkan-drivers.i686 gamemode mokutil; do
+  check "installed: $pkg" "rpm -q $pkg >/dev/null"
+done
+check "thermald only runs on Intel processors" "grep -q GenuineIntel /usr/lib/systemd/system/thermald.service.d/gill-osaab-intel-only.conf"
+gosaab-fps status > /tmp/fps.json; echo "fps: $(python3 -c 'import json;d=json.load(open("/tmp/fps.json"));print(d["main"], d["env"])')"
+check "best FPS setup is detected for the graphics chip" "python3 -c 'import json;d=json.load(open(\"/tmp/fps.json\"));assert \"recommendation\" in d'"
+check "FPS settings reach games (both sessions)" "grep -q 60-gill-osaab-fps /usr/libexec/gill-osaab/gosaab-session-start && grep -q 60-gill-osaab-fps /usr/libexec/gill-osaab/gosaab-gamemode-session"
+check "Secure Boot status" "gosaab-secureboot status | python3 -c 'import json,sys;json.load(sys.stdin)'"
+check "graphical installer" "python3 -m py_compile /usr/bin/gosaab-installer && grep -q gosaab-installer /usr/share/applications/gosaab-installer.desktop"
+check "installer picks the Nvidia edition on RTX/GTX 16 PCs" "python3 -c 'import runpy;g=runpy.run_path(\"/usr/bin/gosaab-install\");assert g[\"image_ref\"](nvidia=True).endswith(\"-nvidia:latest\")'"
+check "on-screen keyboard for touch screens" "command -v wvkbd-mobintl >/dev/null"
+check "touch keyboard on the login screen" "[ -f /usr/share/sddm/themes/gill-osaab/OnScreenKeyboard.qml ] && [ ! -L /usr/share/sddm/themes/gill-osaab/OnScreenKeyboard.qml ]"
+check "Android helper pinned to a reviewed version, asks for a password" "grep -q WS_COMMIT= /usr/bin/gosaab-android-setup && grep -A8 org.gillosaab.android /usr/share/polkit-1/actions/org.gillosaab.session.policy | grep -q auth_admin_keep"
 timeout 3 /usr/libexec/gill-osaab/gosaab-hotkeyd; rc=$?
 check "shortcut service starts (Desktop and Game Mode)" "[ $rc -eq 124 ]"
 
@@ -133,7 +147,7 @@ qs -c gill-osaab ipc call launchpad toggle; sleep 0.5
 qs -c gill-osaab ipc call spotlight search "fire"; sleep 1.5; grim "$OUT/05-core-spotlight.png"
 qs -c gill-osaab ipc call spotlight toggle; sleep 0.5
 QT_QPA_PLATFORM=wayland gosaab-settings >/dev/null 2>&1 & sleep 4; grim "$OUT/06-core-settings.png"
-for pg in problems device buttons security; do
+for pg in problems device buttons security game; do
   QT_QPA_PLATFORM=wayland gosaab-settings $pg >/dev/null 2>&1 & sp=$!; sleep 4; grim "$OUT/07-settings-$pg.png"; kill $sp
 done
 check "desktop still running" "pgrep -x gosaab-wm >/dev/null"

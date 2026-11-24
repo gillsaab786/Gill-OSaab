@@ -2,6 +2,11 @@
 # First sign-in: finish setting up apps that are too big to ship inside the system image,
 # with a progress notification (Liquid Glass ring in the shell). Runs once per user, retries
 # next sign-in if it was interrupted (e.g. no internet).
+# running from the USB stick: offer to install on the PC (every sign-in, until installed)
+if gosaab-install --live 2>/dev/null; then
+  notify-send -a "Gill-OSaab" -i system-software-install "Install Gill-OSaab on this PC?" \
+    "You're running from the USB stick. Open \"Install Gill-OSaab\" in Launchpad to put it on the PC's drive, encrypted." || true
+fi
 DONE="$HOME/.config/gill-osaab/first-setup.done"
 [ -f "$DONE" ] && exit 0
 mkdir -p "$(dirname "$DONE")"

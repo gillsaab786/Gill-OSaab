@@ -8,6 +8,7 @@ fi
 if [ "${1:-}" = "--remove" ]; then
   user=$(id -nu "${PKEXEC_UID:-0}" 2>/dev/null)
   home=$(getent passwd "$user" | cut -d: -f6)
+  case "$home" in /home/*|/var/home/*) ;; *) echo "unknown user"; exit 2 ;; esac
   waydroid session stop 2>/dev/null || true
   systemctl disable --now waydroid-container.service gosaab-android-folders.service 2>/dev/null || true
   umount "$home/Android" 2>/dev/null; umount "$home/.local/share/waydroid/data/media/0/Download" 2>/dev/null
@@ -30,7 +31,10 @@ sed -i '/^\[properties\]/a persist.waydroid.multi_windows = true' "$cfg"
 waydroid upgrade -o || true
 echo "3/4 ARM translation for phone-only apps (libndk)"
 tmp=$(mktemp -d)
-if git clone -q --depth 1 https://github.com/casualsnek/waydroid_script "$tmp/ws" 2>/dev/null; then
+# pinned to a reviewed version: this runs as admin, so never "whatever is newest" from the internet
+WS_COMMIT=4a50dabd97fcb632a608b1421105258862a5b994
+if git clone -q https://github.com/casualsnek/waydroid_script "$tmp/ws" 2>/dev/null && \
+   git -C "$tmp/ws" checkout -q "$WS_COMMIT" 2>/dev/null; then
   python3 -m venv "$tmp/venv" && "$tmp/venv/bin/pip" -q install -r "$tmp/ws/requirements.txt" &&
     "$tmp/venv/bin/python" "$tmp/ws/main.py" install libndk || echo "   (skipped: translation could not be installed)"
 fi

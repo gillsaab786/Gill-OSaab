@@ -1,0 +1,233 @@
+#!/usr/bin/python3
+"""Install Gill-OSaab on this PC — the graphical installer (runs gosaab-install underneath)."""
+import json
+import os
+import subprocess
+import sys
+
+from PySide6.QtCore import QProcess, Qt
+from PySide6.QtWidgets import (QApplication, QButtonGroup, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
+                               QProgressBar, QPlainTextEdit, QPushButton, QStackedWidget, QVBoxLayout, QWidget)
+
+STYLE = """
+QWidget { background: #1c1c1e; color: #f2f2f7; font-family: Inter; font-size: 15px; }
+QLabel#title { font-size: 30px; font-weight: 700; }
+QLabel#note { color: #a1a1a6; }
+QPushButton { background: #2c2c2e; border-radius: 14px; padding: 14px 22px; min-height: 28px; }
+QPushButton:checked { background: #0a84ff; }
+QPushButton#primary { background: #0a84ff; font-weight: 600; }
+QPushButton#danger { background: #ff453a; font-weight: 600; }
+QPushButton:disabled, QPushButton#primary:disabled { color: #636366; background: #2c2c2e; }
+QLineEdit { background: #2c2c2e; border-radius: 12px; padding: 14px; font-size: 18px; }
+QProgressBar { background: #2c2c2e; border-radius: 8px; height: 16px; text-align: center; }
+QProgressBar::chunk { background: #30d158; border-radius: 8px; }
+QPlainTextEdit { background: #000; color: #8e8e93; border-radius: 10px; font-family: monospace; font-size: 12px; }
+"""
+
+
+def run_json(cmd, default):
+    try:
+        return json.loads(subprocess.run(cmd, capture_output=True, text=True, check=False).stdout)
+    except (OSError, ValueError):
+        return default
+
+
+class Page(QWidget):
+    def __init__(self, title, note=""):
+        super().__init__()
+        self.lay = QVBoxLayout(self)
+        self.lay.setContentsMargins(60, 50, 60, 40)
+        self.lay.setSpacing(16)
+        t = QLabel(title)
+        t.setObjectName("title")
+        t.setWordWrap(True)
+        self.lay.addWidget(t)
+        if note:
+            n = QLabel(note)
+            n.setObjectName("note")
+            n.setWordWrap(True)
+            self.lay.addWidget(n)
+
+    def buttons(self, *buttons):
+        self.lay.addStretch(1)
+        row = QHBoxLayout()
+        row.addStretch(1)
+        for b in buttons:
+            row.addWidget(b)
+        self.lay.addLayout(row)
+
+
+class Installer(QStackedWidget):
+    def __init__(self, disks=None):
+        super().__init__()
+        self.setWindowTitle("Install Gill-OSaab")
+        self.setStyleSheet(STYLE)
+        self.disks = [d for d in (disks if disks is not None else run_json(["gosaab-install", "--list"], []))
+                      if d.get("big_enough")]
+        self.disk = ""
+        self.encrypt = True
+        self.proc = None
+        for page in (self.welcome(), self.choose_disk(), self.choose_encryption(), self.choose_password(),
+                     self.confirm(), self.progress_page(), self.done_page()):
+            self.addWidget(page)
+
+    def nav(self, label, to, primary=True):
+        b = QPushButton(label)
+        b.setObjectName("primary" if primary else "")
+        b.setCursor(Qt.PointingHandCursor)
+        b.clicked.connect(lambda: self.setCurrentIndex(to) if isinstance(to, int) else to())
+        return b
+
+    # ---------------------------------------------------------------- pages
+    def welcome(self):
+        p = Page("Install Gill-OSaab on this PC",
+                 "Copies Gill-OSaab from this USB stick to the PC's own drive, so it starts faster and keeps your "
+                 "files. Your account comes along. Takes about 10–20 minutes with internet.")
+        kb = self.nav("⌨  Keyboard", self.toggle_keyboard, primary=False)
+        p.buttons(kb, self.nav("Continue", 1))
+        return p
+
+    def choose_disk(self):
+        p = Page("Which drive?", "Everything on the drive you pick is erased. The USB stick you're running from "
+                                 "isn't listed.")
+        self.disk_group = QButtonGroup(self)
+        for d in self.disks:
+            kind = "removable" if d["removable"] else (d.get("transport") or "internal").upper()
+            b = QPushButton(f"{d['model'] or d['path']}   ·   {d['size'] / 1e9:.0f} GB   ·   {kind}")
+            b.setCheckable(True)
+            b.clicked.connect(lambda _=False, path=d["path"]: self.pick_disk(path))
+            self.disk_group.addButton(b)
+            p.lay.addWidget(b)
+        if not self.disks:
+            n = QLabel("No drive of 30 GB or more was found besides this USB stick.")
+            n.setObjectName("note")
+            p.lay.addWidget(n)
+        self.disk_next = self.nav("Continue", 2)
+        self.disk_next.setEnabled(False)
+        p.buttons(self.nav("Back", 0, False), self.disk_next)
+        return p
+
+    def pick_disk(self, path):
+        self.disk = path
+        self.disk_next.setEnabled(True)
+
+    def choose_encryption(self):
+        p = Page("Encrypt the drive?", "Recommended. Nobody can read your files if the PC or the drive is stolen. "
+                                       "It opens with the PC's security chip; after the first start you'll add a "
+                                       "recovery key (and a start-up PIN if Secure Boot is off).")
+        group = QButtonGroup(self)
+        yes = QPushButton("Encrypt (recommended)")
+        no = QPushButton("Don't encrypt")
+        for b, value in ((yes, True), (no, False)):
+            b.setCheckable(True)
+            group.addButton(b)
+            b.clicked.connect(lambda _=False, v=value: setattr(self, "encrypt", v))
+            p.lay.addWidget(b)
+        yes.setChecked(True)
+        p.buttons(self.nav("Back", 1, False), self.nav("Continue", 3))
+        return p
+
+    def choose_password(self):
+        p = Page("Choose your password", "For signing in and approving changes on the installed system. At least "
+                                         "8 characters, not the test password.")
+        self.pw1, self.pw2 = QLineEdit(), QLineEdit()
+        for w, hint in ((self.pw1, "Password"), (self.pw2, "Again")):
+            w.setEchoMode(QLineEdit.Password)
+            w.setPlaceholderText(hint)
+            p.lay.addWidget(w)
+        self.pw_note = QLabel("")
+        self.pw_note.setObjectName("note")
+        p.lay.addWidget(self.pw_note)
+        p.buttons(self.nav("⌨  Keyboard", self.toggle_keyboard, False), self.nav("Back", 2, False),
+                  self.nav("Continue", self.check_password))
+        return p
+
+    def password_problem(self):
+        a, b = self.pw1.text(), self.pw2.text()
+        user = os.environ.get("USER", "")
+        if len(a) < 8:
+            return "At least 8 characters, please."
+        if a.lower() in ("gill", "password", "12345678", user.lower()):
+            return "That one is too easy to guess."
+        if a != b:
+            return "The two passwords don't match."
+        return ""
+
+    def check_password(self):
+        problem = self.password_problem()
+        self.pw_note.setText(problem)
+        if not problem:
+            self.summary.setText(f"Drive: {self.disk} (erased)\nEncryption: {'on' if self.encrypt else 'off'}\n"
+                                 f"Account: {os.environ.get('USER', '')} with your new password")
+            self.setCurrentIndex(4)
+
+    def confirm(self):
+        p = Page("Ready to install", "Last chance to go back: the drive will be erased.")
+        self.summary = QLabel("")
+        self.summary.setWordWrap(True)
+        p.lay.addWidget(self.summary)
+        go = self.nav("Erase and install", self.start)
+        go.setObjectName("danger")
+        p.buttons(self.nav("Back", 3, False), go)
+        return p
+
+    def progress_page(self):
+        p = Page("Installing…", "Downloading Gill-OSaab and writing it to the drive. Keep the PC plugged in.")
+        self.bar = QProgressBar()
+        self.bar.setRange(0, 0)  # busy until done
+        p.lay.addWidget(self.bar)
+        self.log = QPlainTextEdit()
+        self.log.setReadOnly(True)
+        p.lay.addWidget(self.log, 1)
+        return p
+
+    def done_page(self):
+        p = Page("Done!", "Remove the USB stick and restart. After you sign in, Settings opens to add your "
+                          "recovery key — write it down and keep it safe.")
+        restart = self.nav("Restart now", lambda: subprocess.run(["systemctl", "reboot"], check=False))
+        p.buttons(restart)
+        return p
+
+    # ---------------------------------------------------------------- actions
+    def command(self):
+        cmd = ["pkexec", "/usr/bin/gosaab-install", self.disk, "--yes", "--password-stdin"]
+        if not self.encrypt:
+            cmd.append("--no-encrypt")
+        return cmd
+
+    def start(self):
+        self.setCurrentIndex(5)
+        self.proc = QProcess(self)
+        self.proc.setProcessChannelMode(QProcess.MergedChannels)
+        self.proc.readyReadStandardOutput.connect(
+            lambda: self.log.appendPlainText(bytes(self.proc.readAllStandardOutput()).decode(errors="replace").rstrip()))
+        self.proc.finished.connect(self.finished)
+        cmd = self.command()
+        self.proc.start(cmd[0], cmd[1:])
+        self.proc.write((self.pw1.text() + "\n").encode())
+        self.proc.closeWriteChannel()
+        self.pw1.clear()
+        self.pw2.clear()
+
+    def finished(self, code, _status=None):
+        if code == 0:
+            self.setCurrentIndex(6)
+            return
+        self.bar.setRange(0, 1)
+        QMessageBox.warning(self, "Install stopped", "The install didn't finish (see the details). Nothing on your "
+                                                     "USB stick changed. Check the internet and try again.")
+
+    def toggle_keyboard(self):
+        subprocess.Popen(["qs", "-c", "gill-osaab", "ipc", "call", "shell", "keyboard"])
+
+
+def main():
+    app = QApplication(sys.argv)
+    w = Installer()
+    w.resize(900, 640)
+    w.show()
+    return app.exec()
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -21,6 +21,7 @@ jobs:
       contents: write
       packages: read
     steps:
+      - uses: actions/checkout@v4 # for tools/Get-GillOSaab-USB.ps1
       - name: Make room
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
@@ -59,6 +60,7 @@ jobs:
           mkdir -p release
           sudo split -b 1900M -d -a 2 "$img.xz" release/gill-osaab-core-usb.img.xz.part-
           sudo sha256sum "$img.xz" | sed 's|  .*|  gill-osaab-core-usb.img.xz|' | sudo tee release/SHA256SUMS
+          cp tools/Get-GillOSaab-USB.ps1 release/
           sudo chown -R "$(id -u)" release && ls -lh release
       - name: Publish on the core-usb release
         env:
@@ -67,4 +69,4 @@ jobs:
           gh release delete core-usb --yes --cleanup-tag -R "${{ github.repository }}" || true
           gh release create core-usb release/* -R "${{ github.repository }}" --prerelease \
             --title "Gill-OSaab Core bootable USB (test build)" \
-            --notes "Bootable USB image of Gill-OSaab Core. 1) Download every part and join them: Windows: copy /b gill-osaab-core-usb.img.xz.part-00+gill-osaab-core-usb.img.xz.part-01+... gill-osaab-core-usb.img.xz (Linux/macOS: cat gill-osaab-core-usb.img.xz.part-* > gill-osaab-core-usb.img.xz). 2) Check SHA256SUMS. 3) Write it to a 32 GB+ USB stick with balenaEtcher (it reads .xz directly). 4) Boot from the stick (GPD/ROG Ally: hold Volume Down + Power for the boot menu). Login: gill / gill, then run passwd. Pick Gill-OSaab or Game Mode at the login screen."
+            --notes "Bootable USB image of Gill-OSaab Core (AMD/Intel; the installer picks the Nvidia edition by itself on RTX/GTX 16 PCs). Windows: download Get-GillOSaab-USB.ps1, right-click > Run with PowerShell: it downloads or joins the parts, checks the SHA-256 and opens balenaEtcher. Linux/macOS: cat gill-osaab-core-usb.img.xz.part-* > gill-osaab-core-usb.img.xz, check SHA256SUMS, flash with balenaEtcher. Use a 32 GB+ USB stick. Boot from it (ROG Ally/GPD: hold Volume Down + Power), sign in as gill / gill, then open Install Gill-OSaab in Launchpad to install on the PC, encrypted."

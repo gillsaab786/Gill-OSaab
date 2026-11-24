@@ -18,8 +18,12 @@ dnf install -y akmod-nvidia xorg-x11-drv-nvidia xorg-x11-drv-nvidia-cuda xorg-x1
     xorg-x11-drv-nvidia-cuda-libs nvidia-modprobe libva-nvidia-driver
 dnf install -y --skip-unavailable nvidia-settings xorg-x11-drv-nvidia-power
 
-akmods --force --kernels "$kver" --kmod nvidia
-find "/usr/lib/modules/$kver" -name 'nvidia.ko*' | grep -q . || { log "ERROR: nvidia module not built"; exit 1; }
+akmods --force --kernels "$kver" --kmod nvidia || true
+if ! find "/usr/lib/modules/$kver" -name 'nvidia.ko*' | grep -q .; then
+    log "ERROR: nvidia module not built; build log:"
+    tail -n 80 /var/cache/akmods/nvidia/*.failed.log 2>/dev/null || true
+    exit 1
+fi
 log "built: $(modinfo -k "$kver" -F version nvidia)"
 
 # load Nvidia's driver instead of nouveau, with modesetting for Wayland/gamescope

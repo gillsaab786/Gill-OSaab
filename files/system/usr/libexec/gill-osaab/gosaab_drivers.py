@@ -178,15 +178,29 @@ def fwupd_category(dev):
     return "Controllers & accessories"
 
 
-def fwupd_updates(json_text):
-    """Device firmware updates (never the BIOS: that has its own careful button)."""
+SB_KEY_PLUGINS = ("uefi_db", "uefi_kek", "uefi_dbx")
+
+
+def secure_boot_on(efivars=Path("/sys/firmware/efi/efivars")):
+    for f in efivars.glob("SecureBoot-*"):
+        try:
+            return f.read_bytes()[-1:] == b"\x01"
+        except OSError:
+            pass
+    return False
+
+
+def fwupd_updates(json_text, allow_sb_keys=False):
+    """Device firmware updates (never the BIOS: that has its own careful button). With Secure Boot on,
+    the Secure Boot certificate updates (Microsoft 2023 CA, revocations) are included."""
     try:
         devices = json.loads(json_text or "{}").get("Devices", [])
     except ValueError:
         return []
     out = []
     for d in devices:
-        if (d.get("Plugin", "")).startswith("uefi") or not d.get("Releases"):
+        plugin = d.get("Plugin", "")
+        if not d.get("Releases") or (plugin.startswith("uefi") and not (allow_sb_keys and plugin in SB_KEY_PLUGINS)):
             continue
         dev_id = d.get("DeviceId", "")
         if not re.fullmatch(r"[0-9a-f]{40}", dev_id):

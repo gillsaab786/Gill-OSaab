@@ -28,7 +28,10 @@ jobs:
                 pango-devel cairo-devel libdrm-devel libinput-devel git-core mesa-libEGL-devel mesa-libgbm-devel libglvnd-devel rsms-inter-fonts >/dev/null
               dnf -y -q install wlr-randr python3-gobject glib2 dbus-daemon libnotify adwaita-icon-theme qt6-qtsvg qt6-qtwayland >/dev/null
               dnf -y -q install xwayland-satellite xorg-x11-server-Xwayland xkeyboard-config sddm >/dev/null || echo "no xwayland-satellite package"
-              dnf -y -q install wvkbd wayland-utils bubblewrap >/dev/null 2>&1 || echo "no wvkbd/wayland-utils/bwrap"
+              for pkg in wayland-utils bubblewrap; do dnf -y -q install $pkg >/dev/null 2>&1 || echo "no $pkg"; done
+              dnf -y -q install wvkbd >/dev/null 2>&1 || { git clone -q https://github.com/jjsullivan5196/wvkbd /tmp/wvkbd && \
+                git -C /tmp/wvkbd checkout -q f7e9ea3a7565decd0d120861c1cb36a7b6836244 && \
+                make -s -C /tmp/wvkbd LAYOUT=mobintl wvkbd-mobintl >/dev/null && install -m 0755 /tmp/wvkbd/wvkbd-mobintl /usr/bin/; } || echo "no wvkbd"
               dnf -y -q install xclock >/dev/null 2>&1 || dnf -y -q install xorg-x11-apps >/dev/null 2>&1 || echo "no xclock"
               dnf -y -q install quickshell >/dev/null 2>&1 || { dnf -y -q install dnf-plugins-core >/dev/null; \
                 dnf -y -q copr enable errornointernet/quickshell >/dev/null; dnf -y -q install quickshell >/dev/null; }

@@ -101,13 +101,15 @@ Rectangle {
             Text {
                 width: parent.width
                 text: card.notification.summary
+                textFormat: Text.PlainText // apps can't inject formatting or images here
                 color: Theme.text; elide: Text.ElideRight
                 font { family: Theme.font; pixelSize: 14; weight: Font.DemiBold }
             }
             Text {
                 width: parent.width
                 visible: text !== ""
-                text: card.notification.body
+                // bold/italic/links only: no <img> (a remote image would tell a website you saw it)
+                text: card.notification.body.replace(/<img[^>]*>/gi, "")
                 color: Theme.text; opacity: 0.85
                 wrapMode: Text.Wrap; maximumLineCount: 3; elide: Text.ElideRight
                 textFormat: Text.StyledText

@@ -301,6 +301,9 @@ class Backend:
     def remove_hotkey(self, combo):
         return subprocess.run(["gosaab-hotkeys", "remove", combo], check=False).returncode == 0
 
+    def secure_boot(self):
+        return self._json(["gosaab-secureboot", "status"], {})
+
     def last_update_text(self):
         import time as _t
         try:
@@ -1218,10 +1221,50 @@ class Settings(QMainWindow):
             rows[0].subtitle.setStyleSheet("color: #ff453a;")
         p.section("Security checkup", rows)
         self.encryption_section(p, sec.get("encryption", {}))
+        self.secureboot_section(p, self.backend.secure_boot(), sec.get("encryption", {}))
 
     def terminal(self, title, cmd):
         return lambda: self.backend.run(["foot", "-T", title, "-e", "sh", "-c",
                                          cmd + "; echo; read -p 'Press Enter to close.' x"], wait=False)
+
+    def secureboot_section(self, p, sb, enc):
+        if not sb.get("supported"):
+            return
+        on = sb.get("enabled")
+
+        def term(text, title, cmd, primary=False):
+            b = QPushButton(text)
+            b.setObjectName("primary" if primary else "pill")
+            b.clicked.connect(self.terminal(title, cmd))
+            return b
+        lab = QLabel("●  On" if on else "●  Off")
+        lab.setObjectName("ok" if on else "note")
+        mode = ("On: the PC only starts signed system software and your drive opens by itself with the security "
+                "chip. Certificate updates install automatically." if on else
+                "Off: simpler and every power tool works. Keep a start-up PIN so the encrypted drive stays safe.")
+        rows = [Row("Secure Boot", mode, lab)]
+        if sb.get("pending"):
+            rows.append(Row("Finish the Secure Boot change", "Locks your drive key to the new setting again.",
+                            term("Finish…", "Secure Boot", "gosaab-secureboot finish", primary=True)))
+        else:
+            note = "Asks your password, then restarts into the BIOS where you switch it (a PC only lets its own " \
+                   "BIOS change this). Your files stay encrypted the whole time."
+            if not on and sb.get("nvidia_edition"):
+                note = "Nvidia's driver isn't signed for Secure Boot, so keep it off on the Nvidia edition."
+            rows.append(Row("Turn Secure Boot " + ("off" if on else "on"), note,
+                            term("Turn off…" if on else "Turn on…", "Secure Boot",
+                                 "gosaab-secureboot turn " + ("off" if on else "on"))))
+        if on:
+            ok = sb.get("ms_2023_ca")
+            cert = QLabel("●  Installed" if ok else "●  Missing")
+            cert.setObjectName("ok" if ok else "bad")
+            rows.append(Row("Microsoft 2023 certificate", "Needed for future Linux start-up updates; installs "
+                            "with device firmware updates.", cert if ok else self.update_button("firmware", "Install")))
+        if enc.get("encrypted") and not on:
+            rows.append(Row("Handheld without a keyboard?", "The start-up PIN is typed before Gill-OSaab starts, "
+                            "so it needs a USB keyboard. Turn Secure Boot on instead: the drive then opens by "
+                            "itself safely, no PIN needed."))
+        p.section("Secure Boot", rows)
 
     def encryption_section(self, p, enc):
         def button(text, title, cmd, primary=False):

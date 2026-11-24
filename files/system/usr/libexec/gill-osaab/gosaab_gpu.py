@@ -24,10 +24,10 @@ def vendor_of(text):
     t = text.lower()
     if "nvidia" in t:
         return "nvidia"
-    if "amd" in t or "ati" in t or "advanced micro" in t:
-        return "amd"
-    if "intel" in t:
+    if "intel" in t:  # before "ati": "corporATIon"
         return "intel"
+    if re.search(r"\bamd\b|\bati\b|advanced micro", t):
+        return "amd"
     return "other"
 
 
