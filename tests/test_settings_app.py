@@ -274,6 +274,7 @@ if __name__ == "__main__":
     unittest.main()
 
 
+@unittest.skipUnless(HAVE_QT, "PySide6 not installed")
 class DepthSetting(unittest.TestCase):
     def test_writes_3ds_emulator_depth(self):
         import tempfile
