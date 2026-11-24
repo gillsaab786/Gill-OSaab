@@ -1,0 +1,12 @@
+[Unit]
+Description=Gill-OSaab: create your account on the first start after installing
+ConditionPathExists=/boot/gill-osaab-user.json
+After=local-fs.target systemd-sysusers.service
+Before=display-manager.service sddm.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/gill-osaab/gosaab-firstboot-user
+
+[Install]
+WantedBy=multi-user.target

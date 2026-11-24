@@ -5,8 +5,13 @@
   gosaab-drivers update CATEGORY[,CATEGORY] [--builtin]
                                                    e.g. "graphics" or "graphics,wi-fi"; --builtin also updates
                                                    the drivers built into the system (kernel, Mesa, firmware files)
-  gosaab-drivers auto                              (admin, at boot) record every part and its driver and install
-                                                   firmware/driver updates when automatic drivers are on
+  gosaab-drivers auto [--install]                  (admin) record every part and its driver; --install (on the
+                                                   update schedule, and at the very first start) installs
+                                                   firmware/driver updates
+  gosaab-drivers history                           driver changes that can be undone (JSON)
+  gosaab-drivers rollback ID                       undo one (previous firmware / graphics drivers / system)
+  gosaab-drivers search WORDS                      find any driver: on this device, built in, firmware files
+  gosaab-drivers index FILE                        (image build) describe every built-in driver for search
 """
 import json
 import os
@@ -50,15 +55,106 @@ def cmd_list(check):
     return 0
 
 
-def run_target(target, gl_refs):
+def device_versions():
+    if not shutil.which("fwupdmgr"):
+        return {}
+    out = subprocess.run(["fwupdmgr", "get-devices", "--json"], capture_output=True, text=True, check=False,
+                         timeout=120)
+    return drv.fwupd_device_versions(out.stdout)
+
+
+def flatpak_commit(ref, installation):
+    out = subprocess.run(["flatpak", "info", f"--{installation}", "--show-commit", ref], capture_output=True,
+                         text=True, check=False)
+    return out.stdout.strip()
+
+
+def install_firmware(dev_id, name, installer):
+    before = device_versions().get(dev_id, "")
+    rc = installer()
+    after = device_versions().get(dev_id, "")
+    if rc == 0 and before and after and before != after:
+        drv.add_history({"kind": "firmware", "name": f"{name} firmware", "target": dev_id, "from": before,
+                         "to": after})
+    return rc
+
+
+def update_graphics_apps(gl, extra=()):
+    before = {ref: flatpak_commit(ref, inst) for ref, inst in gl}
+    rc = 0
+    for inst in sorted({i for _, i in gl}):
+        refs = [r for r, i in gl if i == inst]
+        rc |= subprocess.run(["flatpak", "update", f"--{inst}", "-y", "--noninteractive", *extra, *refs],
+                             check=False).returncode
+    for ref, inst in gl:
+        after = flatpak_commit(ref, inst)
+        if before[ref] and after and before[ref] != after:
+            drv.add_history({"kind": "graphics-apps", "name": "Graphics drivers for apps and games (Mesa/Vulkan)",
+                             "target": ref, "installation": inst, "from": before[ref], "to": after})
+    return 0 if rc == 0 else FAILED
+
+
+def run_target(target, gl, names=None):
     if target == "gfx-apps":
-        rc = subprocess.run(["flatpak", "update", "-y", "--noninteractive", *gl_refs], check=False).returncode
-        return 0 if rc == 0 else FAILED
+        return update_graphics_apps(gl)
     if target.startswith("fw:"):
-        return as_root("firmware-device", target[3:])
+        dev = target[3:]
+        return install_firmware(dev, (names or {}).get(target, "Device"), lambda: as_root("firmware-device", dev))
     if target == "builtin":
-        return as_root("os")
+        v = drv.inventory().get("versions", {})
+        rc = as_root("os")
+        if rc == 0:
+            drv.add_history({"kind": "system", "name": "Built-in drivers (kernel, Mesa, firmware files)",
+                             "target": "system", "from": f"kernel {v.get('kernel')} · Mesa {v.get('mesa')}",
+                             "to": "after restart"})
+        return rc
     return NOT_AVAILABLE
+
+
+def cmd_rollback(entry_id):
+    entry = next((e for e in drv.load_history() if e.get("id") == entry_id), None)
+    if not entry:
+        print("no such change", file=sys.stderr)
+        return 2
+    progress = Progress(f"Undoing: {entry['name']}", app="gosaab-settings").start("Going back")
+    if entry["kind"] == "firmware":
+        rc = install_firmware(entry["target"], entry["name"].replace(" firmware", ""),
+                              lambda: as_root("firmware-version", entry["target"], entry["from"]))
+    elif entry["kind"] == "graphics-apps":
+        inst = entry.get("installation", "system")
+        rc = update_graphics_apps([(entry["target"], inst)], extra=[f"--commit={entry['from']}"])
+    elif entry["kind"] == "system":
+        rc = as_root("rollback")
+    else:
+        rc = NOT_AVAILABLE
+    progress.update(percent=100)
+    progress.finish(rc == 0, "Back to the previous version." + (" Restart to finish." if entry["kind"] == "system"
+                                                                 else "") if rc == 0 else "Couldn't go back.")
+    return 0 if rc == 0 else FAILED
+
+
+def cmd_search(query):
+    inv = drv.load_state() or drv.inventory()
+    try:
+        modules = json.loads(drv.INDEX.read_text()).get(os.uname().release) or {}
+    except (OSError, ValueError):
+        modules = {}
+    if not modules:
+        modules = drv.kernel_modules(f"/usr/lib/modules/{os.uname().release}")
+    loaded = {ln.split()[0] for ln in drv.gosaab_hw.read("/proc/modules").splitlines() if ln}
+    print(json.dumps(drv.search(query, inv, modules, loaded, updates=inv.get("updates", []))))
+    return 0
+
+
+def cmd_index(out):
+    index = {}
+    for kdir in sorted(Path("/usr/lib/modules").iterdir()):
+        if (kdir / "kernel").is_dir():
+            index[kdir.name] = drv.build_index(kdir / "kernel")
+    Path(out).parent.mkdir(parents=True, exist_ok=True)
+    Path(out).write_text(json.dumps(index))
+    print(f"indexed {sum(len(v) for v in index.values())} drivers")
+    return 0
 
 
 def cmd_update(keys, builtin):
@@ -68,8 +164,10 @@ def cmd_update(keys, builtin):
         return 2
     title = "Updating " + (", ".join(cats) if cats else "built-in") + " drivers"
     progress = Progress(title, app="gosaab-settings").start("Checking for updates")
-    gl = drv.flatpak_gl_refs()
-    targets = drv.targets_for(cats, drv.fwupd_updates(fwupd_json()), builtin, bool(gl))
+    gl = drv.flatpak_gl()
+    ups = drv.fwupd_updates(fwupd_json())
+    names = {u["id"]: u["name"] for u in ups}
+    targets = drv.targets_for(cats, ups, builtin, bool(gl))
     if not targets:
         progress.finish(True, "Already up to date.")
         return UP_TO_DATE
@@ -77,7 +175,7 @@ def cmd_update(keys, builtin):
     for i, t in enumerate(targets):
         progress.update(percent=i * 100 // len(targets), message=t)
         log("drivers", f"update {t}")
-        results[t] = run_target(t, gl)
+        results[t] = run_target(t, gl, names)
     failed = [t for t, rc in results.items() if rc not in (0, UP_TO_DATE, NOT_AVAILABLE)]
     progress.update(percent=100)
     restart = results.get("builtin") == 0
@@ -94,19 +192,26 @@ def on_ac_power(root=Path("/sys/class/power_supply")):
                for s in supplies)
 
 
-def cmd_auto():
-    """Boot-time (admin): record the device, then fetch what can be installed on its own."""
+def cmd_auto(install):
+    """(admin) Record the device; install firmware/driver updates when asked (the update schedule) or at
+    the very first start, unless updates are set to Never."""
+    first = not drv.STATE_FILE.exists()
     inv = drv.inventory()
     done, skipped = [], []
-    if is_on(read_conf(ETC / "features.conf"), "auto_drivers", default=True):
+    updates_conf = read_conf(ETC / "updates.conf")
+    allowed = is_on(read_conf(ETC / "features.conf"), "auto_drivers", default=True) and \
+        is_on(updates_conf, "all", default=True) and updates_conf.get("frequency") != "never"
+    if allowed and (install or first):
         if shutil.which("fwupdmgr"):
             subprocess.run(["fwupdmgr", "refresh", "--force"], capture_output=True, check=False, timeout=300)
             for u in drv.fwupd_updates(fwupd_json()):
                 if not on_ac_power():
                     skipped.append(f"{u['name']} firmware {u['to']} (waiting for the charger)")
                     continue
-                rc = subprocess.run(["fwupdmgr", "update", u["id"][3:], "--assume-yes", "--no-reboot-check"],
-                                    capture_output=True, check=False, timeout=1800).returncode
+                dev = u["id"][3:]
+                rc = install_firmware(dev, u["name"], lambda d=dev: subprocess.run(
+                    ["fwupdmgr", "update", d, "--assume-yes", "--no-reboot-check"], capture_output=True,
+                    check=False, timeout=1800).returncode)
                 if rc == 0:
                     done.append(f"{u['name']} firmware {u['to']}")
                 else:
@@ -114,10 +219,10 @@ def cmd_auto():
                         "kind": "update-failed", "category": u["category"], "name": u["name"],
                         "detail": f"Firmware {u['to']} for {u['name']} failed to install.",
                         "hint": "Try again from Settings > Device & Drivers."})
-        gl = drv.flatpak_gl_refs()
+        gl = [(r, i) for r, i in drv.flatpak_gl() if i == "system"]
         if gl:
-            subprocess.run(["flatpak", "update", "--system", "-y", "--noninteractive", *gl], capture_output=True,
-                           check=False, timeout=1800)
+            update_graphics_apps(gl)
+    inv["updates"] = drv.fwupd_updates(fwupd_json()) if shutil.which("fwupdmgr") else []
     inv["installed"], inv["waiting"] = done, skipped
     drv.STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
     tmp = drv.STATE_FILE.with_suffix(".tmp")
@@ -141,7 +246,16 @@ def main(argv):
         if os.geteuid() != 0:
             print("auto runs as admin at boot (gosaab-drivers.service)", file=sys.stderr)
             return 2
-        return cmd_auto()
+        return cmd_auto("--install" in argv)
+    if argv[0] == "history":
+        print(json.dumps(drv.load_history()))
+        return 0
+    if argv[0] == "rollback" and len(argv) == 2:
+        return cmd_rollback(argv[1])
+    if argv[0] == "search" and len(argv) >= 2:
+        return cmd_search(" ".join(argv[1:]))
+    if argv[0] == "index" and len(argv) == 2:
+        return cmd_index(argv[1])
     print(__doc__.strip(), file=sys.stderr)
     return 2
 

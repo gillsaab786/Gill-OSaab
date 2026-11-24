@@ -40,6 +40,8 @@ for unit in cups.socket ipp-usb.service fwupd-refresh.timer; do systemctl enable
 
 # Button/combo shortcuts (handheld buttons, Windows+R -> Game Mode) in both sessions
 systemctl enable gosaab-hotkeyd.service || log "warning: shortcut service not enabled"
+# After "Install on this PC (encrypted)": your account is created on the first start
+systemctl enable gosaab-firstboot-user.service || log "warning: first-boot account service not enabled"
 
 # Firewall: nothing on this PC is reachable from the network unless allowed. Allowed: finding printers
 # and other devices (mDNS), Steam Remote Play/LAN game downloads; Android (Waydroid) gets its own

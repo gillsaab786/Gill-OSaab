@@ -80,10 +80,18 @@ def encrypted_root():
     return "crypt" in out
 
 
+def encryption():
+    try:
+        return json.loads(subprocess.run(["gosaab-encryption", "status"], capture_output=True, text=True,
+                                         check=False).stdout)
+    except (OSError, ValueError):
+        return {"encrypted": False}
+
+
 def main():
     data = {"weak_password_users": weak_password_users(),
             "ssh": unit_state("sshd.service"), "firewall": unit_state("firewalld.service"),
-            "secure_boot": secure_boot(), "encrypted": encrypted_root(),
+            "secure_boot": secure_boot(), "encrypted": encrypted_root(), "encryption": encryption(),
             "auto_reboot_updates": unit_state("bootc-fetch-apply-updates.timer")["enabled"]}
     OUT.parent.mkdir(parents=True, exist_ok=True)
     tmp = OUT.with_suffix(".tmp")

@@ -3,14 +3,19 @@
 Pure parsing lives here (tested); gosaab-drivers is the command that runs it.
 """
 import json
+import os
 import re
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 import gosaab_hw
 
 STATE_FILE = Path("/var/lib/gill-osaab/drivers.json")
+HISTORY_SYSTEM = Path("/var/lib/gill-osaab/driver-history.json")
+HISTORY_USER = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "gill-osaab" / "driver-history.json"
+INDEX = Path("/usr/share/gill-osaab/driver-index.json")
 
 CATEGORIES = ["Graphics", "Wi-Fi", "Ethernet", "Bluetooth", "Audio", "Storage", "USB & Thunderbolt",
               "Input & Touch", "Camera", "Controllers & accessories", "Sensors"]
@@ -203,18 +208,140 @@ def targets_for(categories, fw_updates, builtin=False, have_flatpak_gl=False):
     return t
 
 
-def flatpak_gl_refs(runner=subprocess.run):
-    """Mesa/Vulkan drivers Flatpak apps and emulators use (updated separately from the system)."""
+def flatpak_gl(runner=subprocess.run):
+    """Mesa/Vulkan drivers Flatpak apps and emulators use (updated separately from the system):
+    [(ref, installation)]"""
     if not shutil.which("flatpak"):
         return []
-    out = runner(["flatpak", "list", "--runtime", "--columns=application,branch"], capture_output=True,
-                 text=True, check=False).stdout
+    out = runner(["flatpak", "list", "--runtime", "--columns=application,branch,installation"],
+                 capture_output=True, text=True, check=False).stdout
     refs = []
     for line in out.splitlines():
         cols = line.split("\t")
         if cols and cols[0].startswith("org.freedesktop.Platform.GL"):
-            refs.append(f"{cols[0]}//{cols[1]}" if len(cols) > 1 and cols[1] else cols[0])
+            ref = f"{cols[0]}//{cols[1]}" if len(cols) > 1 and cols[1] else cols[0]
+            refs.append((ref, cols[2] if len(cols) > 2 and cols[2] in ("system", "user") else "system"))
     return refs
+
+
+def flatpak_gl_refs(runner=subprocess.run):
+    return [ref for ref, _ in flatpak_gl(runner)]
+
+
+# ------------------------------------------------------------------ history (for rollback)
+def load_history(paths=None):
+    entries = []
+    for p in paths or (HISTORY_SYSTEM, HISTORY_USER):
+        try:
+            entries += json.loads(Path(p).read_text())
+        except (OSError, ValueError):
+            continue
+    return sorted(entries, key=lambda e: -e.get("time", 0))
+
+
+def add_history(entry, path=None):
+    """Remember a driver change so it can be undone. Keeps the newest 100."""
+    path = Path(path or (HISTORY_SYSTEM if os.geteuid() == 0 else HISTORY_USER))
+    try:
+        entries = json.loads(path.read_text())
+    except (OSError, ValueError):
+        entries = []
+    now = entry.get("time") or time.time()
+    entry = {**entry, "time": now, "id": entry.get("id") or f"{int(now * 1000)}-{len(entries)}"}
+    entries = ([entry] + entries)[:100]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(entries, indent=1))
+    os.chmod(tmp, 0o644)
+    os.replace(tmp, path)
+    return entry
+
+
+def fwupd_device_versions(json_text):
+    """DeviceId -> current version (from fwupdmgr get-devices --json)."""
+    try:
+        return {d.get("DeviceId", ""): d.get("Version", "") for d in json.loads(json_text or "{}").get("Devices", [])}
+    except ValueError:
+        return {}
+
+
+# ------------------------------------------------------------------ search
+def _norm(text):
+    return re.sub(r"[-_\s]+", "", text.lower())
+
+
+def build_index(modules_root):
+    """{module: description} for every kernel driver (made when the image is built)."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    def describe(path):
+        out = subprocess.run(["modinfo", "-F", "description", str(path)], capture_output=True, text=True,
+                             check=False).stdout.strip()
+        return path.name.split(".ko")[0], out.splitlines()[0] if out else ""
+    with ThreadPoolExecutor(16) as pool:
+        return dict(pool.map(describe, sorted(Path(modules_root).rglob("*.ko*"))))
+
+
+def kernel_modules(modules_root):
+    return {p.name.split(".ko")[0]: "" for p in Path(modules_root).rglob("*.ko*")}
+
+
+# what people type -> how drivers describe themselves
+SYNONYMS = {
+    "wifi": ("wifi", "wireless", "wlan", "80211"), "wireless": ("wireless", "wifi", "wlan", "80211"),
+    "graphics": ("graphics", "gpu", "drm", "display", "video"), "gpu": ("gpu", "graphics", "drm"),
+    "sound": ("sound", "audio", "snd", "hda", "sof"), "audio": ("audio", "sound", "snd", "hda", "sof"),
+    "bluetooth": ("bluetooth", "btusb", "hci"), "touchscreen": ("touchscreen", "touch", "hid", "i2c"),
+    "camera": ("camera", "webcam", "uvc", "video", "ipu"), "webcam": ("webcam", "camera", "uvc"),
+    "controller": ("controller", "gamepad", "joystick", "xpad", "hid"), "gamepad": ("gamepad", "joystick", "xpad"),
+    "ethernet": ("ethernet", "lan", "r8169", "igc", "e1000"), "printer": ("printer", "usblp", "ipp"),
+    "fingerprint": ("fingerprint", "fprint"), "battery": ("battery", "power", "acpi"),
+}
+
+
+def search(query, inv, modules=None, loaded=(), firmware_root=Path("/usr/lib/firmware"), updates=(), limit=40):
+    """Find drivers by part name, driver name, maker or firmware file: on this device, built into the
+    system, firmware files and firmware updates."""
+    q = _norm(query)
+    if len(q) < 2:
+        return []
+    words = [_norm(w) for w in query.split() if w.strip()]
+
+    def hit(*fields):
+        hay = _norm(" ".join(f for f in fields if f))
+        return all(any(alt in hay for alt in SYNONYMS.get(w, (w,))) for w in words)
+    res = []
+    for p in inv.get("parts", []):
+        if hit(p["name"], p["driver"], p["category"]):
+            res.append({"type": "This device", "name": p["name"],
+                        "detail": f"{p['category']} · driver: {p['driver'] or 'none (missing)'}",
+                        "status": "in use" if p["driver"] else "missing"})
+    for u in updates:
+        if hit(u["name"], u["category"]):
+            res.append({"type": "Firmware update", "name": u["name"], "detail": f"{u['from']} → {u['to']}",
+                        "status": "update available"})
+    found = 0
+    for name, desc in sorted((modules or {}).items()):
+        if hit(name, desc):
+            res.append({"type": "Built-in driver", "name": name, "detail": desc or "Linux kernel driver",
+                        "status": "loaded" if name.replace("-", "_") in loaded else "available"})
+            found += 1
+            if found >= limit:
+                break
+    found = 0
+    if firmware_root and Path(firmware_root).is_dir():
+        for root, _dirs, files in os.walk(firmware_root):
+            for f in files:
+                rel = os.path.relpath(os.path.join(root, f), firmware_root)
+                if hit(rel):
+                    res.append({"type": "Firmware file", "name": rel.rsplit(".", 1)[0] if rel.endswith(
+                        (".xz", ".zst")) else rel, "detail": "included", "status": "available"})
+                    found += 1
+                    if found >= limit // 2:
+                        break
+            if found >= limit // 2:
+                break
+    return res
 
 
 # ------------------------------------------------------------------ collecting

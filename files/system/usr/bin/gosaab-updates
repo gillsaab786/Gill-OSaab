@@ -54,7 +54,7 @@ def main(argv):
         return 0
     if argv[0] == "now":
         elevate(argv)
-        return subprocess.run(["systemctl", "start", "--wait", "gosaab-update.service"], check=False).returncode
+        return subprocess.run(["/usr/libexec/gill-osaab/gosaab-update-run", "--force"], check=False).returncode
     if len(argv) != 2 or argv[0] not in TARGETS or argv[1] not in ("on", "off"):
         print(__doc__.strip(), file=sys.stderr)
         return 2

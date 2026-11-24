@@ -1,0 +1,211 @@
+#!/usr/bin/python3
+"""Install Gill-OSaab on this PC's own drive, encrypted.
+
+  gosaab-install                       guided install (asks which drive, then for a password)
+  gosaab-install --list                drives you can install to (JSON)
+  gosaab-install DISK [--no-encrypt] [--dry-run] [--yes]
+
+The whole system drive is encrypted (LUKS2). It unlocks with this device's security chip (TPM2);
+after the first start you add a start-up PIN and a recovery key (Settings > Apps & Security), so
+someone who takes the drive or the device can't read your files.
+Everything on DISK is erased.
+"""
+import ctypes
+import getpass
+import json
+import os
+import pwd
+import re
+import subprocess
+import sys
+import tempfile
+
+MIN_BYTES = 30 * 10 ** 9
+USER_FILE = "gill-osaab-user.json"  # read once on the first start, then deleted
+
+
+def sh(cmd, dry=False, **kw):
+    print("+ " + " ".join(cmd), flush=True)
+    if dry:
+        return 0
+    return subprocess.run(cmd, check=False, **kw).returncode
+
+
+def out(cmd):
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, check=False).stdout.strip()
+    except OSError:
+        return ""
+
+
+# ------------------------------------------------------------------ drives
+def boot_disk():
+    """The drive Gill-OSaab is running from right now (never offered)."""
+    src = out(["findmnt", "-no", "SOURCE", "/sysroot"]) or out(["findmnt", "-no", "SOURCE", "/"])
+    src = src.split("[")[0]
+    if not src:
+        return ""
+    if src.startswith("/dev/mapper/"):
+        status = out(["cryptsetup", "status", src])
+        m = re.search(r"device:\s+(\S+)", status)
+        src = m.group(1) if m else src
+    parent = out(["lsblk", "-no", "PKNAME", src]).splitlines()
+    return "/dev/" + parent[0] if parent and parent[0] else src
+
+
+def candidate_disks(lsblk_json, booted):
+    try:
+        devs = json.loads(lsblk_json).get("blockdevices", [])
+    except ValueError:
+        return []
+    disks = []
+    for d in devs:
+        path = d.get("path") or "/dev/" + d.get("name", "")
+        if d.get("type") != "disk" or re.match(r"/dev/(loop|zram|sr|ram)", path) or path == booted:
+            continue
+        size = int(d.get("size") or 0)
+        disks.append({"path": path, "size": size, "model": (d.get("model") or "").strip(),
+                      "transport": d.get("tran") or "", "removable": bool(int(d.get("rm") or 0)),
+                      "big_enough": size >= MIN_BYTES})
+    return disks
+
+
+def list_disks():
+    return candidate_disks(out(["lsblk", "-J", "-b", "-d", "-o", "NAME,PATH,SIZE,MODEL,TRAN,RM,TYPE"]), boot_disk())
+
+
+def has_tpm():
+    return os.path.exists("/dev/tpmrm0") or os.path.exists("/sys/class/tpm/tpm0")
+
+
+# ------------------------------------------------------------------ the account to carry over
+def hash_password(password):
+    lib = ctypes.CDLL("libcrypt.so.2")
+    lib.crypt_gensalt.restype = ctypes.c_char_p
+    lib.crypt_gensalt.argtypes = [ctypes.c_char_p, ctypes.c_ulong, ctypes.c_char_p, ctypes.c_int]
+    lib.crypt.restype = ctypes.c_char_p
+    lib.crypt.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
+    salt = lib.crypt_gensalt(b"$y$", 0, None, 0)
+    return lib.crypt(password.encode(), salt).decode()
+
+
+def account_record(name, password_hash):
+    if not re.fullmatch(r"[a-z_][a-z0-9_-]{0,31}", name) or not password_hash.startswith("$"):
+        raise ValueError("bad account")
+    try:
+        gecos = pwd.getpwnam(name).pw_gecos.split(",")[0]
+    except KeyError:
+        gecos = name
+    return {"name": name, "hash": password_hash, "full_name": gecos}
+
+
+def image_ref():
+    try:
+        st = json.loads(out(["bootc", "status", "--json"]))
+        return st["status"]["booted"]["image"]["image"]["image"]
+    except (ValueError, KeyError, TypeError):
+        return "ghcr.io/gillsaab786/gill-osaab-core:latest"
+
+
+def install_command(image, disk, encrypt):
+    cmd = ["podman", "run", "--rm", "--privileged", "--pid=host", "-v", "/dev:/dev",
+           "-v", "/var/lib/containers:/var/lib/containers", "--security-opt", "label=type:unconfined_t",
+           image, "bootc", "install", "to-disk", "--wipe", "--filesystem", "btrfs"]
+    if encrypt:
+        cmd += ["--block-setup", "tpm2-luks"]
+    return cmd + [disk]
+
+
+def write_account(disk, record, dry=False):
+    """Put the account where the new system finds it on its first start (the unencrypted /boot, briefly)."""
+    if dry:
+        print(f"+ write /boot/{USER_FILE} on {disk} for {record['name']}")
+        return 0
+    sh(["udevadm", "settle"])
+    parts = out(["lsblk", "-lno", "PATH,LABEL", disk]).splitlines()
+    boot = next((p.split()[0] for p in parts if p.split()[1:] == ["boot"]), "")
+    if not boot:
+        print("couldn't find the new /boot partition", file=sys.stderr)
+        return 1
+    with tempfile.TemporaryDirectory() as mnt:
+        if sh(["mount", boot, mnt]) != 0:
+            return 1
+        try:
+            path = os.path.join(mnt, USER_FILE)
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w") as fh:
+                json.dump(record, fh)
+        finally:
+            sh(["umount", mnt])
+    return 0
+
+
+# ------------------------------------------------------------------ guided
+def ask_disk():
+    disks = [d for d in list_disks() if d["big_enough"]]
+    if not disks:
+        print("No drive big enough (30 GB or more) was found besides the one Gill-OSaab is running from.")
+        return ""
+    print("Drives you can install Gill-OSaab on (EVERYTHING ON IT WILL BE ERASED):\n")
+    for i, d in enumerate(disks, 1):
+        kind = "removable" if d["removable"] else (d["transport"] or "internal")
+        print(f"  {i}. {d['path']}  {d['size'] / 1e9:.0f} GB  {d['model']}  ({kind})")
+    choice = input("\nNumber of the drive (Enter to cancel): ").strip()
+    if not choice.isdigit() or not 1 <= int(choice) <= len(disks):
+        return ""
+    return disks[int(choice) - 1]["path"]
+
+
+def ask_password(user):
+    print(f"\nChoose the password for {user} on the installed system (at least 8 characters).")
+    while True:
+        p1 = getpass.getpass("Password: ")
+        if len(p1) < 8 or p1.lower() in ("gill", "password", "12345678", user):
+            print("Too easy to guess – try another.")
+            continue
+        if getpass.getpass("Again: ") == p1:
+            return p1
+        print("They didn't match.")
+
+
+def main(argv):
+    if argv and argv[0] in ("-h", "--help"):
+        print(__doc__.strip())
+        return 0
+    if argv and argv[0] == "--list":
+        print(json.dumps(list_disks()))
+        return 0
+    dry, yes, encrypt = "--dry-run" in argv, "--yes" in argv, "--no-encrypt" not in argv
+    disk = next((a for a in argv if a.startswith("/dev/")), "")
+    if os.geteuid() != 0 and not dry:
+        os.execvp("pkexec", ["pkexec", os.path.realpath(__file__), *argv])
+    if encrypt and not has_tpm() and not dry:
+        print("This device has no security chip (TPM2), which the encrypted install needs.\n"
+              "Turn on fTPM/PTT in the BIOS, or install without encryption: gosaab-install --no-encrypt")
+        return 3
+    if not disk:
+        disk = ask_disk()
+        if not disk:
+            return 1
+    if disk not in [d["path"] for d in list_disks()] and not dry:
+        print(f"{disk} can't be used (it's the drive Gill-OSaab is running from, or not a drive).")
+        return 2
+    user = os.environ.get("PKEXEC_UID") and pwd.getpwuid(int(os.environ["PKEXEC_UID"])).pw_name or \
+        os.environ.get("SUDO_USER") or "gill"
+    if not yes:
+        if input(f"\nErase {disk} and install Gill-OSaab{' (encrypted)' if encrypt else ''}? Type YES: ") != "YES":
+            return 1
+    record = account_record(user, "$y$dry$run" if dry else hash_password(ask_password(user)))
+    rc = sh(install_command(image_ref(), disk, encrypt), dry)
+    if rc != 0:
+        print("\nThe install failed; nothing else was changed. See Settings > Problems.")
+        return 1
+    if write_account(disk, record, dry) != 0:
+        return 1
+    print("\nDone. Remove the USB stick and restart. After signing in, open Settings > Apps & Security and "
+          "add a start-up PIN and a recovery key.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

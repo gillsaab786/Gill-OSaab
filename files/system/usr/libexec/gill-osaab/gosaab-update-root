@@ -3,6 +3,7 @@
 
   gosaab-update-root <os|firmware|bios|android|decky|nvidia|rollback>
   gosaab-update-root firmware-device <fwupd device id>   one part's firmware only
+  gosaab-update-root firmware-version <device id> <version>   put an earlier firmware version back
 
 Exit codes: 0 updated, 3 not available on this device, 4 already up to date, 1 failed.
 """
@@ -72,6 +73,17 @@ def bootc_or_ostree(ostree_args, bootc_args):
 
 
 def main(argv):
+    if len(argv) == 3 and argv[0] == "firmware-version":  # go back to an earlier firmware version
+        if not re.fullmatch(r"[0-9a-f]{40}", argv[1]) or not re.fullmatch(r"[0-9A-Za-z][0-9A-Za-z._-]{0,39}", argv[2]):
+            return 2
+        if not shutil.which("fwupdmgr"):
+            return NOT_AVAILABLE
+        run(["fwupdmgr", "refresh"])
+        rc = run(["fwupdmgr", "install", argv[1], argv[2], "--allow-older", "--allow-reinstall", "--assume-yes",
+                  "--no-reboot-check"])
+        if rc not in (0, 2):  # older fwupd: pick the downgrade instead
+            rc = run(["fwupdmgr", "downgrade", argv[1], "--assume-yes", "--no-reboot-check"])
+        return 0 if rc == 0 else FAILED
     if len(argv) == 2 and argv[0] == "firmware-device":
         if not re.fullmatch(r"[0-9a-f]{40}", argv[1]):  # fwupd device ids only; nothing else reaches fwupdmgr
             return 2

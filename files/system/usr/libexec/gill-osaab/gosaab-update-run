@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
 """Runs the updates that are switched on in /etc/gill-osaab/updates.conf.
 
-Called daily by gosaab-update.timer, or now with:  gosaab-updates now
+Called daily by gosaab-update.timer; does nothing until the chosen interval (frequency=) has passed.
+  frequency = daily | weekly | 2weeks | monthly | 2months | 3months | 6months | yearly | never
+  scope     = everything | drivers        (drivers: only driver and device firmware updates)
+Run now, whatever the schedule:  gosaab-updates now   (or gosaab-update-run --force)
 """
 import os
 import pwd
 import shutil
 import subprocess
 import sys
+import time
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 from gosaab_common import ETC, is_on, log, read_conf  # noqa: E402
@@ -22,10 +27,35 @@ def human_users():
     return users
 
 
+DAY = 86400
+INTERVALS = {"daily": 1, "weekly": 7, "2weeks": 14, "monthly": 30, "2months": 61, "3months": 91,
+             "6months": 182, "yearly": 365}
+LAST_RUN = Path("/var/lib/gill-osaab/last-auto-update")
+DRIVERS_STEP = ["gosaab-drivers", "auto", "--install"]
+
+
+def is_due(conf, last, now):
+    """Has the chosen interval passed since the last automatic update?"""
+    freq = conf.get("frequency", "daily")
+    if freq == "never" or not is_on(conf, "all", default=True):
+        return False
+    days = INTERVALS.get(freq, 1)
+    return last is None or now - last >= days * DAY - 3600  # an hour early is fine (timer jitter)
+
+
+def last_run(path=LAST_RUN):
+    try:
+        return float(path.read_text().strip())
+    except (OSError, ValueError):
+        return None
+
+
 def plan_updates(conf, which=shutil.which, users=None):
     """Return the list of commands to run for the current switches."""
-    if not is_on(conf, "all", default=True):
+    if not is_on(conf, "all", default=True) or conf.get("frequency") == "never":
         return []
+    if conf.get("scope") == "drivers":
+        return [DRIVERS_STEP] if which("gosaab-drivers") else []
     users = human_users() if users is None else users
     steps = []
     if is_on(conf, "os", default=True):
@@ -40,12 +70,17 @@ def plan_updates(conf, which=shutil.which, users=None):
     if is_on(conf, "containers", default=True) and which("distrobox"):
         for user in users:
             steps.append(["runuser", "-u", user, "--", "distrobox", "upgrade", "--all"])
+    if which("gosaab-drivers") and is_on(read_conf(ETC / "features.conf"), "auto_drivers", default=True):
+        steps.append(DRIVERS_STEP)
     return steps
 
 
-def main():
+def main(argv=()):
     conf = read_conf(ETC / "updates.conf")
-    steps = plan_updates(conf)
+    if "--force" not in argv and not is_due(conf, last_run(), time.time()):
+        log("updates", f"not due yet (frequency={conf.get('frequency', 'daily')})")
+        return 0
+    steps = plan_updates({**conf, "frequency": "daily"} if "--force" in argv else conf)
     if not steps:
         log("updates", "all updates switched off; nothing to do")
         print("Gill-OSaab: updates are switched off.")
@@ -57,8 +92,13 @@ def main():
         if result.returncode != 0:
             failed += 1
             log("updates", f"failed ({result.returncode}): " + " ".join(cmd))
+    try:
+        LAST_RUN.parent.mkdir(parents=True, exist_ok=True)
+        LAST_RUN.write_text(str(time.time()))
+    except OSError:
+        pass
     return 1 if failed else 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

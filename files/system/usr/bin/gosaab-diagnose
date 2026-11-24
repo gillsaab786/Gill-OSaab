@@ -131,6 +131,17 @@ def security_problems(sec, user=None):
         out.append({"kind": "security", "title": "Remote login (SSH) is on",
                     "detail": "Other devices on the network can try to sign in. Turn it off if you don't use it: "
                               "sudo systemctl disable --now sshd", "source": "security", "time": now, "state": True})
+    enc = sec.get("encryption", {})
+    if enc.get("encrypted") and enc.get("tpm") and not enc.get("pin"):
+        out.append({"kind": "security", "title": "Add a start-up PIN",
+                    "detail": "Your drive is encrypted but unlocks by itself when the device starts. Add a PIN so "
+                              "a stolen device stays locked: Settings > Apps & Security > Start-up PIN.",
+                    "source": "security", "time": now, "state": True})
+    if enc.get("encrypted") and not enc.get("recovery"):
+        out.append({"kind": "security", "title": "Create a recovery key",
+                    "detail": "Without one, a forgotten PIN or a BIOS update can lock you out of your files: "
+                              "Settings > Apps & Security > Recovery key.", "source": "security", "time": now,
+                    "state": True})
     if sec.get("firewall") and not sec["firewall"].get("active"):
         out.append({"kind": "security", "title": "Firewall is off",
                     "detail": "Turn it on: sudo systemctl enable --now firewalld", "source": "security",

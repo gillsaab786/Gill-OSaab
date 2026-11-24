@@ -16,7 +16,10 @@ ONOFF = ("on", "off")
 OPTIONAL = ("phone_link", "shared_game_library", "vpn", "cloud_drives", "night_light", "auto_dark_mode_sunset",
             "vrr", "suspend_then_hibernate", "undervolt", "smart_updates", "pause_downloads_while_gaming")
 ALLOWED = {
-    "updates.conf": {k: ONOFF for k in ("all", "os", "apps", "containers")},
+    "updates.conf": {**{k: ONOFF for k in ("all", "os", "apps", "containers")},
+                     "frequency": ("daily", "weekly", "2weeks", "monthly", "2months", "3months", "6months",
+                                   "yearly", "never"),
+                     "scope": ("everything", "drivers")},
     "features.conf": {
         "sandbox_windows_apps": ONOFF,
         "screen_off_overnight": ONOFF,

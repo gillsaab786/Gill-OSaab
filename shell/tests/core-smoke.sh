@@ -91,6 +91,20 @@ check "problem report can be copied (personal details removed)" "grep -q 'Gill-O
 check "button shortcuts: Windows+R switches Game Mode/Desktop" "grep -q '^META+R = mode' /etc/gill-osaab/hotkeys.conf"
 check "button shortcuts: add your own" "HOME=/tmp/hk gosaab-hotkeys set BTN_MODE+BTN_SOUTH app:steam && HOME=/tmp/hk gosaab-hotkeys list | grep -q 'Home button + A'"
 check "button shortcuts: typing keys refused" "! HOME=/tmp/hk gosaab-hotkeys set R mode 2>/dev/null"
+# update schedule, driver search and rollback, encrypted install
+check "update schedule: every 3 months / never / drivers only" "gosaab-config set updates.conf frequency 3months && gosaab-config set updates.conf scope drivers && ! gosaab-config set updates.conf frequency fortnightly 2>/dev/null"
+mkdir -p /var/lib/gill-osaab && date +%s > /var/lib/gill-osaab/last-auto-update
+check "nothing updates before the chosen time" "timeout 20 /usr/libexec/gill-osaab/gosaab-update-run && grep -q 'not due' /root/.local/state/gill-osaab/updates.log"
+gosaab-config set updates.conf frequency daily; gosaab-config set updates.conf scope everything
+check "driver search index built ($(python3 -c 'import json;print(sum(len(v) for v in json.load(open("/usr/share/gill-osaab/driver-index.json")).values()))' 2>/dev/null) drivers)" "[ -s /usr/share/gill-osaab/driver-index.json ]"
+gosaab-drivers search realtek wifi > /tmp/search.json; echo "search 'realtek wifi': $(python3 -c 'import json;r=json.load(open("/tmp/search.json"));print(len(r), [x["name"] for x in r[:5]])')"
+check "search any driver (e.g. Realtek Wi-Fi)" "grep -q 'Built-in driver' /tmp/search.json"
+check "driver changes listed for rollback" "gosaab-drivers history | python3 -c 'import json,sys;assert isinstance(json.load(sys.stdin),list)'"
+check "encryption status" "gosaab-encryption status | grep -q '\"encrypted\": false'"
+check "installer lists drives (JSON)" "gosaab-install --list | python3 -c 'import json,sys;json.load(sys.stdin)'"
+gosaab-install /dev/nvme9n9 --dry-run --yes > /tmp/install.txt 2>&1; grep '^+' /tmp/install.txt | head -3
+check "encrypted install: whole drive LUKS2 + security chip" "grep -q 'bootc install to-disk --wipe --filesystem btrfs --block-setup tpm2-luks /dev/nvme9n9' /tmp/install.txt"
+check "first start after install creates your account" "systemctl is-enabled gosaab-firstboot-user.service >/dev/null 2>&1"
 timeout 3 /usr/libexec/gill-osaab/gosaab-hotkeyd; rc=$?
 check "shortcut service starts (Desktop and Game Mode)" "[ $rc -eq 124 ]"
 

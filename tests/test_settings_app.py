@@ -169,6 +169,17 @@ class FakeBackend:
     def security(self):
         return getattr(self, "sec", {})
 
+    def last_update_text(self):
+        return "Not yet"
+
+    def search_drivers(self, query):
+        self.searched = query
+        return [{"type": "Built-in driver", "name": "rtw89_8852be", "detail": "Realtek 802.11ax", "status": "available"}]
+
+    def driver_history(self):
+        return [{"id": "1-0", "kind": "graphics-apps", "name": "Graphics drivers for apps", "time": 1,
+                 "from": "abc", "to": "def"}]
+
     def desktop_apps(self):
         return [("steam", "Steam"), ("vlc", "VLC")]
 
@@ -372,3 +383,51 @@ class NewPages(unittest.TestCase):
         b = FakeBackend()
         b.sec = {"weak_password_users": [os.environ.get("USER", "")], "firewall": {"active": True}}
         self.gs.Settings(b)  # builds with the red password row
+
+    def test_encryption_actions(self):
+        b = FakeBackend()
+        w = self.gs.Settings(b)  # not encrypted: offers the encrypted install
+        install = [x for x in w.findChildren(self.gs.QPushButton) if x.text() == "Install…"][0]
+        install.click()
+        self.assertTrue(any("gosaab-install" in " ".join(c) for c in b.calls if isinstance(c, tuple)))
+        b.sec = {"encryption": {"encrypted": True, "tpm": True, "pin": False, "recovery": False}}
+        w = self.gs.Settings(b)
+        names = [x.text() for x in w.findChildren(self.gs.QPushButton)]
+        self.assertIn("Add PIN…", names)
+        self.assertIn("Create…", names)
+
+
+@unittest.skipUnless(HAVE_QT, "PySide6 not installed")
+class Schedule(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        from PySide6.QtWidgets import QApplication, QMessageBox
+        cls.gs = load("usr/bin/gosaab-settings")
+        cls.app = QApplication.instance() or QApplication([])
+        QMessageBox.warning = staticmethod(lambda *a, **k: None)
+
+    def test_frequency_and_drivers_only(self):
+        b = FakeBackend()
+        w = self.gs.Settings(b)
+        w.freq_pick.setCurrentIndex([w.freq_pick.itemData(i) for i in range(w.freq_pick.count())].index("3months"))
+        w.scope_pick.setCurrentIndex(1)
+        self.assertIn(("set", "updates.conf", "frequency", "3months"), b.calls)
+        self.assertIn(("set", "updates.conf", "scope", "drivers"), b.calls)
+        self.assertIn("never", [w.freq_pick.itemData(i) for i in range(w.freq_pick.count())])
+
+    def test_failed_save_reverts_choice(self):
+        b = FakeBackend(ok=False)
+        w = self.gs.Settings(b)
+        w.freq_pick.setCurrentIndex(8)
+        self.assertEqual(w.freq_pick.currentData(), "daily")
+
+    def test_driver_search_and_undo(self):
+        b = FakeBackend()
+        w = self.gs.Settings(b)
+        w.driver_query.setText("realtek")
+        self.assertEqual(b.searched, "realtek")
+        self.assertEqual(w.driver_results_lay.count(), 1)
+        w.update_buttons.get("undo-1-0") or None
+        undo = [x for x in w.findChildren(self.gs.UpdateButton) if x.part == "undo-1-0"][0]
+        undo.start()
+        self.assertIn(("async", "gosaab-drivers", "rollback", "1-0"), b.calls)

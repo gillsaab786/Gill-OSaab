@@ -22,6 +22,9 @@ from PySide6.QtWidgets import (QAbstractButton, QApplication, QButtonGroup, QCom
 ACCENT = QColor(31, 182, 201)
 VERSION_FILE = Path("/usr/share/gill-osaab/version")
 UPDATER = "gosaab-update-component"
+FREQUENCIES = [("daily", "Every day"), ("weekly", "Every week"), ("2weeks", "Every 2 weeks"),
+               ("monthly", "Every month"), ("2months", "Every 2 months"), ("3months", "Every 3 months"),
+               ("6months", "Every 6 months"), ("yearly", "Once a year"), ("never", "Never")]
 RESULT_TEXT = {0: "Updated", 4: "Up to date", 3: "Not available", 1: "Failed – retry"}
 
 
@@ -297,6 +300,20 @@ class Backend:
 
     def remove_hotkey(self, combo):
         return subprocess.run(["gosaab-hotkeys", "remove", combo], check=False).returncode == 0
+
+    def last_update_text(self):
+        import time as _t
+        try:
+            ts = float(Path("/var/lib/gill-osaab/last-auto-update").read_text().strip())
+            return _t.strftime("%-d %B %Y", _t.localtime(ts))
+        except (OSError, ValueError):
+            return "Not yet"
+
+    def search_drivers(self, query):
+        return self._json(["gosaab-drivers", "search", query], [], 30)
+
+    def driver_history(self):
+        return self._json(["gosaab-drivers", "history"], [])
 
     def security(self):
         try:
@@ -746,6 +763,25 @@ class Settings(QMainWindow):
                 sw.set_quiet(is_on(confs[filename], key, default))
         self.update_master_state()
 
+    def choice(self, filename, key, current, options):
+        """A drop-down that saves straight to a Gill-OSaab setting (reverts if saving isn't allowed)."""
+        box = QComboBox()
+        for value, label in options:
+            box.addItem(label, value)
+        values = [v for v, _ in options]
+        box.setCurrentIndex(values.index(current) if current in values else 0)
+        box.last = box.currentIndex()
+
+        def changed(i):
+            if self.backend.set_value(filename, key, box.itemData(i)):
+                box.last = i
+            else:
+                box.blockSignals(True)
+                box.setCurrentIndex(box.last)
+                box.blockSignals(False)
+        box.currentIndexChanged.connect(changed)
+        return box
+
     def update_master_state(self):
         master = self.switches.get(("updates.conf", "all"))
         if not master:
@@ -789,6 +825,17 @@ class Settings(QMainWindow):
         p.section("Something broke after an update?", [
             Row("Go back to the previous version", "The system before the last update comes back after a "
                 "restart. Your files and apps aren't touched.", self.update_button("rollback", "Go back"))])
+        conf = self.backend.updates()
+        self.freq_pick = self.choice("updates.conf", "frequency", conf.get("frequency", "daily"), FREQUENCIES)
+        self.scope_pick = self.choice("updates.conf", "scope", conf.get("scope", "everything"),
+                                      [("everything", "Everything below"), ("drivers", "Only drivers and firmware")])
+        p.section("When to update", [
+            Row("How often", "Updates wait until this much time has passed since the last one. Never: nothing "
+                "updates by itself (you can still press Update).", self.freq_pick),
+            Row("What to update", "Only drivers: device firmware and the graphics drivers for apps; the system and "
+                "apps stay as they are.", self.scope_pick),
+            Row("Last automatic update", self.backend.last_update_text()),
+        ])
         p.section("Automatic updates", [
             Row("All updates", "Master switch. Off stops every automatic update below.",
                 self.switch("updates.conf", "all")),
@@ -978,6 +1025,7 @@ class Settings(QMainWindow):
             info.append(Row("Graphics", f"{g['vendor']} {g['device']}", self.driver_label(g)))
         for n in hw.get("network", []):
             info.append(Row(n.get("kind", "Network"), f"{n['vendor']} {n['device']}", self.driver_label(n)))
+        self.driver_search_section(p)
         p.section("This device", info)
         parts = [Row(d["kind"], f"{d['vendor']} {d['device']}", self.driver_label(d)) for d in hw.get("parts", [])]
         parts += [Row("USB", name, QLabel("●  Connected")) for name in hw.get("usb", [])]
@@ -987,6 +1035,7 @@ class Settings(QMainWindow):
                       "as they are plugged in; firmware for them is checked automatically.")
 
         self.driver_section(p)
+        self.driver_history_section(p)
         actions = [
             Row("Device firmware", "Controllers, SSDs, docks and other parts that publish updates (LVFS).",
                 self.update_button("firmware")),
@@ -1015,8 +1064,64 @@ class Settings(QMainWindow):
         p.finish()
         return p
 
+    def driver_search_section(self, p):
+        box = QWidget()
+        bl = QVBoxLayout(box)
+        bl.setContentsMargins(0, 0, 0, 0)
+        self.driver_query = QLineEdit()
+        self.driver_query.setObjectName("search")
+        self.driver_query.setPlaceholderText("Search any driver: Wi-Fi, Realtek, amdgpu, touchscreen, firmware…")
+        self.driver_query.setClearButtonEnabled(True)
+        self.driver_query.returnPressed.connect(self.run_driver_search)
+        self.driver_query.textChanged.connect(lambda t: self.run_driver_search() if len(t.strip()) >= 3 or not t
+                                              else None)
+        bl.addWidget(self.driver_query)
+        self.driver_results = QWidget()
+        self.driver_results_lay = QVBoxLayout(self.driver_results)
+        self.driver_results_lay.setContentsMargins(0, 0, 0, 0)
+        bl.addWidget(self.driver_results)
+        p.lay.addWidget(box)
+
+    def run_driver_search(self):
+        while self.driver_results_lay.count():
+            w = self.driver_results_lay.takeAt(0).widget()
+            if w:
+                w.deleteLater()
+        q = self.driver_query.text().strip()
+        if len(q) < 2:
+            return
+        results = self.backend.search_drivers(q)
+        if not results:
+            self.driver_results_lay.addWidget(Card([Row(f"Nothing found for “{q}”", "Not on this device and not "
+                                                        "built in. Copy the report in Problems to ask for it.")]))
+            return
+        rows = []
+        for r in results[:40]:
+            lab = QLabel(f"●  {r['status']}")
+            lab.setObjectName("bad" if r["status"] == "missing" else "ok" if r["status"] in ("in use", "loaded")
+                             else "note")
+            rows.append(Row(f"{r['name']}", f"{r['type']} · {r['detail']}", lab))
+        self.driver_results_lay.addWidget(Card(rows))
+
+    def driver_history_section(self, p):
+        hist = self.backend.driver_history()
+        if not hist:
+            p.section("Driver changes", [Row("Nothing to undo yet", "Each driver or firmware update is listed "
+                                             "here, so you can go back if it doesn't work right.")])
+            return
+        rows = []
+        for e in hist[:15]:
+            when = __import__("time").strftime("%-d %b %Y", __import__("time").localtime(e.get("time", 0)))
+            undo = UpdateButton(self, "undo-" + e["id"], "Go back",
+                                command=lambda i=e["id"]: ["gosaab-drivers", "rollback", i])
+            undo.setObjectName("pill")
+            rows.append(Row(e["name"], f"{when} · {str(e.get('from', ''))[:20]} → {str(e.get('to', ''))[:20]}", undo))
+        p.section("Driver changes", rows, "“Go back” puts the version from before that update back.")
+
     def driver_section(self, p):
         info = self.backend.drivers()
+        p.keywords += ["driver", "drivers", "firmware", "rollback", "search driver"] + \
+            [f"{x['name']} {x['driver']}".lower() for x in info.get("parts", [])]
         missing = [x for x in info.get("problems", []) if x.get("kind") in ("missing-driver", "missing-firmware")]
         if missing:
             rows = []
@@ -1104,11 +1209,42 @@ class Settings(QMainWindow):
                     state(is_on(self.backend.features(), "sandbox_windows_apps", True), "On", "Off")),
                 Row("Secure Boot", "Firmware only starts signed system software.",
                     state(sec.get("secure_boot", False), "On", "Off (normal for a test USB)")),
-                Row("Disk encryption", "Your files can't be read if the device is stolen.",
+                Row("Disk encryption", "Your files can't be read if the drive or the device is stolen.",
                     state(sec.get("encrypted", False), "On", "Off"))]
         if weak:
             rows[0].subtitle.setStyleSheet("color: #ff453a;")
         p.section("Security checkup", rows)
+        self.encryption_section(p, sec.get("encryption", {}))
+
+    def terminal(self, title, cmd):
+        return lambda: self.backend.run(["foot", "-T", title, "-e", "sh", "-c",
+                                         cmd + "; echo; read -p 'Press Enter to close.' x"], wait=False)
+
+    def encryption_section(self, p, enc):
+        def button(text, title, cmd, primary=False):
+            b = QPushButton(text)
+            b.setObjectName("primary" if primary else "pill")
+            b.clicked.connect(self.terminal(title, cmd))
+            return b
+        if not enc.get("encrypted"):
+            p.section("Encrypt your files", [
+                Row("Install Gill-OSaab on this PC, encrypted",
+                    "Copies Gill-OSaab from this USB to the device's own drive and encrypts the whole drive "
+                    "(LUKS2 + the security chip). Everything on that drive is erased; your account comes along.",
+                    button("Install…", "Install Gill-OSaab", "gosaab-install", primary=True))],
+                "Running from the USB stick? Its files aren't encrypted – install to the drive for that.")
+            return
+        rows = [Row("Start-up PIN", "Asked when the device starts, so a stolen device stays locked. "
+                    + ("On." if enc.get("pin") else "Not set – recommended."),
+                    button("Change PIN…" if enc.get("pin") else "Add PIN…", "Start-up PIN", "gosaab-encryption pin",
+                           primary=not enc.get("pin"))),
+                Row("Recovery key", "Opens the drive if the PIN is forgotten or the security chip is reset. "
+                    + ("Created." if enc.get("recovery") else "Not created yet."),
+                    button("New key…" if enc.get("recovery") else "Create…", "Recovery key",
+                           "gosaab-encryption recovery", primary=not enc.get("recovery"))),
+                Row("Use a password instead", "For devices without a security chip, or if you prefer typing a "
+                    "password at start-up.", button("Use password…", "Start-up password", "gosaab-encryption password"))]
+        p.section("Encryption", rows)
 
     def page_notifications(self):
         p = Page("Notifications")

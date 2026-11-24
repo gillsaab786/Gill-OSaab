@@ -217,5 +217,108 @@ class Cli(unittest.TestCase):
             compile((ROOT / rel).read_text(), rel, "exec")
 
 
+upd_run = load("usr/libexec/gill-osaab/gosaab-update-run", "upd_run_sched")
+
+
+class Schedule(unittest.TestCase):
+    def test_intervals(self):
+        day = 86400
+        self.assertTrue(upd_run.is_due({}, None, 0))
+        self.assertFalse(upd_run.is_due({"frequency": "weekly"}, 0, 3 * day))
+        self.assertTrue(upd_run.is_due({"frequency": "weekly"}, 0, 7 * day))
+        self.assertFalse(upd_run.is_due({"frequency": "6months"}, 0, 100 * day))
+        self.assertTrue(upd_run.is_due({"frequency": "yearly"}, 0, 365 * day))
+        self.assertFalse(upd_run.is_due({"frequency": "never"}, None, 10 ** 9))
+        self.assertFalse(upd_run.is_due({"all": "off"}, None, 10 ** 9))
+
+    def test_drivers_only_and_never(self):
+        tools = lambda t: f"/usr/bin/{t}"
+        self.assertEqual(upd_run.plan_updates({"scope": "drivers"}, which=tools, users=[]),
+                         [["gosaab-drivers", "auto", "--install"]])
+        self.assertEqual(upd_run.plan_updates({"frequency": "never"}, which=tools, users=[]), [])
+
+
+class DriverHistoryAndSearch(unittest.TestCase):
+    def test_history_roundtrip(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "h.json"
+            e1 = drv.add_history({"kind": "firmware", "name": "SSD firmware", "target": "a" * 40, "from": "1",
+                                  "to": "2", "time": 10}, p)
+            drv.add_history({"kind": "system", "name": "Built-in", "from": "x", "to": "y", "time": 20}, p)
+            hist = drv.load_history([p])
+            self.assertEqual([h["kind"] for h in hist], ["system", "firmware"])
+            self.assertEqual(hist[1]["id"], e1["id"])
+
+    def test_search_everywhere(self):
+        inv = {"parts": [{"category": "Wi-Fi", "name": "Realtek RTL8852BE", "driver": "rtw89_8852be"},
+                         {"category": "Camera", "name": "Intel IPU6", "driver": ""}]}
+        mods = {"rtw89_8852be": "Realtek 802.11ax wireless 8852BE driver", "amdgpu": "AMD GPU",
+                "ipu6": "Intel IPU6 input system"}
+        with tempfile.TemporaryDirectory() as fw:
+            (Path(fw) / "rtw89").mkdir()
+            (Path(fw) / "rtw89" / "rtw8852b_fw.bin.xz").write_text("x")
+            res = drv.search("realtek", inv, mods, {"rtw89_8852be"}, fw)
+            types = [(r["type"], r["status"]) for r in res]
+            self.assertIn(("This device", "in use"), types)
+            self.assertIn(("Built-in driver", "loaded"), types)
+            self.assertIn("rtw89_8852be", [r["name"] for r in drv.search("realtek wifi", {}, mods, set(), None)])
+            res = drv.search("rtw 8852b", inv, mods, set(), fw)
+            self.assertIn("Firmware file", [r["type"] for r in res])
+        self.assertEqual(drv.search("ipu6", inv, mods, set(), None)[0]["status"], "missing")
+        self.assertEqual(drv.search("a", inv, mods), [])
+
+    def test_firmware_version_validated(self):
+        root = load("usr/libexec/gill-osaab/gosaab-update-root", "update_root_fwv")
+        self.assertEqual(root.main(["firmware-version", "a" * 40, "1.2; reboot"]), 2)
+        self.assertEqual(root.main(["firmware-version", "zz", "1.2"]), 2)
+
+
+def load_core(rel, name):
+    import importlib.machinery
+    import importlib.util
+    loader = importlib.machinery.SourceFileLoader(name, str(ROOT / "files/core-system" / rel))
+    spec = importlib.util.spec_from_loader(name, loader)
+    mod = importlib.util.module_from_spec(spec)
+    loader.exec_module(mod)
+    return mod
+
+
+class Installer(unittest.TestCase):
+    inst = load_core("usr/bin/gosaab-install", "gosaab_install")
+    LSBLK = json.dumps({"blockdevices": [
+        {"name": "sda", "path": "/dev/sda", "size": 64 * 10 ** 9, "model": "USB Stick", "tran": "usb", "rm": "1",
+         "type": "disk"},
+        {"name": "nvme0n1", "path": "/dev/nvme0n1", "size": 1000 * 10 ** 9, "model": "WD SN770", "tran": "nvme",
+         "rm": "0", "type": "disk"},
+        {"name": "zram0", "path": "/dev/zram0", "size": 8 * 10 ** 9, "type": "disk"},
+        {"name": "sdb", "path": "/dev/sdb", "size": 16 * 10 ** 9, "model": "Small", "rm": "1", "type": "disk"}]})
+
+    def test_never_offers_the_running_drive(self):
+        disks = self.inst.candidate_disks(self.LSBLK, "/dev/sda")
+        self.assertEqual([d["path"] for d in disks], ["/dev/nvme0n1", "/dev/sdb"])
+        self.assertFalse(disks[1]["big_enough"])
+
+    def test_encrypted_install_command(self):
+        cmd = self.inst.install_command("ghcr.io/x/gill-osaab-core:latest", "/dev/nvme0n1", True)
+        self.assertEqual(cmd[-4:], ["btrfs", "--block-setup", "tpm2-luks", "/dev/nvme0n1"])
+        self.assertIn("to-disk", cmd)
+        self.assertNotIn("--block-setup", self.inst.install_command("i", "/dev/x", False))
+
+    def test_account_validated(self):
+        self.assertEqual(self.inst.account_record("gill", "$y$abc")["name"], "gill")
+        for bad in ("root;rm", "Gill", ""):
+            with self.assertRaises(ValueError):
+                self.inst.account_record(bad, "$y$abc")
+        with self.assertRaises(ValueError):
+            self.inst.account_record("gill", "plaintext")
+
+    def test_password_hash(self):
+        try:
+            h = self.inst.hash_password("correct horse")
+        except OSError:
+            self.skipTest("no libcrypt")
+        self.assertTrue(h.startswith("$y$"))
+
+
 if __name__ == "__main__":
     unittest.main()

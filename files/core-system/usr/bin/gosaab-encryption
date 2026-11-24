@@ -1,0 +1,42 @@
+#!/bin/bash
+# Disk encryption (the installed system drive).
+#   gosaab-encryption status      JSON: encrypted, device, tpm, pin, password, recovery
+#   gosaab-encryption pin         ask for a start-up PIN (security chip + PIN)
+#   gosaab-encryption password    use a start-up password instead of the security chip
+#   gosaab-encryption recovery    create a recovery key (write it down; it opens the drive if the PIN is lost)
+set -u
+root_luks() {
+  src=$(findmnt -no SOURCE /sysroot 2>/dev/null || findmnt -no SOURCE /); src=${src%%[*}
+  case "$src" in /dev/mapper/*) cryptsetup status "$src" 2>/dev/null | sed -n 's/^ *device: *//p' ;; esac
+}
+dev=$(root_luks)
+if [ "${1:-status}" = status ]; then
+  if [ -z "$dev" ]; then echo '{"encrypted": false}'; exit 0; fi
+  dump=$(cryptsetup luksDump "$dev" 2>/dev/null)
+  tpm=false; pin=false; rec=false; pw=false
+  echo "$dump" | grep -q 'systemd-tpm2' && tpm=true
+  echo "$dump" | grep -qi 'tpm2-pin: *true' && pin=true
+  echo "$dump" | grep -q 'systemd-recovery' && rec=true
+  # a key slot no token uses = a typed password
+  slots=$(echo "$dump" | sed -n '/^Keyslots:/,/^Tokens:/p' | grep -cE '^ +[0-9]+: luks2')
+  tokens=$(echo "$dump" | sed -n '/^Tokens:/,/^Digests:/p' | grep -cE '^ +[0-9]+: ')
+  [ "$slots" -gt "$tokens" ] && pw=true
+  printf '{"encrypted": true, "device": "%s", "tpm": %s, "pin": %s, "recovery": %s, "password": %s}\n' "$dev" $tpm $pin $rec $pw
+  exit 0
+fi
+[ "$(id -u)" -eq 0 ] || exec pkexec "$0" "$@"
+[ -n "$dev" ] || { echo "The system drive isn't encrypted. Install with: gosaab-install"; exit 3; }
+unlock=(--unlock-tpm2-device=auto)
+cryptsetup luksDump "$dev" | grep -q systemd-tpm2 || unlock=()
+case "$1" in
+  pin)
+    echo "Choose a start-up PIN (asked each time the device starts)."
+    systemd-cryptenroll "$dev" "${unlock[@]}" --wipe-slot=tpm2 --tpm2-device=auto --tpm2-with-pin=yes --tpm2-pcrs=7 ;;
+  password)
+    echo "Choose a start-up password (replaces the security chip unlock)."
+    systemd-cryptenroll "$dev" "${unlock[@]}" --password && systemd-cryptenroll "$dev" --wipe-slot=tpm2 ;;
+  recovery)
+    echo "Your recovery key (write it down and keep it somewhere safe, not on this device):"
+    systemd-cryptenroll "$dev" "${unlock[@]}" --wipe-slot=recovery --recovery-key ;;
+  *) sed -n '2,6p' "$0"; exit 2 ;;
+esac

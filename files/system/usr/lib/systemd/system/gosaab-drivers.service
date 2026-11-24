@@ -1,5 +1,5 @@
 [Unit]
-Description=Gill-OSaab: record every part and its driver, install missing firmware/driver updates
+Description=Gill-OSaab: record every part and its driver (installs only at the very first start; later on the update schedule)
 Wants=network-online.target
 After=network-online.target fwupd.service
 

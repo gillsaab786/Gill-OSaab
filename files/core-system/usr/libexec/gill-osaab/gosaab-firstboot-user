@@ -1,0 +1,37 @@
+#!/usr/bin/python3 -I
+"""(first start after gosaab-install) Create the account carried over from the USB, then forget it."""
+import json
+import os
+import re
+import subprocess
+import sys
+
+PATH = "/boot/gill-osaab-user.json"
+
+
+def main():
+    try:
+        with open(PATH) as fh:
+            rec = json.load(fh)
+    except (OSError, ValueError):
+        return 0
+    name, pw_hash = rec.get("name", ""), rec.get("hash", "")
+    full = re.sub(r"[:,\n]", " ", rec.get("full_name", ""))[:64]
+    ok = re.fullmatch(r"[a-z_][a-z0-9_-]{0,31}", name) and re.fullmatch(r"\$[A-Za-z0-9./$]+", pw_hash)
+    if ok and subprocess.run(["id", name], capture_output=True, check=False).returncode != 0:
+        subprocess.run(["useradd", "-m", "-G", "wheel", "-c", full or name, "-p", pw_hash, name], check=False)
+    # never leave the password hash on the unencrypted /boot
+    try:
+        size = os.path.getsize(PATH)
+        with open(PATH, "r+b") as fh:
+            fh.write(b"\0" * size)
+            fh.flush()
+            os.fsync(fh.fileno())
+    except OSError:
+        pass
+    os.unlink(PATH)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
