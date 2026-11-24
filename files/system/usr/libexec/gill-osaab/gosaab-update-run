@@ -78,7 +78,9 @@ def plan_updates(conf, which=shutil.which, users=None):
 def main(argv=()):
     conf = read_conf(ETC / "updates.conf")
     if "--force" not in argv and not is_due(conf, last_run(), time.time()):
-        log("updates", f"not due yet (frequency={conf.get('frequency', 'daily')})")
+        msg = f"not due yet (frequency={conf.get('frequency', 'daily')})"
+        log("updates", msg)
+        print(msg)
         return 0
     steps = plan_updates({**conf, "frequency": "daily"} if "--force" in argv else conf)
     if not steps:

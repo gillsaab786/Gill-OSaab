@@ -136,9 +136,11 @@ def cmd_rollback(entry_id):
 def cmd_search(query):
     inv = drv.load_state() or drv.inventory()
     try:
-        modules = json.loads(drv.INDEX.read_text()).get(os.uname().release) or {}
+        index = json.loads(drv.INDEX.read_text())
     except (OSError, ValueError):
-        modules = {}
+        index = {}
+    # the running kernel; else the newest one indexed (e.g. just after a kernel update, before a restart)
+    modules = index.get(os.uname().release) or (index[sorted(index)[-1]] if index else {})
     if not modules:
         modules = drv.kernel_modules(f"/usr/lib/modules/{os.uname().release}")
     loaded = {ln.split()[0] for ln in drv.gosaab_hw.read("/proc/modules").splitlines() if ln}

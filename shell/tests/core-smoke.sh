@@ -94,7 +94,7 @@ check "button shortcuts: typing keys refused" "! HOME=/tmp/hk gosaab-hotkeys set
 # update schedule, driver search and rollback, encrypted install
 check "update schedule: every 3 months / never / drivers only" "gosaab-config set updates.conf frequency 3months && gosaab-config set updates.conf scope drivers && ! gosaab-config set updates.conf frequency fortnightly 2>/dev/null"
 mkdir -p /var/lib/gill-osaab && date +%s > /var/lib/gill-osaab/last-auto-update
-check "nothing updates before the chosen time" "timeout 20 /usr/libexec/gill-osaab/gosaab-update-run && grep -q 'not due' /root/.local/state/gill-osaab/updates.log"
+check "nothing updates before the chosen time" "timeout 20 /usr/libexec/gill-osaab/gosaab-update-run | grep -q 'not due'"
 gosaab-config set updates.conf frequency daily; gosaab-config set updates.conf scope everything
 check "driver search index built ($(python3 -c 'import json;print(sum(len(v) for v in json.load(open("/usr/share/gill-osaab/driver-index.json")).values()))' 2>/dev/null) drivers)" "[ -s /usr/share/gill-osaab/driver-index.json ]"
 gosaab-drivers search realtek wifi > /tmp/search.json; echo "search 'realtek wifi': $(python3 -c 'import json;r=json.load(open("/tmp/search.json"));print(len(r), [x["name"] for x in r[:5]])')"
