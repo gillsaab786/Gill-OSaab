@@ -44,13 +44,8 @@ systemctl enable gosaab-hotkeyd.service || log "warning: shortcut service not en
 # Firewall: nothing on this PC is reachable from the network unless allowed. Allowed: finding printers
 # and other devices (mDNS), Steam Remote Play/LAN game downloads; Android (Waydroid) gets its own
 # trusted network link so its apps keep internet access.
-if command -v firewall-offline-cmd >/dev/null; then
-    firewall-offline-cmd --set-default-zone=public || log "warning: firewall zone not set"
-    firewall-offline-cmd --zone=public --remove-service=ssh >/dev/null 2>&1 || true
-    for svc in mdns ipp-client steam-streaming steam-lan-transfer; do
-        firewall-offline-cmd --zone=public --add-service="$svc" >/dev/null 2>&1 || log "note: no firewalld service $svc"
-    done
-    firewall-offline-cmd --zone=trusted --add-interface=waydroid0 >/dev/null 2>&1 || true
+if [ -f /etc/firewalld/firewalld.conf ]; then  # zones: /etc/firewalld/zones (public = ours)
+    sed -i 's/^DefaultZone=.*/DefaultZone=public/' /etc/firewalld/firewalld.conf
     systemctl enable firewalld.service || log "warning: firewalld not enabled"
 else
     log "warning: firewalld missing"

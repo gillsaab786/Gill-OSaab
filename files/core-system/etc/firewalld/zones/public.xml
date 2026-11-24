@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<zone>
+  <short>Gill-OSaab</short>
+  <description>Nothing on this PC can be reached from the network except finding printers/devices and Steam Remote Play / LAN game transfers.</description>
+  <service name="dhcpv6-client"/>
+  <service name="mdns"/>
+  <service name="ipp-client"/>
+  <port protocol="udp" port="27031-27036"/>
+  <port protocol="tcp" port="27036-27037"/>
+  <forward/>
+</zone>

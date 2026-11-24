@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<zone target="ACCEPT">
+  <short>Trusted</short>
+  <description>Android (Waydroid) network link: Android apps keep internet access.</description>
+  <interface name="waydroid0"/>
+  <forward/>
+</zone>

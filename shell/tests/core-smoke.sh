@@ -56,11 +56,20 @@ check "Brave is the default browser" "grep -q 'https=brave-browser.desktop' /etc
 check "VLC opens sandboxed" "grep -qs '^Exec=gosaab-sandbox vlc' /usr/share/applications/*vlc*.desktop /usr/share/applications/*VLC*.desktop"
 check "sandboxed app can't see other programs" "[ \$(HOME=/tmp/sbhome gosaab-sandbox testapp sh -c 'ls -d /proc/[0-9]* | wc -l') -le 4 ]"
 check "sandboxed app can't read keyboards/controllers directly" "! HOME=/tmp/sbhome gosaab-sandbox testapp ls /dev/input >/dev/null 2>&1"
-check "sandboxed app can't reach the session bus (no escape)" "HOME=/tmp/sbhome DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/0/bus gosaab-sandbox testapp sh -c '[ ! -e /run/user/0/bus ] && [ ! -e /run/dbus/system_bus_socket ]'"
+export XDG_RUNTIME_DIR=/tmp/sbrt && mkdir -p -m 700 /tmp/sbrt
+export DBUS_SESSION_BUS_ADDRESS=$(dbus-daemon --session --fork --print-address 2>/dev/null)
+python3 -c 'from gi.repository import Gio, GLib; Gio.bus_own_name(Gio.BusType.SESSION, "org.freedesktop.systemd1", 0, None, None, None); GLib.MainLoop().run()' & fake_systemd=$!
+sleep 1
+ping_systemd='gdbus call --session --dest org.freedesktop.systemd1 --object-path / --method org.freedesktop.DBus.Peer.Ping'
+list_names='gdbus call --session --dest org.freedesktop.DBus --object-path /org/freedesktop/DBus --method org.freedesktop.DBus.ListNames'
+check "sandboxed app gets a filtered session bus (can't start programs outside)" "$ping_systemd >/dev/null && HOME=/tmp/sbhome gosaab-sandbox testapp sh -c \"$list_names >/dev/null && ! $ping_systemd >/dev/null 2>&1\""
+check "sandboxed app can't reach the system bus" "HOME=/tmp/sbhome gosaab-sandbox testapp sh -c '[ ! -e /run/dbus/system_bus_socket ]'"
+kill $fake_systemd 2>/dev/null; unset DBUS_SESSION_BUS_ADDRESS XDG_RUNTIME_DIR
 
 # security
 check "remote login (SSH) off by default" "! systemctl is-enabled sshd.service >/dev/null 2>&1"
-check "firewall on, nothing open but discovery and Steam" "systemctl is-enabled firewalld.service >/dev/null 2>&1 && ! firewall-offline-cmd --zone=public --list-services | grep -qw ssh"
+echo "firewall: $(systemctl is-enabled firewalld.service 2>&1) zone=$(sed -n 's/^DefaultZone=//p' /etc/firewalld/firewalld.conf) services=$(firewall-offline-cmd --zone=public --list-services 2>&1 | tail -1)"
+check "firewall on, nothing open but discovery and Steam" "systemctl is-enabled firewalld.service >/dev/null 2>&1 && grep -q '^DefaultZone=public' /etc/firewalld/firewalld.conf && ! grep -q 'service name=\"ssh\"' /etc/firewalld/zones/public.xml"
 check "no surprise restarts from automatic updates" "! systemctl is-enabled bootc-fetch-apply-updates.timer >/dev/null 2>&1"
 check "apps can't read each other's memory (ptrace)" "grep -q 'ptrace_scope = 1' /usr/lib/sysctl.d/60-gill-osaab.conf"
 id weakuser >/dev/null 2>&1 || useradd -m weakuser; echo weakuser:gill | chpasswd
