@@ -23,6 +23,10 @@ command -v waydroid >/dev/null && /usr/libexec/gill-osaab/gosaab-android-notify 
 /usr/libexec/gill-osaab/gosaab-first-setup &
 # the handheld's controller works as mouse + keys on the desktop (View+Menu toggles it)
 /usr/libexec/gill-osaab/gosaab-gamepad &
+# best FPS settings for this graphics chip (DLSS / FSR 4 / XeSS upgrades, Smooth Motion): see gosaab-fps
+gosaab-fps apply >/dev/null 2>&1
+fps_env="$HOME/.config/environment.d/60-gill-osaab-fps.conf"
+[ -f "$fps_env" ] && { set -a; . "$fps_env"; set +a; }
 # the menu bar, Dock, notifications, Control Centre, Spotlight, Launchpad, lock screen
 while :; do
   qs -c gill-osaab

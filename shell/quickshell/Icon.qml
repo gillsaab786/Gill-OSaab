@@ -114,6 +114,12 @@ Canvas {
             rrect(13.5, 9, 8.5, 6.5, 3); c.stroke()
             line([10.5, 11, 13.5, 11])
             break
+        case "keyboard": // on-screen keyboard
+            c.lineWidth = 1.7
+            rrect(2, 6, 20, 13, 3); c.stroke()
+            for (let r = 0; r < 2; r++) for (let q = 0; q < 6; q++) { rrect(4.4 + q * 2.65, 8.6 + r * 3, 1.6, 1.6, 0.4); c.fill() }
+            line([8, 15.6, 16, 15.6])
+            break
         case "airplane":
             c.beginPath(); c.moveTo(12, 2); c.lineTo(13.5, 9); c.lineTo(21, 13); c.lineTo(21, 15); c.lineTo(13.5, 12.5); c.lineTo(13, 18); c.lineTo(15.5, 20); c.lineTo(15.5, 21.5); c.lineTo(12, 20.5); c.lineTo(8.5, 21.5); c.lineTo(8.5, 20); c.lineTo(11, 18); c.lineTo(10.5, 12.5); c.lineTo(3, 15); c.lineTo(3, 13); c.lineTo(10.5, 9); c.closePath(); c.fill()
             break

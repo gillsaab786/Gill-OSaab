@@ -25,6 +25,8 @@ ALLOWED = {
         "screen_off_overnight": ONOFF,
         "screen_off_idle_seconds": "int:5:600",
         "auto_drivers": ONOFF,
+        "fps_upgrade": ONOFF,
+        "fps_smooth_motion": ONOFF,
         "charge_limit": "int:50:100",
         **{k: ONOFF for k in OPTIONAL},
     },

@@ -42,5 +42,6 @@ ShellRoot {
         function closeAll(): void { ShellState.closeAll() }
         function setDark(on: bool): void { Theme.dark = on }
         function ping(): string { return "gill-osaab shell ok" }
+        function keyboard(): void { ShellState.toggleKeyboard() }
     }
 }

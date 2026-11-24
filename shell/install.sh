@@ -23,7 +23,7 @@ ln -sfn /usr/share/gill-osaab/shell /etc/xdg/quickshell/gill-osaab
 # login screen theme
 if [ -d "$SRC/sddm-theme" ]; then
   install -d /usr/share/sddm/themes/gill-osaab
-  cp -r "$SRC/sddm-theme/." /usr/share/sddm/themes/gill-osaab/
+  cp -rL "$SRC/sddm-theme/." /usr/share/sddm/themes/gill-osaab/  # -L: the touch keyboard is shared with the lock screen
 fi
 gosaab-wm -v
 echo "Gill-OSaab desktop installed"

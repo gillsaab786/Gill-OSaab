@@ -1,0 +1,11 @@
+name: gill-osaab-core-nvidia
+description: Gill-OSaab Core with Nvidia's own driver (RTX 20 / GTX 16 and newer) for DLSS, frame generation and full speed.
+
+# Built right after gill-osaab-core in the same workflow run, so it always matches it.
+base-image: ghcr.io/gillsaab786/gill-osaab-core
+image-version: latest
+
+modules:
+  - type: script
+    scripts:
+      - gosaab-nvidia-kmod.sh

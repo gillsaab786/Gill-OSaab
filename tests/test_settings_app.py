@@ -172,6 +172,11 @@ class FakeBackend:
     def last_update_text(self):
         return "Not yet"
 
+    def fps_status(self):
+        return {"main": {"vendor": "nvidia", "name": "AD107 [GeForce RTX 4060]", "family": "rtx40"},
+                "recommendation": {"upgrade": "dlss", "smooth_motion": True, "notes": ["DLSS 4", "LSFG"]},
+                "ge_proton": [], "needs_nvidia_edition": getattr(self, "fps_needs", False)}
+
     def search_drivers(self, query):
         self.searched = query
         return [{"type": "Built-in driver", "name": "rtw89_8852be", "detail": "Realtek 802.11ax", "status": "available"}]
@@ -431,3 +436,22 @@ class Schedule(unittest.TestCase):
         undo = [x for x in w.findChildren(self.gs.UpdateButton) if x.part == "undo-1-0"][0]
         undo.start()
         self.assertIn(("async", "gosaab-drivers", "rollback", "1-0"), b.calls)
+
+
+@unittest.skipUnless(HAVE_QT, "PySide6 not installed")
+class Fps(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        from PySide6.QtWidgets import QApplication
+        cls.gs = load("usr/bin/gosaab-settings")
+        cls.app = QApplication.instance() or QApplication([])
+
+    def test_nvidia_fps_controls(self):
+        b = FakeBackend()
+        b.fps_needs = True
+        w = self.gs.Settings(b)
+        w.switches[("features.conf", "fps_smooth_motion")][0].setChecked(True)
+        self.assertIn(("set", "features.conf", "fps_smooth_motion", "on"), b.calls)
+        self.assertIn("nvidia", w.update_buttons)
+        names = [x.text() for x in w.findChildren(self.gs.QPushButton)]
+        self.assertIn("Install", names)

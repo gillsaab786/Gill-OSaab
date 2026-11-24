@@ -1,0 +1,148 @@
+#!/usr/bin/env python3
+"""Best FPS setup for this device's graphics chip (Nvidia, AMD or Intel).
+
+  gosaab-fps status          chips found, what's recommended, what's on (JSON)
+  gosaab-fps apply           write the game settings for this chip (done at every sign-in)
+  gosaab-fps install-proton  download GE-Proton (needed for the DLSS/FSR/XeSS upgrades) and make it
+                             Steam's default for Windows games
+"""
+import hashlib
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tarfile
+import tempfile
+import urllib.request
+from pathlib import Path
+
+sys.path.insert(0, "/usr/libexec/gill-osaab")
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "../libexec/gill-osaab"))
+import gosaab_gpu  # noqa: E402
+from gosaab_common import ETC, Progress, is_on, read_conf  # noqa: E402
+
+ENV_FILE = Path.home() / ".config/environment.d/60-gill-osaab-fps.conf"
+STEAM = Path.home() / ".local/share/Steam"
+TOOLS = STEAM / "compatibilitytools.d"
+GE_API = "https://api.github.com/repos/GloriousEggroll/proton-ge-custom/releases/latest"
+
+
+def settings():
+    f = read_conf(ETC / "features.conf")
+    return is_on(f, "fps_upgrade", default=True), is_on(f, "fps_smooth_motion", default=False)
+
+
+def env_text(env):
+    lines = ["# Gill-OSaab: best FPS settings for this graphics chip (Settings > Game Mode). Rewritten at sign-in."]
+    lines += [f"{k}={v}" for k, v in sorted(env.items())]
+    return "\n".join(lines) + "\n"
+
+
+def installed_ge():
+    return sorted((p.name for p in TOOLS.glob("GE-Proton*") if p.is_dir()), reverse=True) if TOOLS.is_dir() else []
+
+
+def status():
+    gs = gosaab_gpu.gpus()
+    g = gosaab_gpu.main_gpu(gs)
+    rec = gosaab_gpu.recommendation(g)
+    up, sm = settings()
+    return {"gpus": gs, "main": g, "recommendation": rec, "env": gosaab_gpu.environment(rec, up, sm),
+            "upgrade_on": up, "smooth_motion_on": sm, "ge_proton": installed_ge(),
+            "nvidia_edition": Path("/usr/share/gill-osaab/edition-gpu").exists(),
+            "needs_nvidia_edition": gosaab_gpu.nvidia_needs_driver(gs)
+            and not Path("/usr/share/gill-osaab/edition-gpu").exists()}
+
+
+def apply():
+    st = status()
+    ENV_FILE.parent.mkdir(parents=True, exist_ok=True)
+    ENV_FILE.write_text(env_text(st["env"]))
+    print(env_text(st["env"]), end="")
+    return 0
+
+
+def set_default_tool(name, config=STEAM / "config/config.vdf"):
+    """Make a compatibility tool Steam's default for Windows games (only when Steam isn't running and
+    no default was chosen yet; the old file is kept as config.vdf.gosaab-backup)."""
+    if not config.exists() or subprocess.run(["pgrep", "-x", "steam"], capture_output=True).returncode == 0:
+        return False
+    text = config.read_text(errors="replace")
+    if '"CompatToolMapping"' in text:
+        return False
+    new = add_default_tool(text, name)
+    if new == text:
+        return False
+    shutil.copy2(config, config.with_suffix(".vdf.gosaab-backup"))
+    config.write_text(new)
+    return True
+
+
+def add_default_tool(text, name):
+    m = re.search(r'(\n(\s*)"Steam"\s*\n\s*\{\s*\n)', text)
+    if not m:
+        return text
+    ind = m.group(2) + "\t"
+    block = (f'{ind}"CompatToolMapping"\n{ind}{{\n{ind}\t"0"\n{ind}\t{{\n{ind}\t\t"name"\t\t"{name}"\n'
+             f'{ind}\t\t"config"\t\t""\n{ind}\t\t"priority"\t\t"75"\n{ind}\t}}\n{ind}}}\n')
+    return text[:m.end()] + block + text[m.end():]
+
+
+def install_proton():
+    progress = Progress("Installing GE-Proton", app="steam").start("Finding the newest version")
+    try:
+        with urllib.request.urlopen(GE_API, timeout=30) as r:
+            rel = json.load(r)
+        assets = {a["name"]: a["browser_download_url"] for a in rel.get("assets", [])}
+        tar = next(n for n in assets if n.endswith(".tar.gz"))
+        sums = next((n for n in assets if n.endswith(".sha512sum")), None)
+        name = tar[:-len(".tar.gz")]
+        if (TOOLS / name).is_dir():
+            progress.finish(True, f"{name} is already installed.")
+            return 0
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / tar
+            with urllib.request.urlopen(assets[tar], timeout=60) as r, open(path, "wb") as out:
+                total = int(r.headers.get("Content-Length") or 0)
+                done = 0
+                while chunk := r.read(1 << 20):
+                    out.write(chunk)
+                    done += len(chunk)
+                    if total:
+                        progress.update(percent=min(90, done * 90 // total), message=f"{done >> 20} MB")
+            if sums:  # the download must match the published checksum
+                with urllib.request.urlopen(assets[sums], timeout=30) as r:
+                    want = r.read().decode().split()[0]
+                got = hashlib.sha512(path.read_bytes()).hexdigest()
+                if got != want:
+                    raise ValueError("download damaged (checksum mismatch)")
+            TOOLS.mkdir(parents=True, exist_ok=True)
+            with tarfile.open(path) as t:
+                t.extractall(TOOLS, filter="data")  # no paths outside the folder
+        progress.update(percent=100)
+        default = set_default_tool(name)
+        progress.finish(True, f"{name} installed" + (" and set as Steam's default." if default else
+                                                     ". Choose it in Steam › Settings › Compatibility."))
+        return 0
+    except Exception as e:  # network, GitHub limits, disk
+        progress.finish(False, f"Couldn't install GE-Proton: {e}")
+        return 1
+
+
+def main(argv):
+    cmd = argv[0] if argv else "status"
+    if cmd == "status":
+        print(json.dumps(status()))
+        return 0
+    if cmd == "apply":
+        return apply()
+    if cmd == "install-proton":
+        return install_proton()
+    print(__doc__.strip(), file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

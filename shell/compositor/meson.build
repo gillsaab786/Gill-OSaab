@@ -40,6 +40,7 @@ protocols = [
   'protocols/wlr-layer-shell-unstable-v1.xml',
   'protocols/wlr-output-management-unstable-v1.xml',
   'protocols/wlr-output-power-management-unstable-v1.xml',
+  'protocols/virtual-keyboard-unstable-v1.xml',
 ]
 protocol_headers = []
 foreach xml : protocols

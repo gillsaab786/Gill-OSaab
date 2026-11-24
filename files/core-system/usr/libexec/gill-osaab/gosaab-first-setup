@@ -22,6 +22,15 @@ flatpak install --user --noninteractive -y flathub io.github.kolunmi.Bazaar >/de
 progress 20 "Setting up your apps" "Installing Bottles (Windows app installers)"
 flatpak install --user --noninteractive -y flathub com.usebottles.bottles >/dev/null 2>&1 || true
 
+progress 25 "Setting up your games" "Installing GE-Proton (DLSS 4 / FSR 4 / XeSS upgrades for Windows games)"
+gosaab-fps install-proton >/dev/null 2>&1 || true
+
+# encrypted drive without a start-up PIN or recovery key: open the place to add them
+if gosaab-encryption status 2>/dev/null | grep -q '"encrypted": true' && \
+   gosaab-encryption status | grep -q '"recovery": false'; then
+  gosaab-settings security >/dev/null 2>&1 &
+fi
+
 android=$(sed -n 's/^android=//p' /etc/gill-osaab/features.conf 2>/dev/null)
 if [ "${android:-on}" = on ] && ! waydroid status 2>/dev/null | grep -qi "initialized: *yes\|Session:.*RUNNING\|Container:"; then
   progress 30 "Setting up Android" "Downloading Android with Google Play (about 1 GB)"
@@ -34,5 +43,5 @@ if [ "${android:-on}" = on ] && ! waydroid status 2>/dev/null | grep -qi "initia
     esac
   done
 fi
-progress 100 "Your apps are ready" "Play Store (Android), Bazaar (Linux apps), Bottles (Windows apps), Brave, VLC and Steam are set up."
+progress 100 "Your apps are ready" "Play Store (Android), Bazaar (Linux apps), Bottles (Windows apps), Brave, VLC, Steam and GE-Proton are set up."
 touch "$DONE"

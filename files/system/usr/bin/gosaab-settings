@@ -309,6 +309,9 @@ class Backend:
         except (OSError, ValueError):
             return "Not yet"
 
+    def fps_status(self):
+        return self._json(["gosaab-fps", "status"], {})
+
     def search_drivers(self, query):
         return self._json(["gosaab-drivers", "search", query], [], 30)
 
@@ -1468,6 +1471,36 @@ class Settings(QMainWindow):
         self.backend.set_glasses_profiles({a: c.currentText() for a, c in self.glasses_combo.items()
                                            if c.currentText() != "Off"})
 
+    def fps_section(self, p):
+        st = self.backend.fps_status()
+        g = st.get("main") or {}
+        rec = st.get("recommendation", {})
+        names = {"dlss": "DLSS 4", "fsr4": "FSR 4", "fsr4-rdna3": "FSR 4 (RX 7000)", "xess": "XeSS",
+                 "fsr3": "FSR 3"}
+        up = names.get(rec.get("upgrade"), "FSR")
+        rows = [Row("Graphics", f"{g.get('name') or 'Unknown'} · " + "  ".join(rec.get("notes", [])[:1]),
+                    QLabel(f"●  {g.get('vendor', '?').upper()}"))]
+
+        def apply_after(key):
+            sw = self.switch("features.conf", key, default=key == "fps_upgrade")
+            sw.toggled.connect(lambda _on: self.backend.run(["gosaab-fps", "apply"], wait=False))
+            return sw
+        rows.append(Row(f"Use the newest {up} in games", "Upgrades the upscaler and frame generation built into "
+                        "games to the latest version (needs GE-Proton, set up for you).", apply_after("fps_upgrade")))
+        if rec.get("smooth_motion"):
+            rows.append(Row("Nvidia Smooth Motion", "Driver frame generation for games without DLSS frame "
+                            "generation. Turn off in games that have it.", apply_after("fps_smooth_motion")))
+        ge = st.get("ge_proton", [])
+        get = UpdateButton(self, "ge-proton", "Update" if ge else "Install",
+                           command=lambda: ["gosaab-fps", "install-proton"])
+        get.setObjectName("pill")
+        rows.append(Row("GE-Proton", (ge[0] if ge else "Not installed") + " · runs Windows games with the "
+                        "upscaler upgrades.", get))
+        if st.get("needs_nvidia_edition"):
+            rows.append(Row("Nvidia driver", "Your RTX/GTX 16 card needs Nvidia's driver for DLSS and full speed.",
+                            self.update_button("nvidia", "Install")))
+        p.section("Best FPS for your graphics", rows, "  ".join(rec.get("notes", [])[1:]))
+
     def page_gamemode(self):
         p = Page("Game Mode")
         b = self.backend
@@ -1503,6 +1536,7 @@ class Settings(QMainWindow):
                 "option  LSFG_PROCESS=gosaab %command%. Needs Lossless Scaling from Steam."
                 + ("" if fg_ready else "  (Not installed on this system.)"), self.fg),
         ])
+        self.fps_section(p)
         decky = p.button("Install Decky Loader (Game Mode plugins, notifications)")
         decky.clicked.connect(lambda: b.run(["foot", "-e", "sh", "-c",
             "curl -L https://github.com/SteamDeckHomebrew/decky-installer/releases/latest/download/"

@@ -342,6 +342,19 @@ if command -v qs >/dev/null; then
   kill $HUBPID 2>/dev/null
   qs -p "$SHELLDIR" ipc call controlcenter toggle; sleep 1.2; shot 23-control-center
   qs -p "$SHELLDIR" ipc call controlcenter toggle; sleep 0.8
+  # on-screen keyboard (Control Centre > Keyboard)
+  if command -v wvkbd-mobintl >/dev/null; then
+    qs -p "$SHELLDIR" ipc call shell keyboard; sleep 1.5; shot 23b-onscreen-keyboard
+    check "on-screen keyboard opens" "pgrep -x wvkbd-mobintl >/dev/null"
+    qs -p "$SHELLDIR" ipc call shell keyboard; sleep 0.5
+  fi
+  # security: an app in a sandbox can't capture the screen, read the clipboard, inject keys or draw overlays
+  if command -v wayland-info >/dev/null && command -v bwrap >/dev/null; then
+    wayland-info > "$OUT/globals-host.txt" 2>&1
+    bwrap --dev-bind / / --unshare-pid --proc /proc wayland-info > "$OUT/globals-sandboxed.txt" 2>&1
+    check "trusted apps see screen capture and overlays" "grep -q zwlr_screencopy_manager_v1 $OUT/globals-host.txt && grep -q zwlr_layer_shell_v1 $OUT/globals-host.txt && grep -q zwp_virtual_keyboard_manager_v1 $OUT/globals-host.txt"
+    check "sandboxed apps can't capture the screen, read the clipboard, inject keys or draw overlays" "grep -q xdg_wm_base $OUT/globals-sandboxed.txt && ! grep -qE 'zwlr_screencopy|zwlr_layer_shell|data_control|virtual_keyboard|zwlr_export_dmabuf|session_lock' $OUT/globals-sandboxed.txt"
+  fi
   qs -p "$SHELLDIR" ipc call notifications toggle; sleep 1.2; shot 24-notification-center
   qs -p "$SHELLDIR" ipc call notifications toggle; sleep 0.8
   qs -p "$SHELLDIR" ipc call spotlight search "foo"; sleep 1.2; shot 25-spotlight
@@ -396,6 +409,8 @@ EOF5
   # lock screen: covers everything, new windows stay hidden, unlock brings the desktop back
   shot 39-before-lock
   qs -p "$SHELLDIR" ipc call lock lock; sleep 1.5; shot 40-locked
+  qs -p "$SHELLDIR" ipc call lock keyboard; sleep 0.8; shot 40b-lock-touch-keyboard
+  qs -p "$SHELLDIR" ipc call lock keyboard; sleep 0.5
   check "lock screen engages" "[ \"\$(qs -p $SHELLDIR ipc call lock isLocked)\" = true ]"
   foot -W 60x10 -T "Sneaky" -e sh -c 'sleep 300' & sleep 1.2; shot 41-locked-new-window
   qs -p "$SHELLDIR" ipc call lock unlockForTest; sleep 1.2; shot 42-unlocked

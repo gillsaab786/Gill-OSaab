@@ -14,6 +14,7 @@ Rectangle {
     property string userName: ""
     property string realName: ""
     property string message: ""
+    property bool keyboard: false // touch keyboard (handhelds have no keyboard)
 
     // look up the chosen account's names from the model
     Repeater {
@@ -57,7 +58,8 @@ Rectangle {
     }
 
     Column {
-        anchors { horizontalCenter: parent.horizontalCenter; bottom: parent.bottom; bottomMargin: parent.height * 0.12 }
+        anchors { horizontalCenter: parent.horizontalCenter; bottom: parent.bottom
+                  bottomMargin: root.keyboard ? osk.height + 80 : parent.height * 0.12 }
         spacing: 12
 
         Row { // accounts (only shown when there is more than one)
@@ -113,6 +115,7 @@ Rectangle {
                 NumberAnimation { target: pill; property: "dx"; to: -10; duration: 70 }
                 NumberAnimation { target: pill; property: "dx"; to: 0; duration: 60 }
             }
+            TapHandler { onTapped: root.keyboard = true } // touch: bring up the keyboard
             TextInput {
                 id: password
                 anchors { fill: parent; leftMargin: 16; rightMargin: 16 }
@@ -128,8 +131,24 @@ Rectangle {
                 Keys.onEnterPressed: sddm.login(root.userName, password.text, root.sessionIndex)
             }
         }
+        Text { // show/hide the touch keyboard
+            anchors.horizontalCenter: parent.horizontalCenter
+            text: root.keyboard ? "Hide keyboard" : "⌨  Keyboard"
+            color: Qt.rgba(1, 1, 1, 0.75); font { family: root.fontName; pixelSize: 13 }
+            MouseArea { anchors.fill: parent; anchors.margins: -10; onClicked: root.keyboard = !root.keyboard }
+        }
         Text { anchors.horizontalCenter: parent.horizontalCenter; visible: root.message !== ""; text: root.message
             color: Qt.rgba(1, 1, 1, 0.85); font { family: root.fontName; pixelSize: 12 } }
+    }
+
+    OnScreenKeyboard {
+        id: osk
+        visible: root.keyboard
+        target: password
+        fontName: root.fontName
+        z: 10
+        anchors { horizontalCenter: parent.horizontalCenter; bottom: parent.bottom; bottomMargin: 70 }
+        onAccepted: sddm.login(root.userName, password.text, root.sessionIndex)
     }
 
     // bottom bar: session (Desktop / Game Mode) and power

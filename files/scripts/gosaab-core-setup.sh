@@ -40,6 +40,7 @@ for unit in cups.socket ipp-usb.service fwupd-refresh.timer; do systemctl enable
 
 # Button/combo shortcuts (handheld buttons, Windows+R -> Game Mode) in both sessions
 systemctl enable gosaab-hotkeyd.service || log "warning: shortcut service not enabled"
+systemctl enable thermald.service 2>/dev/null || true  # Intel only (see its drop-in)
 # After "Install on this PC (encrypted)": your account is created on the first start
 systemctl enable gosaab-firstboot-user.service || log "warning: first-boot account service not enabled"
 

@@ -14,6 +14,7 @@ Scope {
     // fades: the lock screen fades up from black; unlocking fades to black and the
     // compositor then fades the desktop back in
     property bool cover: true
+    property bool keyboard: false // touch keyboard (handhelds have no keyboard)
     function unlock() { cover = true; unlockTimer.start() }
     Timer { id: unlockTimer; interval: 300; onTriggered: sessionLock.locked = false }
     Timer { id: revealTimer; interval: 30; onTriggered: root.cover = false }
@@ -62,7 +63,9 @@ Scope {
 
             Column {
                 id: login
-                anchors { horizontalCenter: parent.horizontalCenter; bottom: parent.bottom; bottomMargin: parent.height * 0.12 }
+                anchors { horizontalCenter: parent.horizontalCenter; bottom: parent.bottom
+                          bottomMargin: root.keyboard ? osk.height + 40 : parent.height * 0.12 }
+                Behavior on anchors.bottomMargin { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
                 spacing: 12
                 Rectangle { // avatar
                     anchors.horizontalCenter: parent.horizontalCenter
@@ -95,6 +98,7 @@ Scope {
                         NumberAnimation { target: pill; property: "shake"; to: 8; duration: 60 }
                         NumberAnimation { target: pill; property: "shake"; to: 0; duration: 50 }
                     }
+                    TapHandler { onTapped: root.keyboard = true } // touching the field brings up the keyboard
                     TextInput {
                         id: password
                         anchors { fill: parent; leftMargin: 16; rightMargin: 16 }
@@ -113,6 +117,13 @@ Scope {
                         }
                     }
                 }
+                Text { // show/hide the touch keyboard
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    text: root.keyboard ? "Hide keyboard" : "⌨  Keyboard"
+                    color: Qt.rgba(1, 1, 1, 0.75)
+                    font { family: Theme.font; pixelSize: 13 }
+                    MouseArea { anchors.fill: parent; anchors.margins: -10; onClicked: root.keyboard = !root.keyboard }
+                }
                 Text {
                     anchors.horizontalCenter: parent.horizontalCenter
                     text: pam.messageText
@@ -120,6 +131,15 @@ Scope {
                     color: Qt.rgba(1, 1, 1, 0.8)
                     font { family: Theme.font; pixelSize: 12 }
                 }
+            }
+
+            OnScreenKeyboard {
+                id: osk
+                visible: root.keyboard
+                target: password
+                fontName: Theme.font
+                anchors { horizontalCenter: parent.horizontalCenter; bottom: parent.bottom; bottomMargin: 16 }
+                onAccepted: if (password.text !== "" && !pam.active) pam.start()
             }
         }
     }
@@ -149,5 +169,6 @@ Scope {
         function lock(): void { ShellState.closeAll(); root.cover = true; sessionLock.locked = true; revealTimer.start() }
         function isLocked(): bool { return sessionLock.locked }
         function unlockForTest(): void { if (root.testMode) root.unlock() }
+        function keyboard(): void { root.keyboard = !root.keyboard }
     }
 }

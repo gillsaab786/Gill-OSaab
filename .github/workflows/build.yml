@@ -58,3 +58,36 @@ jobs:
           registry_token: ${{ github.token }}
           pr_event_number: ${{ github.event.number }}
           maximize_build_space: true
+
+  core-nvidia:
+    name: Build image (recipe-core-nvidia.yml)
+    needs: bluebuild # built on top of the fresh gill-osaab-core
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    steps:
+      - name: Build custom image
+        uses: blue-build/github-action@v1.14
+        with:
+          recipe: recipe-core-nvidia.yml
+          cosign_private_key: ${{ secrets.SIGNING_SECRET }}
+          build_opts: "--no-sign"
+          registry_token: ${{ github.token }}
+          pr_event_number: ${{ github.event.number }}
+          maximize_build_space: true
+      - name: Check the Nvidia driver is in the image
+        if: github.event_name != 'pull_request'
+        run: |
+          img=ghcr.io/${{ github.repository_owner }}/gill-osaab-core-nvidia:latest
+          docker pull -q "$img"
+          docker run --rm "$img" bash -c '
+            set -e
+            k=$(ls /usr/lib/modules | head -1)
+            find /usr/lib/modules/$k -name "nvidia*.ko*" | sed "s|.*/||" | sort | tr "\n" " "; echo
+            modinfo -k "$k" -F license nvidia
+            rpm -q xorg-x11-drv-nvidia xorg-x11-drv-nvidia-libs.i686 libva-nvidia-driver
+            grep -q nouveau /usr/lib/bootc/kargs.d/00-gill-osaab-nvidia.toml
+            [ "$(ls /usr/lib/modules | wc -l)" = 1 ]
+            echo "PASS: Nvidia driver built for the image kernel"'

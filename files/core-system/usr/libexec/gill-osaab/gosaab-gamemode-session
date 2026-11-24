@@ -2,6 +2,10 @@
 # Game Mode: Steam's big-picture UI in gamescope, like SteamOS.
 export STEAM_MULTIPLE_XWAYLANDS=1 STEAM_GAMESCOPE_VRR_SUPPORTED=1 STEAM_USE_MANGOAPP=1
 export STEAM_DISABLE_MANGOAPP_ATOM_WORKAROUND=1 STEAM_GAMESCOPE_HDR_SUPPORTED=1
+# best FPS settings for this graphics chip (DLSS / FSR 4 / XeSS upgrades, Smooth Motion): see gosaab-fps
+gosaab-fps apply >/dev/null 2>&1
+fps_env="$HOME/.config/environment.d/60-gill-osaab-fps.conf"
+[ -f "$fps_env" ] && { set -a; . "$fps_env"; set +a; }
 # notifications + progress for the Decky plugin (Steam's Game Mode has no notification panel)
 /usr/libexec/gill-osaab/gosaab-notify-hub --force &
 exec gamescope -e -f --adaptive-sync --mangoapp -- steam -gamepadui -steamos3 -steampal -steamdeck

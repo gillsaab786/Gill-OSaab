@@ -61,6 +61,8 @@ Popup {
             } }
         Tile { width: (parent.width - 10) / 2; icon: "screenoff"; label: "Screen Off"; detail: "Wakes when done"
             onToggled: { ShellState.closeAll(); ShellState.run("gosaab-screen-off") } }
+        Tile { width: (parent.width - 10) / 2; icon: "keyboard"; label: "Keyboard"; detail: "Type with touch"
+            onToggled: { ShellState.closeAll(); ShellState.toggleKeyboard() } }
         Tile { width: (parent.width - 10) / 2; icon: "glasses"; label: "Glasses"; detail: "XREAL mode"
             onToggled: { ShellState.closeAll(); ShellState.run("gosaab-settings glasses") } }
     }

@@ -35,6 +35,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <wlr/types/wlr_virtual_keyboard_v1.h>
 #include <scenefx/render/fx_renderer/fx_renderer.h>
 #include <scenefx/types/fx/clipped_region.h>
 #include <scenefx/types/wlr_scene.h>
@@ -191,6 +192,7 @@ struct gs_server {
 	struct wl_listener request_cursor_shape;
 
 	struct wlr_seat *seat;
+	struct wl_listener new_virtual_keyboard;
 	struct wl_listener new_input, request_cursor, request_set_selection, request_set_primary_selection;
 	struct wl_list keyboards;
 	enum gs_cursor_mode cursor_mode;
@@ -2216,16 +2218,18 @@ static void keyboard_destroy(struct wl_listener *listener, void *data) {
 	free(kb);
 }
 
-static void new_keyboard(struct gs_server *server, struct wlr_input_device *device) {
+static void new_keyboard(struct gs_server *server, struct wlr_input_device *device, bool virtual) {
 	struct wlr_keyboard *wlr_keyboard = wlr_keyboard_from_input_device(device);
 	struct gs_keyboard *kb = calloc(1, sizeof(*kb));
 	kb->server = server;
 	kb->wlr_keyboard = wlr_keyboard;
-	struct xkb_context *context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
-	struct xkb_keymap *keymap = xkb_keymap_new_from_names(context, NULL, XKB_KEYMAP_COMPILE_NO_FLAGS);
-	wlr_keyboard_set_keymap(wlr_keyboard, keymap);
-	xkb_keymap_unref(keymap);
-	xkb_context_unref(context);
+	if (!virtual) { /* an on-screen keyboard brings its own keymap */
+		struct xkb_context *context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
+		struct xkb_keymap *keymap = xkb_keymap_new_from_names(context, NULL, XKB_KEYMAP_COMPILE_NO_FLAGS);
+		wlr_keyboard_set_keymap(wlr_keyboard, keymap);
+		xkb_keymap_unref(keymap);
+		xkb_context_unref(context);
+	}
 	wlr_keyboard_set_repeat_info(wlr_keyboard, 30, 400);
 	kb->modifiers.notify = keyboard_modifiers;
 	wl_signal_add(&wlr_keyboard->events.modifiers, &kb->modifiers);
@@ -2273,12 +2277,59 @@ static void configure_pointer(struct wlr_input_device *device) {
 	}
 }
 
+/* On-screen keyboard (wvkbd): its keys arrive as a keyboard of their own. */
+static void server_new_virtual_keyboard(struct wl_listener *listener, void *data) {
+	struct gs_server *server = wl_container_of(listener, server, new_virtual_keyboard);
+	struct wlr_virtual_keyboard_v1 *vk = data;
+	new_keyboard(server, &vk->keyboard.base, true);
+	wlr_seat_set_capabilities(server->seat, WL_SEAT_CAPABILITY_POINTER | WL_SEAT_CAPABILITY_KEYBOARD |
+		(server->has_touch ? WL_SEAT_CAPABILITY_TOUCH : 0));
+}
+
+/* Security: apps in a sandbox (Gill-OSaab's app sandbox, Flatpak) run in their own process
+ * namespace. They must not see the protocols that read the screen or clipboard, type keys into
+ * other apps, draw over everything (fake lock screens) or change displays. The shell, portals
+ * and the on-screen keyboard run outside any sandbox and keep them. */
+static ino_t own_pid_ns;
+
+static bool client_sandboxed(const struct wl_client *client) {
+	pid_t pid;
+	uid_t uid;
+	gid_t gid;
+	wl_client_get_credentials((struct wl_client *)client, &pid, &uid, &gid);
+	char path[64];
+	snprintf(path, sizeof(path), "/proc/%d/ns/pid", (int)pid);
+	struct stat st;
+	if (pid <= 0 || stat(path, &st) != 0) {
+		return true; /* can't tell: treat as untrusted */
+	}
+	return st.st_ino != own_pid_ns || uid != getuid();
+}
+
+static bool global_filter(const struct wl_client *client, const struct wl_global *global, void *data) {
+	static const char *privileged[] = {
+		"zwlr_layer_shell_v1", "zwlr_screencopy_manager_v1", "zwlr_export_dmabuf_manager_v1",
+		"zwlr_data_control_manager_v1", "ext_data_control_manager_v1", "zwlr_gamma_control_manager_v1",
+		"zwlr_output_manager_v1", "zwlr_output_power_manager_v1", "zwlr_foreign_toplevel_manager_v1",
+		"ext_session_lock_manager_v1", "zwp_virtual_keyboard_manager_v1", "zwlr_virtual_pointer_manager_v1",
+		"ext_image_copy_capture_manager_v1", "ext_output_image_capture_source_manager_v1",
+		"ext_foreign_toplevel_list_v1", NULL,
+	};
+	const char *name = wl_global_get_interface(global)->name;
+	for (int i = 0; privileged[i]; i++) {
+		if (strcmp(name, privileged[i]) == 0) {
+			return !client_sandboxed(client);
+		}
+	}
+	return true;
+}
+
 static void server_new_input(struct wl_listener *listener, void *data) {
 	struct gs_server *server = wl_container_of(listener, server, new_input);
 	struct wlr_input_device *device = data;
 	switch (device->type) {
 	case WLR_INPUT_DEVICE_KEYBOARD:
-		new_keyboard(server, device);
+		new_keyboard(server, device, false);
 		break;
 	case WLR_INPUT_DEVICE_POINTER:
 		configure_pointer(device);
@@ -3085,7 +3136,11 @@ int main(int argc, char *argv[]) {
 	wlr_subcompositor_create(server.display);
 	wlr_data_device_manager_create(server.display);
 	wlr_primary_selection_v1_device_manager_create(server.display);
+	struct stat ns_st;
+	own_pid_ns = stat("/proc/self/ns/pid", &ns_st) == 0 ? ns_st.st_ino : 0;
+	wl_display_set_global_filter(server.display, global_filter, NULL);
 	wlr_data_control_manager_v1_create(server.display);
+	struct wlr_virtual_keyboard_manager_v1 *vkbd_mgr = wlr_virtual_keyboard_manager_v1_create(server.display);
 	wlr_viewporter_create(server.display);
 	wlr_single_pixel_buffer_manager_v1_create(server.display);
 	wlr_fractional_scale_manager_v1_create(server.display, 1);
@@ -3213,6 +3268,8 @@ int main(int argc, char *argv[]) {
 	wl_signal_add(&server.cursor->events.touch_frame, &server.touch_frame);
 
 	wl_list_init(&server.keyboards);
+	server.new_virtual_keyboard.notify = server_new_virtual_keyboard;
+	wl_signal_add(&vkbd_mgr->events.new_virtual_keyboard, &server.new_virtual_keyboard);
 	server.new_input.notify = server_new_input;
 	wl_signal_add(&server.backend->events.new_input, &server.new_input);
 	server.seat = wlr_seat_create(server.display, "seat0");
@@ -3267,7 +3324,7 @@ int main(int argc, char *argv[]) {
 	struct wl_listener *server_listeners[] = {
 		&server.new_xdg_toplevel, &server.new_xdg_popup, &server.new_layer_surface, &server.new_decoration,
 		&server.cursor_motion, &server.cursor_motion_absolute, &server.cursor_button, &server.cursor_axis,
-		&server.cursor_frame, &server.request_cursor_shape, &server.new_input, &server.request_cursor,
+		&server.cursor_frame, &server.request_cursor_shape, &server.new_input, &server.new_virtual_keyboard, &server.request_cursor,
 		&server.request_set_selection, &server.request_set_primary_selection, &server.new_output,
 		&server.new_constraint, &server.request_activate, &server.new_lock, &server.new_inhibitor,
 		&server.swipe_begin, &server.swipe_update, &server.swipe_end, &server.pinch_begin, &server.pinch_update,

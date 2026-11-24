@@ -128,6 +128,20 @@ modules:
         - brightnessctl
         - firewalld
         - xdg-dbus-proxy
+        # CPU and GPU support for Intel and AMD (Nvidia: the core-nvidia edition)
+        - microcode_ctl
+        - amd-ucode-firmware
+        - thermald
+        - intel-media-driver
+        - libva-intel-media-driver
+        - intel-vpl-gpu-rt
+        - mesa-vulkan-drivers.i686
+        - mesa-dri-drivers.i686
+        - vulkan-tools
+        - gamemode
+        - mokutil
+        # on-screen keyboard for touch screens
+        - wvkbd
 
   - from-file: common.yml
 
