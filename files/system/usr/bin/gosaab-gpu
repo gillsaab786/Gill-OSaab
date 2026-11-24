@@ -1,0 +1,105 @@
+#!/usr/bin/env python3
+"""Which graphics chip apps use (PCs with integrated + dedicated graphics).
+
+  gosaab-gpu status          chips and mode (JSON)
+  gosaab-gpu run CMD...      run an app on the dedicated graphics
+  gosaab-gpu env-sh          shell lines for Game Mode (all of Steam on the dedicated graphics)
+  gosaab-gpu apply           at sign-in: games and game stores start on the dedicated graphics
+                             (Automatic), everything does (Dedicated), or nothing does (Integrated only)
+"""
+import json
+import os
+import re
+import sys
+from pathlib import Path
+
+sys.path.insert(0, "/usr/libexec/gill-osaab")
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "../libexec/gill-osaab"))
+import gosaab_gpu  # noqa: E402
+import gosaab_power as pw  # noqa: E402
+from gosaab_common import ETC, read_conf  # noqa: E402
+
+APPS = Path.home() / ".local/share/applications"
+ENV_FILE = Path.home() / ".config/environment.d/61-gill-osaab-gpu.conf"
+MARK = "X-Gill-OSaab-Graphics=dedicated"
+SYSTEM_DIRS = [Path("/usr/share/applications"), Path("/var/lib/flatpak/exports/share/applications"),
+               Path.home() / ".local/share/flatpak/exports/share/applications"]
+
+
+def mode():
+    return read_conf(ETC / "features.conf").get("gpu_mode", "auto")
+
+
+def status():
+    gpus = gosaab_gpu.gpus()
+    pair = pw.hybrid(gpus)
+    return {"gpus": gpus, "hybrid": bool(pair), "mode": mode(),
+            "integrated": pair[0] if pair else None, "dedicated": pair[1] if pair else None,
+            "env": pw.offload_env(pair[1]) if pair else {}}
+
+
+def wrap_desktop(text):
+    """Same app, started through gosaab-gpu run (so it renders on the dedicated graphics)."""
+    lines = []
+    for line in text.splitlines():
+        if line.startswith("Exec=") and "gosaab-gpu run" not in line:
+            line = "Exec=gosaab-gpu run " + line[5:]
+        lines.append(line)
+    out = "\n".join(lines)
+    return out.replace("[Desktop Entry]", "[Desktop Entry]\n" + MARK, 1) + "\n"
+
+
+def apply():
+    st = status()
+    APPS.mkdir(parents=True, exist_ok=True)
+    for f in APPS.glob("*.desktop"):  # remove our old copies
+        try:
+            if MARK in f.read_text(errors="ignore"):
+                f.unlink()
+        except OSError:
+            pass
+    env = st["env"] if st["hybrid"] and st["mode"] == "dedicated" else {}
+    ENV_FILE.parent.mkdir(parents=True, exist_ok=True)
+    ENV_FILE.write_text("# Gill-OSaab graphics (Settings > Game Mode > Graphics)\n" +
+                        "".join(f"{k}={v}\n" for k, v in sorted(env.items())))
+    if not st["hybrid"] or st["mode"] != "auto":
+        return 0
+    done = set()
+    for d in SYSTEM_DIRS:
+        for f in sorted(d.glob("*.desktop")) if d.is_dir() else []:
+            if f.stem in done or (APPS / f.name).exists():
+                continue
+            text = f.read_text(errors="ignore")
+            cats = next((ln[11:] for ln in text.splitlines() if ln.startswith("Categories=")), "")
+            prefers = re.search(r"^PrefersNonDefaultGPU=true", text, re.M) is not None
+            if pw.app_wants_dgpu(f.stem, cats, prefers):
+                (APPS / f.name).write_text(wrap_desktop(text))
+                done.add(f.stem)
+    print(f"games on the dedicated graphics: {', '.join(sorted(done)) or 'none'}")
+    return 0
+
+
+def main(argv):
+    cmd = argv[0] if argv else "status"
+    if cmd == "status":
+        print(json.dumps(status()))
+        return 0
+    if cmd == "apply":
+        return apply()
+    if cmd == "env-sh":
+        st = status()
+        if st["hybrid"] and st["mode"] != "integrated":
+            print("".join(f"export {k}={v}\n" for k, v in sorted(st["env"].items())), end="")
+        return 0
+    if cmd == "run" and len(argv) > 1:
+        st = status()
+        env = dict(os.environ)
+        if st["hybrid"] and st["mode"] != "integrated":
+            env.update(st["env"])
+        os.execvpe(argv[1], argv[1:], env)
+    print(__doc__.strip(), file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

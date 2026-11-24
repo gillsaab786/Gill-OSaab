@@ -1,0 +1,95 @@
+#!/usr/bin/python3
+"""(your session) Tells Smart TDP what you're doing, and pops up when the graphics chip changes.
+
+  gosaab-activity watch        keep reporting (started at sign-in)
+  gosaab-activity idle on|off  from the idle timer (swayidle)
+"""
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, "/usr/libexec/gill-osaab")
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__))))
+import gosaab_power as pw  # noqa: E402
+
+RUN = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
+STATE = RUN / "gosaab-activity"
+POWER = Path("/run/gill-osaab/power.json")
+
+
+def load():
+    try:
+        return json.loads(STATE.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def save(data):
+    tmp = STATE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data))
+    os.replace(tmp, STATE)
+
+
+def video_playing():
+    if not shutil.which("playerctl"):
+        return False
+    out = subprocess.run(["playerctl", "-a", "status"], capture_output=True, text=True, check=False).stdout
+    return "Playing" in out
+
+
+def notify(title, body):
+    subprocess.run(["notify-send", "-a", "Graphics", "-i", "video-display", "-t", "3000", "-e", title, body],
+                   capture_output=True, check=False)
+
+
+def gpu_change_message(was_active, now_active, dgpu, igpu, users):
+    """The small pop-up when the graphics chip in use changes (None: nothing to say)."""
+    if now_active and not was_active:
+        app = users[0][1] if users else "an app"
+        return "Dedicated graphics on", f"{dgpu} is now running {app}."
+    if was_active and not now_active:
+        return "Integrated graphics", f"Back to {igpu} – saving power."
+    return None
+
+
+def watch():
+    was = None
+    while True:
+        data = load()
+        data["video"] = video_playing()
+        save(data)
+        try:
+            st = json.loads(POWER.read_text())
+        except (OSError, ValueError):
+            st = {}
+        hyb = st.get("hybrid")
+        if hyb:
+            now = bool(st.get("dgpu_active"))
+            if was is not None:
+                msg = gpu_change_message(was, now, hyb["dedicated"]["name"], hyb["integrated"]["name"],
+                                         pw.dgpu_users(hyb["dedicated"]["slot"]) if now else [])
+                if msg:
+                    notify(*msg)
+            was = now
+        time.sleep(3)
+
+
+def main(argv):
+    if argv[:1] == ["watch"]:
+        watch()
+        return 0
+    if argv[:1] == ["idle"] and len(argv) == 2:
+        data = load()
+        data["idle"] = argv[1] == "on"
+        save(data)
+        return 0
+    print(__doc__.strip(), file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

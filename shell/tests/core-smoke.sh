@@ -119,6 +119,13 @@ check "installer picks the Nvidia edition on RTX/GTX 16 PCs" "python3 -c 'import
 check "on-screen keyboard for touch screens" "command -v wvkbd-mobintl >/dev/null"
 check "touch keyboard on the login screen" "[ -f /usr/share/sddm/themes/gill-osaab/OnScreenKeyboard.qml ] && [ ! -L /usr/share/sddm/themes/gill-osaab/OnScreenKeyboard.qml ]"
 check "Android helper pinned to a reviewed version, asks for a password" "grep -q WS_COMMIT= /usr/bin/gosaab-android-setup && grep -A8 org.gillosaab.android /usr/share/polkit-1/actions/org.gillosaab.session.policy | grep -q auth_admin_keep"
+# Smart TDP and graphics switching
+check "Smart TDP runs at start-up" "systemctl is-enabled gosaab-smart-power.service >/dev/null 2>&1"
+timeout 15 /usr/libexec/gill-osaab/gosaab-smart-power --once >/dev/null 2>&1
+echo "power: $(cat /run/gill-osaab/power.json 2>/dev/null | python3 -c 'import json,sys;d=json.load(sys.stdin);print(d["label"], d["device"], d["backend"], d["backends"])' 2>&1)"
+check "Smart TDP decides a power mode" "python3 -c 'import json;d=json.load(open(\"/run/gill-osaab/power.json\"));assert d[\"mode\"] in (\"idle\",\"video\",\"desktop\",\"game\")'"
+check "graphics switching tool" "gosaab-gpu status | python3 -c 'import json,sys;assert \"hybrid\" in json.load(sys.stdin)'"
+check "Smart TDP settings can be changed" "gosaab-config set features.conf tdp_game 28 && gosaab-config set features.conf gpu_mode integrated && gosaab-config set features.conf gpu_mode auto && ! gosaab-config set features.conf gpu_mode turbo 2>/dev/null"
 timeout 3 /usr/libexec/gill-osaab/gosaab-hotkeyd; rc=$?
 check "shortcut service starts (Desktop and Game Mode)" "[ $rc -eq 124 ]"
 

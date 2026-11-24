@@ -42,6 +42,7 @@ def gpus(devices=None, runner=None):
         name = d.get("Device", "")
         fam = family(v, name)
         out.append({"vendor": v, "name": name, "family": fam, "driver": d.get("Driver", ""),
+                    "slot": d.get("Slot", ""),
                     "discrete": fam in ("rtx50", "rtx40", "rtx30", "turing", "nvidia-old", "rdna4", "rdna3", "arc")
                     or d.get("Class") == "3D controller"})
     return out

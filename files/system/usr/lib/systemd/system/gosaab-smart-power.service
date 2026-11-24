@@ -1,0 +1,12 @@
+[Unit]
+Description=Gill-OSaab Smart TDP and graphics switching
+After=systemd-logind.service power-profiles-daemon.service tuned-ppd.service
+
+[Service]
+ExecStart=/usr/libexec/gill-osaab/gosaab-smart-power
+Restart=on-failure
+RestartSec=5
+Nice=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,194 @@
+#!/usr/bin/python3 -I
+"""Gill-OSaab Smart TDP and graphics switching (runs as admin, all the time).
+
+Every few seconds: what is the device doing (idle, video, everyday, gaming)? Give it the power that
+needs: package power limit (TDP) where the device allows it (ROG Ally/Legion Go firmware, AMD via
+ryzenadj, Intel RAPL) plus the matching power profile on every PC. On PCs with two graphics chips
+it can switch the dedicated one off (Integrated only) and back on, without restarting.
+Status for Settings and the shell: /run/gill-osaab/power.json
+"""
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, "/usr/libexec/gill-osaab")
+import gosaab_gpu  # noqa: E402
+import gosaab_hw  # noqa: E402
+import gosaab_power as pw  # noqa: E402
+from gosaab_common import ETC, is_on, read_conf  # noqa: E402
+
+STATUS = Path("/run/gill-osaab/power.json")
+TICK = 3.0
+
+
+def cmdlines():
+    out = []
+    for p in Path("/proc").glob("[0-9]*/cmdline"):
+        try:
+            out.append(p.read_bytes().replace(b"\0", b" ").decode(errors="ignore"))
+        except OSError:
+            continue
+    return out
+
+
+def active_user():
+    sid = subprocess.run(["loginctl", "show-seat", "seat0", "-p", "ActiveSession", "--value"],
+                         capture_output=True, text=True, check=False).stdout.strip()
+    if not sid:
+        return None
+    uid = subprocess.run(["loginctl", "show-session", sid, "-p", "User", "--value"], capture_output=True,
+                         text=True, check=False).stdout.strip()
+    return int(uid) if uid.isdigit() else None
+
+
+def activity(uid):
+    """What the person's session reports (video playing, idle), written by gosaab-activity."""
+    if uid is None:
+        return {"idle": True}
+    path = Path(f"/run/user/{uid}/gosaab-activity")
+    try:
+        st = path.lstat()
+        if st.st_uid != uid or not path.is_file() or time.time() - st.st_mtime > 30:
+            return {}
+        return json.loads(path.read_text()[:4096])
+    except (OSError, ValueError):
+        return {}
+
+
+def runtime_active(slot):
+    return gosaab_hw.read(Path(pw.pci_path(slot)) / "power/runtime_status") == "active"
+
+
+def gpu_busy(gpus):
+    """Highest load of the graphics chips that are awake (reading a sleeping chip would wake it)."""
+    busy = 0
+    for g in gpus:
+        if g["discrete"] and g["slot"] and not runtime_active(g["slot"]):
+            continue
+        val = gosaab_hw.read(Path(pw.pci_path(g["slot"])) / "gpu_busy_percent") if g["slot"] else ""
+        if val.isdigit():
+            busy = max(busy, int(val))
+        elif g["vendor"] == "nvidia" and g.get("driver") == "nvidia" and shutil.which("nvidia-smi"):
+            out = subprocess.run(["nvidia-smi", "--query-gpu=utilization.gpu", "--format=csv,noheader,nounits"],
+                                 capture_output=True, text=True, check=False, timeout=5).stdout.strip()
+            if out.split("\n")[0].strip().isdigit():
+                busy = max(busy, int(out.split("\n")[0]))
+    return busy
+
+
+def apply_tdp(backends, watts, mode):
+    """Returns the backend that took the limit ('' if only the power profile applies)."""
+    used = ""
+    for name, path in backends:
+        actions = pw.tdp_actions(name, path, pw.clamp_watts(watts)) if watts else []
+        if not actions:
+            continue
+        ok = True
+        for kind, target, *value in actions:
+            try:
+                if kind == "write":
+                    Path(target).write_text(value[0])
+                else:
+                    ok = subprocess.run(target, capture_output=True, check=False, timeout=10).returncode == 0 and ok
+            except OSError:
+                ok = False
+        if ok:
+            used = name
+            break
+    if shutil.which("powerprofilesctl"):
+        subprocess.run(["powerprofilesctl", "set", pw.PROFILE[mode]], capture_output=True, check=False)
+    return used
+
+
+def display_on(slot):
+    """Is a screen connected to this chip? (Then it must never be switched off.)"""
+    for status in Path(pw.pci_path(slot)).glob("drm/card*/card*-*/status"):
+        if gosaab_hw.read(status) == "connected":
+            return True
+    return gosaab_hw.read(Path(pw.pci_path(slot)) / "boot_vga") == "1"
+
+
+def set_gpu_mode(mode, pair, removed):
+    """integrated: switch the dedicated chip off (PCI remove); anything else: bring it back (rescan)."""
+    if not pair:
+        return removed, ""
+    _igpu, dgpu = pair
+    path = Path(pw.pci_path(dgpu["slot"]))
+    if mode == "integrated" and path.exists():
+        if display_on(dgpu["slot"]):
+            return removed, "A screen is connected to the dedicated graphics, so it stays on."
+        if pw.dgpu_users(dgpu["slot"]):
+            return removed, "Close the apps using the dedicated graphics first."
+        try:
+            (path / "remove").write_text("1")
+            return True, ""
+        except OSError as e:
+            return removed, f"Couldn't switch it off: {e}"
+    if mode != "integrated" and removed:
+        try:
+            Path("/sys/bus/pci/rescan").write_text("1")
+            return False, ""
+        except OSError as e:
+            return removed, f"Couldn't switch it on: {e}"
+    return removed, ""
+
+
+def main():
+    hw = gosaab_hw.summary()
+    has_battery = any(gosaab_hw.read(p / "type") == "Battery" for p in Path("/sys/class/power_supply").glob("*"))
+    device = pw.device_class(hw.get("cpu", ""), gosaab_hw.read("/sys/class/dmi/id/chassis_type"), has_battery)
+    backends = pw.tdp_backends()
+    gpus = gosaab_gpu.gpus()
+    pair = pw.hybrid(gpus)
+    mode, changed_at, removed, gpu_msg, applied = "desktop", time.monotonic(), False, "", None
+    last_gpu_mode = None
+    while True:
+        conf = read_conf(ETC / "features.conf")
+        smart = is_on(conf, "smart_tdp", default=True)
+        gpu_mode = conf.get("gpu_mode", "auto")
+        if gpu_mode != last_gpu_mode:
+            removed, gpu_msg = set_gpu_mode(gpu_mode, pair, removed)
+            last_gpu_mode = gpu_mode
+        uid = active_user()
+        act = activity(uid)
+        signals = {"game": pw.game_running(cmdlines()), "video": act.get("video", False),
+                   "idle": act.get("idle", False), "gpu_busy": gpu_busy([g for g in gpus if not removed
+                                                                        or not g["discrete"]])}
+        new = pw.decide(signals, mode, time.monotonic() - changed_at)
+        if new != mode:
+            mode, changed_at = new, time.monotonic()
+        watts = pw.watts_for(device, conf)
+        key = (mode, smart, watts[mode])
+        # re-apply on a change, and every minute (firmware or other tools may reset the limit)
+        if applied and applied[0] == key and time.monotonic() - applied[2] < 60:
+            backend = applied[1]
+        else:
+            backend = apply_tdp(backends if smart else [], watts[mode] if smart else 0, mode)
+            applied = (key, backend, time.monotonic())
+        status = {"mode": mode, "label": pw.LABELS[mode], "smart_tdp": smart, "watts": watts[mode] if smart else 0,
+                  "watts_all": watts, "device": device, "backend": backend or "power-profile",
+                  "backends": [b for b, _ in backends], "signals": signals,
+                  "hybrid": {"integrated": pair[0], "dedicated": pair[1]} if pair else None,
+                  "gpu_mode": gpu_mode, "dgpu_off": removed, "gpu_message": gpu_msg,
+                  "dgpu_active": bool(pair) and not removed and runtime_active(pair[1]["slot"])}
+        STATUS.parent.mkdir(parents=True, exist_ok=True)
+        tmp = STATUS.with_suffix(".tmp")
+        tmp.write_text(json.dumps(status))
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, STATUS)
+        time.sleep(TICK)
+
+
+if __name__ == "__main__":
+    if os.geteuid() != 0:
+        print("runs as admin (gosaab-smart-power.service)", file=sys.stderr)
+        sys.exit(2)
+    if "--once" in sys.argv:  # for tests: one status snapshot
+        TICK = 0.5
+        import threading
+        threading.Timer(4, lambda: os._exit(0)).start()
+    main()

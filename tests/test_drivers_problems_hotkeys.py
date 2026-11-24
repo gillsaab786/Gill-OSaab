@@ -393,5 +393,84 @@ class SecureBootFirmware(unittest.TestCase):
         self.assertIn('"enabled"', json.dumps(json.loads(out)))
 
 
+import gosaab_power as pw  # noqa: E402
+
+gpu_cli = load("usr/bin/gosaab-gpu", "gosaab_gpu_cli")
+activity = load("usr/libexec/gill-osaab/gosaab-activity", "gosaab_activity")
+
+
+class SmartPowerLogic(unittest.TestCase):
+    def test_device_class(self):
+        self.assertEqual(pw.device_class("AMD Ryzen Z1 Extreme", "31", True), "handheld")
+        self.assertEqual(pw.device_class("Intel Core i7-13700H", "10", True), "laptop")
+        self.assertEqual(pw.device_class("AMD Ryzen 7 7800X3D", "3", False), "desktop")
+
+    def test_modes(self):
+        self.assertEqual(pw.decide({"game": True, "idle": True}), "game")
+        self.assertEqual(pw.decide({"gpu_busy": 85}), "game")  # heavy work without a known game
+        self.assertEqual(pw.decide({"video": True}, "desktop", 100), "video")
+        self.assertEqual(pw.decide({"idle": True}, "desktop", 100), "idle")
+        self.assertEqual(pw.decide({}, "game", 3), "game")  # waits before dropping power
+        self.assertEqual(pw.decide({}, "game", 20), "desktop")
+
+    def test_games_detected(self):
+        self.assertTrue(pw.game_running(["/home/a/.steam/ubuntu12_32/reaper SteamLaunch AppId=1091500 -- proton"]))
+        self.assertTrue(pw.game_running(["/usr/bin/retroarch -L core.so game.sfc"]))
+        self.assertFalse(pw.game_running(["/usr/lib/steam/steamwebhelper --type=renderer", "vlc movie.mkv"]))
+
+    def test_watts(self):
+        w = pw.watts_for("handheld", {"tdp_game": "30", "tdp_idle": "0"})
+        self.assertEqual((w["idle"], w["game"]), (5, 30))
+        self.assertEqual(pw.watts_for("desktop", {})["game"], 0)
+
+    def test_backends(self):
+        with tempfile.TemporaryDirectory() as root:
+            r = Path(root)
+            (r / "proc").mkdir()
+            (r / "proc/cpuinfo").write_text("vendor_id : AuthenticAMD\n")
+            (r / "usr/bin").mkdir(parents=True)
+            (r / "usr/bin/ryzenadj").write_text("")
+            att = r / "sys/class/firmware-attributes/asus-armoury/attributes/ppt_pl1_spl"
+            att.mkdir(parents=True)
+            (att / "current_value").write_text("15")
+            names = [b for b, _ in pw.tdp_backends(r)]
+            self.assertEqual(names, ["firmware-attributes", "ryzenadj", "power-profile"])
+            (r / "proc/cpuinfo").write_text("vendor_id : GenuineIntel\n")
+            rapl = r / "sys/class/powercap/intel-rapl:0"
+            rapl.mkdir(parents=True)
+            (rapl / "constraint_0_power_limit_uw").write_text("0")
+            self.assertIn("intel-rapl", [b for b, _ in pw.tdp_backends(r)])
+            self.assertNotIn("ryzenadj", [b for b, _ in pw.tdp_backends(r)])
+        acts = pw.tdp_actions("ryzenadj", "ryzenadj", 15)
+        self.assertEqual(acts[0][1][:2], ["ryzenadj", "--stapm-limit=15000"])
+        self.assertEqual(pw.tdp_actions("intel-rapl", "/x", 20)[0], ("write", "/x/constraint_0_power_limit_uw", "20000000"))
+        self.assertEqual(pw.tdp_actions("power-profile", "", 20), [])
+
+    def test_hybrid_and_offload(self):
+        ig = {"vendor": "amd", "discrete": False, "name": "780M", "slot": "c4:00.0", "driver": "amdgpu"}
+        nv = {"vendor": "nvidia", "discrete": True, "name": "RTX 4060", "slot": "01:00.0", "driver": "nvidia"}
+        amd = {"vendor": "amd", "discrete": True, "name": "RX 7600S", "slot": "03:00.0", "driver": "amdgpu"}
+        self.assertEqual(pw.hybrid([ig, nv]), (ig, nv))
+        self.assertIsNone(pw.hybrid([ig]))
+        self.assertEqual(pw.offload_env(nv)["__NV_PRIME_RENDER_OFFLOAD"], "1")
+        self.assertEqual(pw.offload_env(amd), {"DRI_PRIME": "pci-0000_03_00_0"})
+        self.assertTrue(pw.app_wants_dgpu("steam"))
+        self.assertTrue(pw.app_wants_dgpu("some-game", "Game;ActionGame;"))
+        self.assertFalse(pw.app_wants_dgpu("vlc", "AudioVideo;Player;"))
+
+    def test_desktop_wrap(self):
+        out = gpu_cli.wrap_desktop("[Desktop Entry]\nName=Steam\nExec=steam %U\n[Desktop Action X]\nExec=steam -x\n")
+        self.assertIn("Exec=gosaab-gpu run steam %U", out)
+        self.assertIn("Exec=gosaab-gpu run steam -x", out)
+        self.assertIn(gpu_cli.MARK, out)
+        self.assertEqual(out.count("gosaab-gpu run"), 2)
+
+    def test_gpu_popup(self):
+        self.assertEqual(activity.gpu_change_message(False, True, "RTX 4060", "780M", [(1, "Cyberpunk2077.exe")]),
+                         ("Dedicated graphics on", "RTX 4060 is now running Cyberpunk2077.exe."))
+        self.assertEqual(activity.gpu_change_message(True, False, "RTX 4060", "780M", [])[0], "Integrated graphics")
+        self.assertIsNone(activity.gpu_change_message(True, True, "a", "b", []))
+
+
 if __name__ == "__main__":
     unittest.main()

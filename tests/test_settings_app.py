@@ -173,6 +173,13 @@ class FakeBackend:
     def last_update_text(self):
         return "Not yet"
 
+    def power_status(self):
+        return {"mode": "video", "label": "Video", "watts": 7, "device": "handheld", "backend": "firmware-attributes",
+                "watts_all": {"idle": 5, "video": 7, "desktop": 12, "game": 25}, "dgpu_active": False}
+
+    def gpu_status(self):
+        return getattr(self, "gpu", {"hybrid": False})
+
     def secure_boot(self):
         return getattr(self, "sb", {"supported": True, "enabled": False, "nvidia_edition": False, "pending": ""})
 
@@ -506,3 +513,26 @@ class GraphicalInstaller(unittest.TestCase):
         self.assertEqual(w.command(), ["pkexec", "/usr/bin/gosaab-install", "/dev/nvme0n1", "--yes", "--password-stdin"])
         w.encrypt = False
         self.assertIn("--no-encrypt", w.command())
+
+
+@unittest.skipUnless(HAVE_QT, "PySide6 not installed")
+class SmartPower(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        from PySide6.QtWidgets import QApplication
+        cls.gs = load("usr/bin/gosaab-settings")
+        cls.app = QApplication.instance() or QApplication([])
+
+    def test_smart_tdp_and_graphics(self):
+        b = FakeBackend()
+        w = self.gs.Settings(b)
+        self.assertFalse(hasattr(w, "gpu_pick"))  # one graphics chip: no switching section
+        boxes = w.findChildren(self.gs.QSpinBox)
+        game = [x for x in boxes if x.value() == 25][0]
+        game.setValue(30)
+        self.assertIn(("set", "features.conf", "tdp_game", "30"), b.calls)
+        b.gpu = {"hybrid": True, "mode": "auto", "integrated": {"name": "Radeon 780M"},
+                 "dedicated": {"name": "GeForce RTX 4060"}}
+        w = self.gs.Settings(b)
+        w.gpu_pick.setCurrentIndex(1)
+        self.assertIn(("set", "features.conf", "gpu_mode", "integrated"), b.calls)

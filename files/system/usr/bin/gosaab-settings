@@ -312,6 +312,15 @@ class Backend:
         except (OSError, ValueError):
             return "Not yet"
 
+    def power_status(self):
+        try:
+            return json.loads(Path("/run/gill-osaab/power.json").read_text())
+        except (OSError, ValueError):
+            return {}
+
+    def gpu_status(self):
+        return self._json(["gosaab-gpu", "status"], {})
+
     def fps_status(self):
         return self._json(["gosaab-fps", "status"], {})
 
@@ -1514,6 +1523,45 @@ class Settings(QMainWindow):
         self.backend.set_glasses_profiles({a: c.currentText() for a, c in self.glasses_combo.items()
                                            if c.currentText() != "Off"})
 
+    def smart_power_section(self, p):
+        st = self.backend.power_status()
+        watts = st.get("watts_all", {})
+        now = QLabel(f"●  {st.get('label', 'Everyday')}" + (f" · {st.get('watts')} W" if st.get("watts") else ""))
+        now.setObjectName("ok")
+        how = {"firmware-attributes": "the device's own power limit", "asus-wmi": "the ASUS power limit",
+               "ryzenadj": "the AMD power limit (ryzenadj)", "intel-rapl": "the Intel power limit (RAPL)"}
+        via = how.get(st.get("backend"), "power profiles (this PC has no adjustable power limit)")
+        rows = [Row("Smart TDP", "Gives the processor only the power the task needs: low for idle and video, "
+                    f"full for games. Uses {via}.", self.switch("features.conf", "smart_tdp", default=True)),
+                Row("Right now", "Changes by itself when you start a game, play a video or step away.", now)]
+        if st.get("device") != "desktop" and watts:
+            for mode, label in (("idle", "Idle"), ("video", "Video"), ("desktop", "Everyday"), ("game", "Gaming")):
+                box = QSpinBox()
+                box.setRange(3, 120)
+                box.setSuffix(" W")
+                box.setValue(int(watts.get(mode, 10)))
+                box.valueChanged.connect(lambda v, m=mode: self.backend.set_value("features.conf", f"tdp_{m}", str(v)))
+                rows.append(Row(f"{label} power", "", box))
+        p.section("Smart TDP", rows, "In Game Mode the Quick Access TDP slider still works; Smart TDP takes "
+                                     "over again when the game ends.")
+        g = self.backend.gpu_status()
+        if not g.get("hybrid"):
+            return
+        ig, dg = g.get("integrated") or {}, g.get("dedicated") or {}
+        self.gpu_pick = self.choice("features.conf", "gpu_mode", g.get("mode", "auto"), [
+            ("auto", "Automatic (recommended)"), ("integrated", "Integrated only – longest battery"),
+            ("dedicated", "Dedicated for everything – most power")])
+        self.gpu_pick.currentIndexChanged.connect(lambda _i: self.backend.run(["gosaab-gpu", "apply"], wait=False))
+        msg = st.get("gpu_message") or ""
+        p.section("Graphics", [
+            Row("Graphics chips", f"Integrated: {ig.get('name', '?')}\nDedicated: {dg.get('name', '?')}",
+                QLabel("●  Dedicated in use" if st.get("dgpu_active") else
+                       ("●  Dedicated off" if st.get("dgpu_off") else "●  Dedicated asleep"))),
+            Row("Which to use", "Automatic: the desktop, videos and browsing use the integrated chip and the "
+                "dedicated one sleeps; games and game stores start on the dedicated one. A small pop-up shows "
+                "when it switches. No restart needed. " + msg, self.gpu_pick)],
+            "Apps keep the chip they started on: restart a running game to move it.")
+
     def fps_section(self, p):
         st = self.backend.fps_status()
         g = st.get("main") or {}
@@ -1579,6 +1627,7 @@ class Settings(QMainWindow):
                 "option  LSFG_PROCESS=gosaab %command%. Needs Lossless Scaling from Steam."
                 + ("" if fg_ready else "  (Not installed on this system.)"), self.fg),
         ])
+        self.smart_power_section(p)
         self.fps_section(p)
         decky = p.button("Install Decky Loader (Game Mode plugins, notifications)")
         decky.clicked.connect(lambda: b.run(["foot", "-e", "sh", "-c",

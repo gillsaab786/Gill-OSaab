@@ -14,6 +14,7 @@ done
 swayidle -w \
   timeout 240 'brightnessctl -s -q set 30%' resume 'brightnessctl -r -q' \
   timeout 300 'qs -c gill-osaab ipc call lock lock' \
+  timeout 120 '/usr/libexec/gill-osaab/gosaab-activity idle on' resume '/usr/libexec/gill-osaab/gosaab-activity idle off' \
   before-sleep 'qs -c gill-osaab ipc call lock lock' &
 # download/copy/install progress from any app -> notifications with progress bars
 /usr/libexec/gill-osaab/gosaab-notify-hub --desktop &
@@ -25,6 +26,9 @@ command -v waydroid >/dev/null && /usr/libexec/gill-osaab/gosaab-android-notify 
 /usr/libexec/gill-osaab/gosaab-gamepad &
 # best FPS settings for this graphics chip (DLSS / FSR 4 / XeSS upgrades, Smooth Motion): see gosaab-fps
 gosaab-fps apply >/dev/null 2>&1
+gosaab-gpu apply >/dev/null 2>&1 # games start on the dedicated graphics (PCs with two graphics chips)
+for f in "$HOME/.config/environment.d/61-gill-osaab-gpu.conf"; do [ -f "$f" ] && { set -a; . "$f"; set +a; }; done
+/usr/libexec/gill-osaab/gosaab-activity watch & # Smart TDP: video/idle; pop-up when graphics change
 fps_env="$HOME/.config/environment.d/60-gill-osaab-fps.conf"
 [ -f "$fps_env" ] && { set -a; . "$fps_env"; set +a; }
 # the menu bar, Dock, notifications, Control Centre, Spotlight, Launchpad, lock screen
