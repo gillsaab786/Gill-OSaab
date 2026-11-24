@@ -32,7 +32,7 @@ jobs:
               dnf -y -q install quickshell >/dev/null 2>&1 || { dnf -y -q install dnf-plugins-core >/dev/null; \
                 dnf -y -q copr enable errornointernet/quickshell >/dev/null; dnf -y -q install quickshell >/dev/null; }
               qs --version || true
-              meson setup shell/compositor/build shell/compositor --buildtype=debugoptimized
+              sh shell/compositor/fetch-scenefx.sh && meson setup shell/compositor/build shell/compositor --buildtype=debugoptimized
               meson compile -C shell/compositor/build
               meson test -C shell/compositor/build --print-errorlogs
               bash shell/tests/run-headless.sh shell/compositor/build artifacts || headless_failed=1

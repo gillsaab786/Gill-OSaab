@@ -6,6 +6,7 @@ SRC=${1:-$(dirname "$(readlink -f "$0")")}
 BUILD_DEPS="gcc meson ninja-build pkgconf wayland-devel wayland-protocols-devel wlroots-devel scenefx-devel
   libxkbcommon-devel pixman-devel pango-devel cairo-devel libdrm-devel libinput-devel git-core mesa-libEGL-devel mesa-libgbm-devel libglvnd-devel"
 dnf -y install $BUILD_DEPS
+sh "$SRC/compositor/fetch-scenefx.sh"
 meson setup /tmp/gosaab-wm-build "$SRC/compositor" --prefix=/usr --buildtype=release
 meson compile -C /tmp/gosaab-wm-build
 meson test -C /tmp/gosaab-wm-build --print-errorlogs
