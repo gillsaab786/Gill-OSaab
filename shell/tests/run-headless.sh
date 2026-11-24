@@ -391,7 +391,8 @@ if command -v qs >/dev/null; then
   check "Spotlight finds actions (Lock Screen)" "qs -p $SHELLDIR ipc call spotlight rowKinds | grep -q action"
   qs -p "$SHELLDIR" ipc call spotlight search "report"; sleep 1.5; shot 26b-spotlight-files
   check "Spotlight finds files (~/Downloads/report.pdf)" "qs -p $SHELLDIR ipc call spotlight rowKinds | grep -q file"
-  qs -p "$SHELLDIR" ipc call spotlight search ""; qs -p "$SHELLDIR" ipc call spotlight show apps; sleep 1; shot 26c-spotlight-apps-view
+  qs -p "$SHELLDIR" ipc call spotlight search ""; qs -p "$SHELLDIR" ipc call spotlight showView apps; sleep 1; shot 26c-spotlight-apps-view
+  check "Spotlight's Apps view lists every app" "[ \"\$(qs -p $SHELLDIR ipc call spotlight currentView)\" = apps ] && qs -p $SHELLDIR ipc call spotlight results | grep -q Netflix"
   qs -p "$SHELLDIR" ipc call spotlight toggle; sleep 0.8; shot 27-after-spotlight
   qs -p "$SHELLDIR" ipc call launchpad toggle; sleep 1.2; shot 28-launchpad
   qs -p "$SHELLDIR" ipc call launchpad toggle; sleep 0.8; shot 29-after-launchpad

@@ -278,7 +278,8 @@ PanelWindow {
         target: "spotlight"
         function toggle(): void { ShellState.toggle("spotlight") }
         function search(text: string): void { ShellState.spotlight = true; input.text = text }
-        function show(view: string): void { ShellState.spotlight = true; spot.view = view }
+        function showView(name: string): void { ShellState.spotlight = true; spot.view = name }
+        function currentView(): string { return spot.view }
         function results(): string { return spot.rows.filter(r => r.kind === "app").map(r => r.title).join(",") }
         function rowKinds(): string { return spot.rows.map(r => r.kind).join(",") }
     }

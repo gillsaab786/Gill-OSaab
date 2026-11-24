@@ -170,7 +170,7 @@ PanelWindow {
         }
         margins { bottom: Theme.dockIcon + 26; left: Math.max(8, anchorX - implicitWidth / 2) }
         implicitWidth: ShellState.dockPopup === "trash" ? 200 : 340
-        implicitHeight: ShellState.dockPopup === "trash" ? 104 : Math.min(8, downloads.count) * 60 + 64
+        implicitHeight: 8 * 60 + 64
         color: "transparent"
         exclusionMode: ExclusionMode.Ignore
         WlrLayershell.layer: WlrLayer.Overlay
@@ -182,11 +182,13 @@ PanelWindow {
             anchors.fill: parent
             opacity: ShellState.dockPopup !== "" ? 1 : 0
             Behavior on opacity { NumberAnimation { duration: Theme.fast } }
+            MouseArea { anchors.fill: parent; onClicked: ShellState.dockPopup = "" } // empty space closes it
 
             // Trash menu
             Rectangle {
                 visible: ShellState.dockPopup === "trash"
-                anchors.fill: parent
+                anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                height: 104
                 radius: 16
                 color: Theme.panel
                 GlassRim { radius: 16 }
@@ -216,6 +218,7 @@ PanelWindow {
                 visible: ShellState.dockPopup === "downloads"
                 anchors.fill: parent
                 Repeater {
+                    id: fan
                     model: downloads
                     delegate: Item {
                         id: fanItem
@@ -242,13 +245,25 @@ PanelWindow {
                                 text: fanItem.fileName; color: fanMouse.containsMouse ? "white" : Theme.text
                                 font { family: Theme.font; pixelSize: 12; weight: Font.Medium } }
                         }
-                        IconImage {
+                        Item {
                             id: icon
                             anchors { right: parent.right; rightMargin: 4; verticalCenter: parent.verticalCenter }
-                            implicitSize: 50
-                            source: dock.fileIcon(fanItem.fileName, fanItem.fileIsDir)
+                            width: 50; height: 50
                             scale: fanMouse.pressed ? 0.9 : fanMouse.containsMouse ? 1.08 : 1
                             Behavior on scale { NumberAnimation { duration: Theme.fast } }
+                            readonly property string src: dock.fileIcon(fanItem.fileName, fanItem.fileIsDir)
+                            IconImage { anchors.fill: parent; source: parent.src; visible: parent.src !== "" }
+                            Rectangle { // no icon theme entry: a plain paper page with the file's extension
+                                visible: parent.src === ""
+                                anchors { fill: parent; leftMargin: 7; rightMargin: 7; topMargin: 2; bottomMargin: 2 }
+                                radius: 6; color: "white"
+                                GlassRim { radius: 6; strength: 0.6 }
+                                Icon { anchors { horizontalCenter: parent.horizontalCenter; top: parent.top; topMargin: 6 }
+                                    width: 20; height: 20; name: fanItem.fileIsDir ? "folder" : "file"; color: Theme.accent }
+                                Text { anchors { horizontalCenter: parent.horizontalCenter; bottom: parent.bottom; bottomMargin: 5 }
+                                    text: fanItem.fileIsDir ? "" : (fanItem.fileName.split(".").pop() || "").toUpperCase().substring(0, 4)
+                                    color: "#3a3a3c"; font { family: Theme.font; pixelSize: 9; weight: Font.Bold } }
+                            }
                         }
                         MouseArea { id: fanMouse; anchors.fill: parent; hoverEnabled: true
                             onClicked: { Quickshell.execDetached(["xdg-open", fanItem.fileUrl.toString()]); ShellState.dockPopup = "" } }
@@ -260,7 +275,7 @@ PanelWindow {
                     color: openAll.containsMouse ? Theme.accent : Theme.panel
                     GlassRim { radius: 15; strength: 0.7 }
                     Text { anchors.centerIn: parent; font { family: Theme.font; pixelSize: 12; weight: Font.DemiBold }
-                        text: downloads.count > 0 ? "Open in Files" : "No downloads yet"; color: openAll.containsMouse ? "white" : Theme.text }
+                        text: fan.count > 0 ? "Open in Files" : "No downloads yet"; color: openAll.containsMouse ? "white" : Theme.text }
                     MouseArea { id: openAll; anchors.fill: parent; hoverEnabled: true
                         onClicked: { ShellState.run("xdg-open \"$HOME/Downloads\""); ShellState.dockPopup = "" } }
                 }
