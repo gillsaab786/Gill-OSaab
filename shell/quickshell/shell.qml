@@ -32,6 +32,7 @@ ShellRoot {
     Notifications {}
     Spotlight {}
     Launchpad {}
+    Switcher {}
     LockScreen {}
     GlassesProfiles {}
     BluetoothBatteries {}

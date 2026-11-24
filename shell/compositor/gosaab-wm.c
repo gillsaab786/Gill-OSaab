@@ -34,6 +34,7 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <sys/stat.h>
 #include <scenefx/render/fx_renderer/fx_renderer.h>
 #include <scenefx/types/fx/clipped_region.h>
 #include <scenefx/types/wlr_scene.h>
@@ -102,6 +103,10 @@
 #define MINIMIZE_MS 380.0
 #define OVERVIEW_MS 340.0
 #define WORKSPACE_MS 360.0
+#define GEO_MS 380.0      /* zoom / split screen / restore glide */
+#define LAUNCH_MS 420.0   /* app opens out of its icon */
+#define FOCUS_MS 180.0
+#define FADE_MS 450.0
 #define WORKSPACES 4
 
 /* Colours (premultiplied alpha) */
@@ -206,6 +211,10 @@ struct gs_server {
 	double swipe_dx, swipe_dy;  /* three/four-finger touchpad swipe in progress */
 	uint32_t swipe_fingers;
 
+	struct wlr_scene_rect *fade_rect; /* fades the desktop in after sign-in and unlock */
+	struct gs_anim fade_anim;
+	bool switching;             /* Alt/Super+Tab switcher is up (the shell draws it) */
+
 	bool overview;              /* Mission Control is showing */
 	bool overview_entering;
 	struct gs_anim overview_anim;
@@ -254,6 +263,11 @@ struct gs_toplevel {
 	struct wl_listener ftl_activate, ftl_close, ftl_maximize, ftl_minimize, ftl_fullscreen, ftl_rectangle;
 	struct wlr_box dock_rect;   /* where this app's Dock icon is (layout coords), for minimise */
 	struct gs_anim min_anim;    /* minimise into / restore out of the Dock */
+	struct gs_anim geo_anim;    /* glide from geo_from to the window's new place and size */
+	struct wlr_box geo_from;    /* visual box (layout coords) the glide starts from */
+	bool geo_pending;           /* waiting for the app to draw at its new size, then glide */
+	bool launch_zoom;           /* geo glide is an app opening out of its Dock/Launchpad icon */
+	struct gs_anim focus_anim;  /* shadow deepens / lightens on focus change */
 	struct gs_slot ov;          /* place in Mission Control */
 	int ws;                     /* which space this window lives on */
 	bool in_overview;           /* has a place in the current Mission Control */
@@ -615,7 +629,13 @@ static void apply_toplevel_visual(struct gs_toplevel *t, float scale, float alph
 	wlr_scene_blur_set_corner_radii(t->blur, corner_radii_all(sradius));
 	wlr_scene_blur_set_alpha(t->blur, alpha);
 	wlr_scene_node_set_position(&t->blur->node, dx, dy);
-	float shadow_color[4] = { 0.0f, 0.0f, 0.0f, (t->activated ? 0.55f : 0.35f) * alpha };
+	/* the front window's shadow deepens smoothly when it gets focus (and lightens when it loses it) */
+	double fp = t->focus_anim.active ? gs_ease_in_out_cubic(gs_anim_progress(&t->focus_anim, now_ms())) : 1.0;
+	float depth = t->activated ? (float)gs_lerp(0.35, 0.55, fp) : (float)gs_lerp(0.55, 0.35, fp);
+	if (t->focus_anim.active && fp >= 1.0) {
+		t->focus_anim.active = false;
+	}
+	float shadow_color[4] = { 0.0f, 0.0f, 0.0f, depth * alpha };
 	wlr_scene_shadow_set_color(t->shadow, shadow_color);
 	wlr_scene_shadow_set_size(t->shadow, sw + sigma * 2, sh + sigma * 2);
 	wlr_scene_node_set_position(&t->shadow->node, dx - sigma, dy - sigma + SHADOW_OFFSET_Y);
@@ -671,6 +691,23 @@ static bool update_toplevel_visual(struct gs_toplevel *t, double now) {
 			running = true;
 		}
 	}
+	if (t->geo_anim.active) { /* zoom, split screen, restore, open-from-icon: glide between boxes */
+		double p = gs_anim_progress(&t->geo_anim, now), e = gs_ease_spring(p);
+		struct wlr_box *f = &t->geo_from;
+		double s = gs_lerp((double)f->width / (fw > 0 ? fw : 1), 1.0, e);
+		scale *= s;
+		ox += gs_lerp(f->x + f->width / 2.0, cx, e) - cx;
+		oy += gs_lerp(f->y + f->height / 2.0, cy, e) - cy;
+		if (t->launch_zoom) {
+			alpha *= fmin(1.0, 0.25 + p * 2.0);
+		}
+		if (p >= 1.0) {
+			t->geo_anim.active = false;
+			t->launch_zoom = false;
+		} else {
+			running = true;
+		}
+	}
 	/* spaces slide sideways; windows on spaces out of view are switched off */
 	double ws_off = (t->ws - server->ws_view);
 	struct wlr_box full = full_area_of(server, toplevel_output(t));
@@ -720,9 +757,21 @@ static bool tick_animations(struct gs_server *server) {
 			running = true;
 		}
 	}
+	if (server->fade_anim.active) {
+		double p = gs_anim_progress(&server->fade_anim, now);
+		float c[4] = { 0, 0, 0, (float)(1.0 - gs_ease_in_out_cubic(p)) };
+		wlr_scene_rect_set_color(server->fade_rect, c);
+		if (p >= 1.0) {
+			server->fade_anim.active = false;
+			wlr_scene_node_set_enabled(&server->fade_rect->node, false);
+		} else {
+			running = true;
+		}
+	}
 	struct gs_toplevel *t;
 	wl_list_for_each(t, &server->toplevels, link) {
-		if (t->open.active || t->min_anim.active || overview_moving || ws_moving) {
+		if (t->open.active || t->min_anim.active || t->geo_anim.active || t->focus_anim.active ||
+				overview_moving || ws_moving) {
 			running = update_toplevel_visual(t, now) || running;
 		}
 	}
@@ -799,6 +848,8 @@ static void set_activated(struct gs_toplevel *t, bool activated) {
 		return;
 	}
 	t->activated = activated;
+	gs_anim_start(&t->focus_anim, now_ms(), anim_ms(FOCUS_MS));
+	schedule_frames(t->server);
 	wlr_xdg_toplevel_set_activated(t->xdg_toplevel, activated);
 	if (t->ftl) {
 		wlr_foreign_toplevel_handle_v1_set_activated(t->ftl, activated);
@@ -878,6 +929,18 @@ static void minimize_toplevel(struct gs_toplevel *t) {
 	}
 }
 
+/* ------------------------------------------------------------------ glides */
+
+/* Remember where the window is now; when the app has redrawn at its new size, it glides there. */
+static void begin_glide(struct gs_toplevel *t) {
+	if (!t->mapped || frame_w(t) <= 0) {
+		return;
+	}
+	t->geo_from = (struct wlr_box){ t->tree->node.x, t->tree->node.y, frame_w(t), frame_h(t) };
+	t->geo_pending = true;
+	schedule_frames(t->server);
+}
+
 /* ------------------------------------------------------------------ snapping (split screen) */
 
 static struct wlr_box snap_box(struct gs_server *server, int zone) {
@@ -897,6 +960,7 @@ static void tile_toplevel(struct gs_toplevel *t, int zone) {
 	}
 	if (zone == 0) {
 		if (t->tiled) {
+			begin_glide(t);
 			t->tiled = false;
 			wlr_scene_node_set_position(&t->tree->node, t->saved.x, t->saved.y);
 			request_frame_size(t, t->saved.width, t->saved.height);
@@ -906,6 +970,7 @@ static void tile_toplevel(struct gs_toplevel *t, int zone) {
 	if (!t->tiled) {
 		t->saved = (struct wlr_box){ t->tree->node.x, t->tree->node.y, frame_w(t), frame_h(t) };
 	}
+	begin_glide(t);
 	t->tiled = true;
 	struct wlr_box b = snap_box(t->server, zone);
 	wlr_scene_node_set_position(&t->tree->node, b.x, b.y);
@@ -1062,6 +1127,8 @@ static void arrange_layers(struct gs_server *server) {
 	output->usable = usable;
 	}
 	struct wlr_box all = layout_area(server);
+	wlr_scene_rect_set_size(server->fade_rect, all.width, all.height);
+	wlr_scene_node_set_position(&server->fade_rect->node, all.x, all.y);
 	wlr_scene_rect_set_size(server->layers.backdrop, all.width, all.height);
 	wlr_scene_node_set_position(&server->layers.backdrop->node, all.x, all.y);
 	wlr_scene_rect_set_size(server->layers.dim_rect, all.width, all.height);
@@ -1213,6 +1280,9 @@ static void request_frame_size(struct gs_toplevel *t, int w, int h) {
 static void set_maximized(struct gs_toplevel *t, bool maximized) {
 	if (t->maximized == maximized) {
 		return;
+	}
+	if (t->server->cursor_mode != CURSOR_MOVE) { /* not while dragging it off the top edge */
+		begin_glide(t);
 	}
 	if (maximized) {
 		t->saved = (struct wlr_box){ t->tree->node.x, t->tree->node.y, frame_w(t), frame_h(t) };
@@ -1398,6 +1468,11 @@ static void toplevel_commit(struct wl_listener *listener, void *data) {
 		place_centered(t);
 		t->placed = true;
 	}
+	if (t->geo_pending && (frame_w(t) != t->geo_from.width || frame_h(t) != t->geo_from.height)) {
+		t->geo_pending = false;
+		gs_anim_start(&t->geo_anim, now_ms(), anim_ms(GEO_MS));
+		schedule_frames(t->server);
+	}
 	if (t->ssd && t->mapped) {
 		/* re-render the title when the width changes enough to matter */
 		int max_w = frame_w(t) - 2 * (GS_BUTTON_X0 + 3 * (GS_BUTTON_D + GS_BUTTON_GAP)) - 8;
@@ -1406,6 +1481,28 @@ static void toplevel_commit(struct wl_listener *listener, void *data) {
 		}
 	}
 	refresh_toplevel(t);
+}
+
+/* The shell writes "x y w h" of the icon that was tapped to $XDG_RUNTIME_DIR/gosaab-launch-origin
+ * just before starting an app; the next window to open within a few seconds grows out of it. */
+static bool launch_origin(struct wlr_box *box) {
+	const char *runtime = getenv("XDG_RUNTIME_DIR");
+	char path[512];
+	snprintf(path, sizeof(path), "%s/gosaab-launch-origin", runtime ? runtime : "/tmp");
+	FILE *f = fopen(path, "r");
+	if (f == NULL) {
+		return false;
+	}
+	int x, y, w, h;
+	bool ok = fscanf(f, "%d %d %d %d", &x, &y, &w, &h) == 4 && w > 0 && h > 0;
+	fclose(f);
+	struct stat st;
+	ok = ok && stat(path, &st) == 0 && time(NULL) - st.st_mtime <= 8;
+	unlink(path); /* use once */
+	if (ok) {
+		*box = (struct wlr_box){ x, y, w, h };
+	}
+	return ok;
 }
 
 static void toplevel_map(struct wl_listener *listener, void *data) {
@@ -1419,12 +1516,19 @@ static void toplevel_map(struct wl_listener *listener, void *data) {
 	}
 	wl_list_insert(&t->server->toplevels, &t->link);
 	ftl_create(t);
-	gs_anim_start(&t->open, now_ms(), anim_ms(OPEN_MS));
+	struct wlr_box origin;
+	if (launch_origin(&origin) && frame_w(t) > 0) { /* opened from the Dock/Launchpad: grow out of the icon */
+		t->geo_from = origin;
+		t->launch_zoom = true;
+		gs_anim_start(&t->geo_anim, now_ms(), anim_ms(LAUNCH_MS));
+	} else {
+		gs_anim_start(&t->open, now_ms(), anim_ms(OPEN_MS));
+	}
 	focus_toplevel(t);
 	if (t->ssd) {
 		titlebar_render_title(t);
 	}
-	apply_toplevel_visual(t, 0.94f, 0.0f, 0, 0);
+	update_toplevel_visual(t, now_ms());
 	schedule_frames(t->server);
 }
 
@@ -1743,6 +1847,19 @@ static void handle_new_decoration(struct wl_listener *listener, void *data) {
 	decoration_apply(d);
 }
 
+/* ------------------------------------------------------------------ fade the whole screen in */
+
+static void fade_in(struct gs_server *server) {
+	if (getenv("GOSAAB_NO_FADE")) {
+		wlr_scene_node_set_enabled(&server->fade_rect->node, false);
+		return;
+	}
+	wlr_scene_node_set_enabled(&server->fade_rect->node, true);
+	wlr_scene_node_raise_to_top(&server->fade_rect->node);
+	gs_anim_start(&server->fade_anim, now_ms(), FADE_MS); /* not slowed down by tests */
+	schedule_frames(server);
+}
+
 /* ------------------------------------------------------------------ lock screen */
 
 struct gs_lock_surface {
@@ -1794,6 +1911,7 @@ static void lock_unlock(struct wl_listener *listener, void *data) {
 	lock_release(server);
 	server->locked = false;
 	wlr_scene_node_set_enabled(&server->lock_tree->node, false);
+	fade_in(server); /* the desktop fades in from dark, like unlocking a Mac */
 	wlr_seat_keyboard_clear_focus(server->seat);
 	struct gs_toplevel *t = focused_toplevel(server);
 	if (t) {
@@ -1966,7 +2084,12 @@ static bool handle_keybinding(struct gs_server *server, uint32_t mods, xkb_keysy
 	bool super = mods & WLR_MODIFIER_LOGO;
 	bool alt = mods & WLR_MODIFIER_ALT;
 	if ((super || alt) && sym == XKB_KEY_Tab) {
-		focus_next_toplevel(server);
+		if (getenv("GOSAAB_NO_SHELL")) {
+			focus_next_toplevel(server);
+		} else { /* the shell shows the app switcher; letting go of Alt/Super picks the app */
+			shell_ipc((mods & WLR_MODIFIER_SHIFT) ? "switcher previous" : "switcher next");
+			server->switching = true;
+		}
 		return true;
 	}
 	if (server->overview && (sym == XKB_KEY_Escape || sym == XKB_KEY_Return)) {
@@ -2054,6 +2177,11 @@ static bool handle_keybinding(struct gs_server *server, uint32_t mods, xkb_keysy
 
 static void keyboard_modifiers(struct wl_listener *listener, void *data) {
 	struct gs_keyboard *kb = wl_container_of(listener, kb, modifiers);
+	uint32_t mods = wlr_keyboard_get_modifiers(kb->wlr_keyboard);
+	if (kb->server->switching && !(mods & (WLR_MODIFIER_ALT | WLR_MODIFIER_LOGO))) {
+		kb->server->switching = false;
+		shell_ipc("switcher done");
+	}
 	wlr_seat_set_keyboard(kb->server->seat, kb->wlr_keyboard);
 	wlr_seat_keyboard_notify_modifiers(kb->server->seat, &kb->wlr_keyboard->modifiers);
 }
@@ -2746,6 +2874,9 @@ static void server_new_output(struct wl_listener *listener, void *data) {
 	wlr_scene_output_layout_add_output(server->scene_layout, l_output, scene_output);
 	wlr_scene_optimized_blur_set_size(server->layers.blur, wlr_output->width, wlr_output->height);
 	arrange_layers(server);
+	if (wl_list_length(&server->outputs) == 1) {
+		fade_in(server); /* signing in: the desktop fades in */
+	}
 }
 
 /* ------------------------------------------------------------------ signals and test hooks */
@@ -3004,6 +3135,7 @@ int main(int argc, char *argv[]) {
 	server.layers.top = wlr_scene_tree_create(&server.scene->tree);
 	server.layers.overlay = wlr_scene_tree_create(&server.scene->tree);
 	server.lock_tree = wlr_scene_tree_create(&server.scene->tree);
+	server.fade_rect = wlr_scene_rect_create(&server.scene->tree, 0, 0, (float[4]){ 0, 0, 0, 1 });
 	server.lock_bg = wlr_scene_rect_create(server.lock_tree, 0, 0, (float[4]){ 0.02f, 0.02f, 0.04f, 1.0f });
 	wlr_scene_node_set_enabled(&server.lock_tree->node, false);
 

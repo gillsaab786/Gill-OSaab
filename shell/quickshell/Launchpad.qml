@@ -35,7 +35,8 @@ PanelWindow {
         page = Math.floor(i / perPage)
     }
 
-    function open(e) {
+    function open(e, from) {
+        if (from) ShellState.launchFrom(from, pad.screen ? pad.screen.x : 0, pad.screen ? pad.screen.y : 0, 72)
         e.execute()
         ShellState.launchpad = false
     }
@@ -137,7 +138,7 @@ PanelWindow {
                                             style: Text.Raised; styleColor: Qt.rgba(0, 0, 0, 0.35)
                                         }
                                     }
-                                    MouseArea { id: appMouse; anchors.fill: parent; hoverEnabled: true; onClicked: pad.open(modelData) }
+                                    MouseArea { id: appMouse; anchors.fill: parent; hoverEnabled: true; onClicked: pad.open(modelData, parent) }
                                 }
                             }
                         }

@@ -99,6 +99,10 @@ Item {
                 return
             }
             if (m.button === Qt.MiddleButton || !item.isRunning) {
+                const win = item.QsWindow.window
+                if (win && win.screen)
+                    ShellState.launchFrom(item, win.screen.x + (win.screen.width - win.width) / 2,
+                                          win.screen.y + win.screen.height - win.height, Theme.dockIcon)
                 if (item.entry) item.entry.execute()
                 bounceAnim.restart()
                 return

@@ -11,7 +11,12 @@ Scope {
     readonly property string user: Quickshell.env("USER") || "user"
     readonly property string fullName: Quickshell.env("GOSAAB_USER_NAME") || user
 
-    function unlock() { sessionLock.locked = false }
+    // fades: the lock screen fades up from black; unlocking fades to black and the
+    // compositor then fades the desktop back in
+    property bool cover: true
+    function unlock() { cover = true; unlockTimer.start() }
+    Timer { id: unlockTimer; interval: 300; onTriggered: sessionLock.locked = false }
+    Timer { id: revealTimer; interval: 30; onTriggered: root.cover = false }
 
     WlSessionLock {
         id: sessionLock
@@ -20,6 +25,13 @@ Scope {
         WlSessionLockSurface {
             id: surface
             color: "black"
+            Rectangle { // fade cover
+                anchors.fill: parent
+                z: 100
+                color: "black"
+                opacity: root.cover ? 1 : 0
+                Behavior on opacity { NumberAnimation { duration: 300; easing.type: Easing.InOutCubic } }
+            }
 
             Image {
                 anchors.fill: parent
@@ -134,7 +146,7 @@ Scope {
 
     IpcHandler {
         target: "lock"
-        function lock(): void { ShellState.closeAll(); sessionLock.locked = true }
+        function lock(): void { ShellState.closeAll(); root.cover = true; sessionLock.locked = true; revealTimer.start() }
         function isLocked(): bool { return sessionLock.locked }
         function unlockForTest(): void { if (root.testMode) root.unlock() }
     }

@@ -354,6 +354,16 @@ if command -v qs >/dev/null; then
   qs -p "$SHELLDIR" ipc call spotlight toggle; sleep 0.8; shot 27-after-spotlight
   qs -p "$SHELLDIR" ipc call launchpad toggle; sleep 1.2; shot 28-launchpad
   qs -p "$SHELLDIR" ipc call launchpad toggle; sleep 0.8; shot 29-after-launchpad
+  # Alt+Tab app switcher (the compositor sends next/done; driven over IPC here)
+  qs -p "$SHELLDIR" ipc call switcher next; sleep 0.8; shot 29a-app-switcher
+  check "Alt+Tab switcher lists open apps" "[ \$(qs -p $SHELLDIR ipc call switcher count) -ge 1 ]"
+  qs -p "$SHELLDIR" ipc call switcher done; sleep 0.8; shot 29b-after-switcher
+  # iOS-style open: the window zooms out of the icon it was opened from
+  printf '%d %d %d %d' 900 1000 60 60 >"$XDG_RUNTIME_DIR/gosaab-launch-origin"
+  foot -W 60x12 -T "Zoom from icon" -e sh -c 'sleep 300' & sleep 0.25; shot 29c-launch-zoom
+  sleep 1.2; shot 29d-launched
+  check "app open zooms from its icon (origin used)" "[ ! -e $XDG_RUNTIME_DIR/gosaab-launch-origin ]"
+  pkill -f "Zoom from icon"; sleep 0.8
   python3 - "$OUT" <<'EOF5' || fail=1
 import sys
 from PIL import Image, ImageChops, ImageStat

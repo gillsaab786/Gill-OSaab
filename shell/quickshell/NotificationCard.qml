@@ -22,10 +22,20 @@ Rectangle {
     Component.onCompleted: slide = 0
     Behavior on slide { SpringAnimation { spring: 3.2; damping: 0.32; epsilon: 0.002 } }
 
+    // going away: slide out to the right and fade, then remove (also when swiped)
+    property bool leaving: false
+    property var afterLeave: null
+    function leave(fn) {
+        if (leaving) return
+        leaving = true; afterLeave = fn; slide = 1; leaveTimer.start()
+    }
+    function close() { leave(() => { if (card.banner) card.timedOut(); else card.notification.dismiss() }) }
+    Timer { id: leaveTimer; interval: 320; onTriggered: if (card.afterLeave) card.afterLeave() }
+
     Timer { // banners go away after 5s unless something is still in progress
         running: card.banner && (card.progress < 0 || card.progress >= 100) && !hover.containsMouse
         interval: card.progress >= 100 ? 3000 : 5000
-        onTriggered: card.timedOut()
+        onTriggered: card.leave(() => card.timedOut())
     }
 
     GlassRim { radius: 24 }
@@ -37,10 +47,18 @@ Rectangle {
         id: hover
         anchors.fill: parent
         hoverEnabled: true
+        property real startX: 0
+        property bool swiped: false
+        onPressed: (m) => { startX = m.x; swiped = false }
+        onPositionChanged: (m) => { if (pressed && !card.leaving) card.slide = Math.max(0, (m.x - startX) / 400) }
+        onReleased: (m) => {
+            if (card.slide > 0.25) { swiped = true; card.close() } else if (!card.leaving) card.slide = 0
+        }
         onClicked: {
+            if (swiped || card.leaving) return
             const def = card.notification.actions.find(a => a.identifier === "default")
             if (def) def.invoke()
-            if (card.banner) card.timedOut(); else card.notification.dismiss()
+            card.close()
         }
     }
 
