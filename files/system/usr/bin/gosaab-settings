@@ -371,11 +371,169 @@ class Backend:
                              capture_output=True, text=True, check=False)
         return out.stdout.strip() or "GillOSaabDark"
 
+    # ---- appearance shared with the shell (menu bar, Dock, widgets): ~/.config/gill-osaab/appearance.json
+    APPEARANCE = Path.home() / ".config/gill-osaab/appearance.json"
+    WALLPAPERS = Path("/usr/share/wallpapers")
+
+    def appearance(self):
+        try:
+            data = json.loads(self.APPEARANCE.read_text())
+            return data if isinstance(data, dict) else {}
+        except (OSError, ValueError):
+            return {}
+
+    def set_appearance(self, key, value):
+        data = self.appearance()
+        data[key] = value
+        self.APPEARANCE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.APPEARANCE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data, indent=2) + "\n")
+        os.replace(tmp, self.APPEARANCE)  # the shell watches the file and follows at once
+        return True
+
+    def wallpaper_thumb(self, folder, dark):
+        path = self.WALLPAPERS / folder / "contents" / ("images_dark" if dark else "images") / "3840x2160.png"
+        return str(path) if path.exists() else ""
+
+    # ---- ROG Ally stick lights (gosaab-ally-lights service)
+    def lights_status(self):
+        try:
+            return json.loads(Path("/run/gill-osaab/lights.json").read_text())
+        except (OSError, ValueError):
+            pass
+        try:
+            import gosaab_lights
+            return {"ally": gosaab_lights.is_rog_ally(), "backend": None}
+        except Exception:
+            return {"ally": False, "backend": None}
+
 
 # ------------------------------------------------------------------ HD icon tiles
+def draw_glyph(p, name, size):
+    """White line icons on a 24-unit grid, drawn in code so they never depend on an icon theme.
+    Returns False for a name it doesn't know."""
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QPen
+    k = size / 24
+    pen = QPen(QColor("white"), 2 * k)
+    pen.setCapStyle(Qt.RoundCap)
+    pen.setJoinStyle(Qt.RoundJoin)
+    p.setPen(pen)
+    p.setBrush(Qt.NoBrush)
+
+    def pt(x, y):
+        return QPointF(x * k, y * k)
+
+    def poly(*xy, close=False, fill=False):
+        path = QPainterPath(pt(xy[0], xy[1]))
+        for i in range(2, len(xy), 2):
+            path.lineTo(pt(xy[i], xy[i + 1]))
+        if close:
+            path.closeSubpath()
+        p.fillPath(path, QColor("white")) if fill else p.drawPath(path)
+
+    def rect(x, y, w, h, r, fill=False):
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(x * k, y * k, w * k, h * k), r * k, r * k)
+        p.fillPath(path, QColor("white")) if fill else p.drawPath(path)
+
+    def circle(x, y, r, fill=False):
+        if fill:
+            p.setBrush(QColor("white"))
+        p.drawEllipse(pt(x, y), r * k, r * k)
+        p.setBrush(Qt.NoBrush)
+
+    def arc(x, y, r, start, span):
+        p.drawArc(QRectF((x - r) * k, (y - r) * k, 2 * r * k, 2 * r * k), int(start * 16), int(span * 16))
+
+    if name == "update":
+        arc(12, 12, 7.5, 30, 250)
+        poly(17.5, 4.5, 18.6, 8.6, 14.5, 9.4)
+        poly(12, 8, 12, 12.5, 15, 14)
+    elif name == "warning":
+        poly(12, 3.5, 21.5, 20, 2.5, 20, close=True)
+        poly(12, 9.5, 12, 14)
+        circle(12, 17, 0.6, fill=True)
+    elif name == "chip":
+        rect(6.5, 6.5, 11, 11, 2)
+        rect(9.5, 9.5, 5, 5, 1, fill=True)
+        for i in (9, 12, 15):
+            poly(i, 3, i, 6.5)
+            poly(i, 17.5, i, 21)
+            poly(3, i, 6.5, i)
+            poly(17.5, i, 21, i)
+    elif name == "shield":
+        poly(12, 3, 19.5, 6, 19, 13, 12, 21, 5, 13, 4.5, 6, close=True)
+        poly(8.8, 12, 11.2, 14.4, 15.5, 9.6)
+    elif name == "folder":
+        poly(3, 7, 3, 18.5, 21, 18.5, 21, 8.5, 11.5, 8.5, 9.5, 5.5, 4.5, 5.5, 3, 7)
+    elif name == "globe":
+        circle(12, 12, 8.5)
+        p.drawEllipse(pt(12, 12), 3.8 * k, 8.5 * k)
+        poly(3.5, 12, 20.5, 12)
+    elif name == "glasses":
+        rect(2.5, 9, 8, 6.5, 3)
+        rect(13.5, 9, 8, 6.5, 3)
+        poly(10.5, 11, 13.5, 11)
+    elif name == "bell":
+        poly(6, 16.5, 6, 11, close=False)
+        arc(12, 11, 6, 0, 180)
+        poly(18, 11, 18, 16.5)
+        poly(4.5, 17, 19.5, 17)
+        arc(12, 18.5, 2, 180, 180)
+    elif name == "moon":
+        path = QPainterPath()
+        path.addEllipse(pt(12, 12), 8 * k, 8 * k)
+        cut = QPainterPath()
+        cut.addEllipse(pt(16.5, 8.5), 7 * k, 7 * k)
+        p.fillPath(path.subtracted(cut), QColor("white"))
+    elif name == "palette":
+        circle(12, 12, 8.5)
+        path = QPainterPath(pt(12, 3.5))
+        path.arcTo(QRectF(3.5 * k, 3.5 * k, 17 * k, 17 * k), 90, 180)
+        path.closeSubpath()
+        p.fillPath(path, QColor("white"))
+    elif name == "gamepad":
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(2.5 * k, 7 * k, 19 * k, 11 * k), 5.5 * k, 5.5 * k)
+        p.drawPath(path)
+        poly(7.5, 10.5, 7.5, 14.5)
+        poly(5.5, 12.5, 9.5, 12.5)
+        circle(15.5, 11.5, 0.9, fill=True)
+        circle(17.8, 13.6, 0.9, fill=True)
+    elif name == "keyboard":
+        rect(2.5, 6.5, 19, 11, 2.5)
+        for x in (6, 9.5, 13, 16.5):
+            circle(x, 10, 0.7, fill=True)
+        poly(7.5, 14, 16.5, 14)
+    elif name == "plus":
+        circle(12, 12, 8.5)
+        poly(12, 8, 12, 16)
+        poly(8, 12, 16, 12)
+    elif name == "info":
+        circle(12, 12, 8.5)
+        poly(12, 11, 12, 16.5)
+        circle(12, 7.8, 0.7, fill=True)
+    elif name == "lights":  # a glowing stick ring
+        circle(12, 12, 7.5)
+        circle(12, 12, 3.2, fill=True)
+        for a in range(0, 360, 45):
+            import math
+            c, sn = math.cos(math.radians(a)), math.sin(math.radians(a))
+            poly(12 + c * 9.5, 12 + sn * 9.5, 12 + c * 11, 12 + sn * 11)
+    elif name == "screen":
+        rect(3, 4.5, 18, 12, 2)
+        poly(9, 20, 15, 20)
+        poly(12, 16.5, 12, 20)
+    else:
+        return False
+    return True
+
+
 def tile_icon(color, glyph, letter):
-    """iOS-style icon: white glyph on a rounded colour square, drawn at 1x/2x/3x so it
-    stays sharp on high-resolution screens."""
+    """iOS-style icon: white glyph on a rounded colour square with a soft top light, drawn at
+    1x/2x/3x so it stays sharp on high-resolution screens."""
+    from PySide6.QtGui import QLinearGradient
     icon = QIcon()
     theme = QIcon.fromTheme(glyph)
     for scale in (1, 2, 3):
@@ -385,11 +543,21 @@ def tile_icon(color, glyph, letter):
         p = QPainter(pm)
         p.setRenderHint(QPainter.Antialiasing)
         path = QPainterPath()
-        path.addRoundedRect(QRectF(0, 0, size, size), size * 0.23, size * 0.23)
-        p.fillPath(path, QColor(color))
+        path.addRoundedRect(QRectF(0, 0, size, size), size * 0.26, size * 0.26)
+        grad = QLinearGradient(0, 0, 0, size)
+        grad.setColorAt(0, QColor(color).lighter(122))
+        grad.setColorAt(1, QColor(color))
+        p.fillPath(path, grad)
         inner = int(size * 0.62)
-        glyph_pm = theme.pixmap(inner, inner) if not theme.isNull() else QPixmap()
-        if not glyph_pm.isNull():
+        off = (size - inner) / 2
+        p.save()
+        p.translate(off, off)
+        drawn = draw_glyph(p, glyph, inner)
+        p.restore()
+        glyph_pm = theme.pixmap(inner, inner) if not drawn and not theme.isNull() else QPixmap()
+        if drawn:
+            pass
+        elif not glyph_pm.isNull():
             white = QPixmap(glyph_pm.size())
             white.fill(Qt.transparent)
             gp = QPainter(white)
@@ -397,7 +565,6 @@ def tile_icon(color, glyph, letter):
             gp.setCompositionMode(QPainter.CompositionMode_SourceIn)
             gp.fillRect(white.rect(), QColor("white"))
             gp.end()
-            off = (size - inner) // 2
             p.drawPixmap(QRectF(off, off, inner, inner), white, QRectF(white.rect()))
         else:
             font = QFont("Inter")
@@ -552,6 +719,235 @@ def haptic(kind="toggle"):
         pass
 
 
+class PreviewTile(QAbstractButton):
+    """A picture you pick, with its name under it (Appearance: mode, icon style, wallpaper).
+    paint(painter, rect) draws the picture; the chosen tile gets an accent ring."""
+
+    def __init__(self, label, paint, width=118, height=78):
+        super().__init__()
+        self.setCheckable(True)
+        self.setCursor(Qt.PointingHandCursor)
+        self.label, self.paint_fn = label, paint
+        self.pic = QSize(width, height)
+        self.setFixedSize(width + 8, height + 30)
+        self.setAccessibleName(label)
+
+    def paintEvent(self, _):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        r = QRectF(4, 4, self.pic.width(), self.pic.height())
+        clip = QPainterPath()
+        clip.addRoundedRect(r, 10, 10)
+        p.save()
+        p.setClipPath(clip)
+        self.paint_fn(p, r)
+        p.restore()
+        from PySide6.QtGui import QPen
+        p.setPen(QPen(ACCENT if self.isChecked() else QColor(255, 255, 255, 40), 3 if self.isChecked() else 1))
+        p.drawRoundedRect(r.adjusted(-1.5, -1.5, 1.5, 1.5), 11.5, 11.5)
+        p.setPen(QColor("#ffffff") if self.isChecked() else QColor("#b8b8c0"))
+        f = QFont("Inter")
+        f.setPixelSize(12)
+        f.setWeight(QFont.DemiBold if self.isChecked() else QFont.Normal)
+        p.setFont(f)
+        p.drawText(QRectF(0, r.bottom() + 6, self.width(), 18), Qt.AlignHCenter, self.label)
+
+
+class ColorDot(QAbstractButton):
+    """A round colour swatch; the chosen one shows a white ring."""
+
+    def __init__(self, color, name):
+        super().__init__()
+        self.setCheckable(True)
+        self.setCursor(Qt.PointingHandCursor)
+        self.color = QColor(color)
+        self.setToolTip(name)
+        self.setAccessibleName(name)
+        self.setFixedSize(30, 30)
+
+    def paintEvent(self, _):
+        from PySide6.QtGui import QPen
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setPen(Qt.NoPen)
+        p.setBrush(self.color)
+        p.drawEllipse(QRectF(5, 5, 20, 20))
+        if self.isChecked():
+            p.setBrush(Qt.NoBrush)
+            p.setPen(QPen(QColor("white"), 2))
+            p.drawEllipse(QRectF(1.5, 1.5, 27, 27))
+
+
+def picker(options, current, on_pick, spacing=10):
+    """A row of PreviewTiles/ColorDots that act as one choice. options: [(value, widget)]."""
+    box = QWidget()
+    lay = QHBoxLayout(box)
+    lay.setContentsMargins(0, 0, 0, 0)
+    lay.setSpacing(spacing)
+    group = QButtonGroup(box)
+    group.setExclusive(True)
+    for value, w in options:
+        w.setChecked(value == current)
+        w.clicked.connect(lambda _=False, v=value: (haptic("tick"), on_pick(v)))
+        group.addButton(w)
+        lay.addWidget(w)
+    lay.addStretch(1)
+    box.group = group
+    return box
+
+
+def segmented(options, current, on_pick):
+    """macOS-style segmented control. options: [(value, label)]."""
+    box = QWidget()
+    lay = QHBoxLayout(box)
+    lay.setContentsMargins(0, 0, 0, 0)
+    lay.setSpacing(0)
+    group = QButtonGroup(box)
+    for i, (value, label) in enumerate(options):
+        b = QPushButton(label)
+        b.setCheckable(True)
+        b.setObjectName("segLeft" if i == 0 else "segRight" if i == len(options) - 1 else "segMid")
+        b.setChecked(value == current)
+        b.clicked.connect(lambda _=False, v=value: (haptic("tick"), on_pick(v)))
+        group.addButton(b)
+        lay.addWidget(b)
+    box.group = group
+    return box
+
+
+ACCENTS = [("#0a84ff", "Blue"), ("#bf5af2", "Purple"), ("#ff375f", "Pink"), ("#ff453a", "Red"),
+           ("#ff9f0a", "Orange"), ("#ffd60a", "Yellow"), ("#30d158", "Green"), ("#8e8e93", "Graphite")]
+LIGHT_COLORS = [("0a84ff", "Blue"), ("64d2ff", "Cyan"), ("30d158", "Green"), ("ffd60a", "Yellow"),
+                ("ff9f0a", "Orange"), ("ff2d55", "Red"), ("ff64d2", "Pink"), ("bf5af2", "Purple"), ("ffffff", "White")]
+WIDGETS = [("clock", "Clock", True), ("weather", "Weather", True), ("calendar", "Calendar", True),
+           ("battery", "Battery", True), ("nowPlaying", "Now Playing", True), ("stats", "Processor & Memory", False)]
+
+
+def paint_icon_style(style):
+    """Sample app icon in one of the four Icon & widget styles."""
+    def paint(p, r):
+        from PySide6.QtGui import QLinearGradient
+        bg = QLinearGradient(r.topLeft(), r.bottomLeft())
+        bg.setColorAt(0, QColor("#2a4f9c"))
+        bg.setColorAt(1, QColor("#0d1d45"))
+        p.fillRect(r, bg)
+        size = r.height() * 0.62
+        for i, hue in enumerate((QColor("#ff9f0a"), QColor("#30d158"))):
+            x = r.center().x() - size - 4 + i * (size + 8)
+            sq = QRectF(x, r.center().y() - size / 2, size, size)
+            path = QPainterPath()
+            path.addRoundedRect(sq, size * 0.26, size * 0.26)
+            glyph = QColor("white")
+            if style == "default":
+                g = QLinearGradient(sq.topLeft(), sq.bottomLeft())
+                g.setColorAt(0, hue.lighter(125))
+                g.setColorAt(1, hue)
+                p.fillPath(path, g)
+            elif style == "dark":
+                p.fillPath(path, QColor(28, 28, 32))
+                glyph = hue
+            elif style == "clear":
+                p.fillPath(path, QColor(255, 255, 255, 50))
+            else:
+                p.fillPath(path, QColor(ACCENT.red(), ACCENT.green(), ACCENT.blue(), 110))
+                glyph = ACCENT.lighter(160)
+            p.setPen(Qt.NoPen)
+            p.setBrush(glyph)
+            p.drawEllipse(sq.center(), size * 0.2, size * 0.2)
+    return paint
+
+
+def paint_picture(paths):
+    """Wallpaper thumbnail(s); two paths are drawn split diagonally (light/dark, like macOS Auto)."""
+    cache = {}
+
+    def load(path, size):
+        key = (path, size.width(), size.height())
+        if key not in cache:
+            pm = QPixmap(path) if path else QPixmap()
+            cache[key] = pm.scaled(size, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation) if not pm.isNull() else pm
+        return cache[key]
+
+    def paint(p, r):
+        size = QSize(int(r.width()), int(r.height()))
+        for i, path in enumerate(paths):
+            pm = load(path, size)
+            if i == 1:
+                clip = QPainterPath(r.topRight())
+                clip.lineTo(r.bottomRight())
+                clip.lineTo(r.bottomLeft())
+                clip.closeSubpath()
+                p.setClipPath(clip, Qt.IntersectClip)
+            if pm.isNull():
+                p.fillRect(r, QColor("#1d3f8f") if i or "dark" in path else QColor("#8fb8f5"))
+            else:
+                p.drawPixmap(r.topLeft(), pm)
+    return paint
+
+
+def paint_mode(light, dark, mode):
+    """Mini desktop for the Light / Dark / Auto tiles: wallpaper, menu bar, a window and the Dock."""
+    pics = paint_picture([light] if mode == "light" else [dark] if mode == "dark" else [light, dark])
+
+    def paint(p, r):
+        pics(p, r)
+        p.setClipping(False)
+        win = QRectF(r.left() + r.width() * 0.16, r.top() + r.height() * 0.24, r.width() * 0.5, r.height() * 0.44)
+        path = QPainterPath()
+        path.addRoundedRect(win, 5, 5)
+        p.fillPath(path, QColor(245, 245, 247, 235) if mode != "dark" else QColor(40, 40, 44, 235))
+        dock = QRectF(r.center().x() - r.width() * 0.25, r.bottom() - 11, r.width() * 0.5, 7)
+        path = QPainterPath()
+        path.addRoundedRect(dock, 3.5, 3.5)
+        p.fillPath(path, QColor(255, 255, 255, 110))
+    return paint
+
+
+class LightsPreview(QWidget):
+    """Two glowing rings, like the Ally's sticks, in the colour the lights will show."""
+
+    def __init__(self, settings):
+        super().__init__()
+        self.settings = settings
+        self.setFixedHeight(150)
+
+    def colour(self, key):
+        import colorsys
+        raw = self.settings.lights.get(key, "0a84ff")
+        c = QColor("#" + raw) if len(raw) == 6 else QColor("#0a84ff")
+        h, sat, v = colorsys.rgb_to_hsv(c.redF(), c.greenF(), c.blueF())
+        sat *= int(self.settings.lights.get("lights_vividness", "100") or 0) / 100
+        v *= int(self.settings.lights.get("lights_brightness", "70") or 0) / 100
+        r, g, b = colorsys.hsv_to_rgb(h, sat, v)
+        return QColor.fromRgbF(r, g, b)
+
+    def paintEvent(self, _):
+        from PySide6.QtGui import QPen, QRadialGradient
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        lights = self.settings.lights
+        off = lights.get("lights_mode") == "off"
+        pairs = [("Desktop", "lights_color")]
+        if lights.get("lights_mode") == "gaming":
+            pairs.append(("Gaming", "lights_game_color"))
+        w = self.width() / len(pairs)
+        for i, (label, key) in enumerate(pairs):
+            col = QColor(40, 40, 44) if off else self.colour(key)
+            for j in (0, 1):
+                cx, cy = w * i + w / 2 + (j - 0.5) * 84, 62
+                glow = QRadialGradient(cx, cy, 52)
+                glow.setColorAt(0.55, QColor(col.red(), col.green(), col.blue(), 0 if off else 150))
+                glow.setColorAt(1, QColor(col.red(), col.green(), col.blue(), 0))
+                p.setPen(Qt.NoPen)
+                p.setBrush(glow)
+                p.drawEllipse(QRectF(cx - 52, cy - 52, 104, 104))
+                p.setBrush(QColor(22, 22, 24))
+                p.setPen(QPen(col, 6))
+                p.drawEllipse(QRectF(cx - 30, cy - 30, 60, 60))
+            p.setPen(QColor("#b8b8c0"))
+            p.drawText(QRectF(w * i, 124, w, 20), Qt.AlignHCenter, label)
+
+
 class Row(QWidget):
     """A settings row: title, optional subtitle, control on the right."""
 
@@ -560,6 +956,10 @@ class Row(QWidget):
         self.title_text = title
         lay = QHBoxLayout(self)
         lay.setContentsMargins(16, 11, 16, 11)
+        self.subtitle = None
+        if not title and control is not None:  # a full-width row (a row of pictures or swatches)
+            lay.addWidget(control, 1)
+            return
         text = QVBoxLayout()
         text.setSpacing(2)
         t = QLabel(title)
@@ -655,21 +1055,22 @@ class Page(QScrollArea):
 
 # ------------------------------------------------------------------ window
 PAGES = [
-    # title, tile colour, symbolic glyph, letter
-    ("Updates", "#0A84FF", "system-software-update-symbolic", "U"),
-    ("Problems", "#FF453A", "dialog-warning-symbolic", "!"),
-    ("Device & Drivers", "#30D158", "computer-symbolic", "D"),
-    ("Apps & Security", "#5E5CE6", "security-high-symbolic", "S"),
-    ("App Folders", "#64D2FF", "folder-symbolic", "F"),
-    ("VPN & Cloud", "#0A84FF", "network-vpn-symbolic", "V"),
-    ("Glasses", "#FF9F0A", "video-display-symbolic", "X"),
-    ("Notifications", "#FF453A", "preferences-system-notifications-symbolic", "N"),
-    ("Screen Off", "#FF9F0A", "video-display-symbolic", "O"),
-    ("Appearance", "#1FB6C9", "preferences-desktop-appearance-symbolic", "A"),
-    ("Game Mode", "#32D74B", "input-gaming-symbolic", "G"),
-    ("Buttons & Shortcuts", "#FF9F0A", "input-keyboard-symbolic", "B"),
-    ("Optional Features", "#BF5AF2", "view-more-symbolic", "+"),
-    ("About", "#8E8E93", "help-about-symbolic", "i"),
+    # title, tile colour, glyph (drawn by draw_glyph), letter
+    ("Updates", "#0A84FF", "update", "U"),
+    ("Problems", "#FF453A", "warning", "!"),
+    ("Device & Drivers", "#30D158", "chip", "D"),
+    ("Apps & Security", "#5E5CE6", "shield", "S"),
+    ("App Folders", "#64D2FF", "folder", "F"),
+    ("VPN & Cloud", "#0A84FF", "globe", "V"),
+    ("Glasses", "#FF9F0A", "glasses", "X"),
+    ("Notifications", "#FF453A", "bell", "N"),
+    ("Screen Off", "#5E5CE6", "moon", "O"),
+    ("Appearance", "#1FB6C9", "palette", "A"),
+    ("Game Mode", "#32D74B", "gamepad", "G"),
+    ("Controller Lights", "#FF375F", "lights", "L"),
+    ("Buttons & Shortcuts", "#FF9F0A", "keyboard", "B"),
+    ("Optional Features", "#BF5AF2", "plus", "+"),
+    ("About", "#8E8E93", "info", "i"),
 ]
 
 
@@ -718,7 +1119,7 @@ class Settings(QMainWindow):
 
         builders = [self.page_updates, self.page_problems, self.page_device, self.page_security, self.page_folders,
                     self.page_vpn_cloud, self.page_glasses, self.page_notifications, self.page_screen,
-                    self.page_appearance, self.page_gamemode, self.page_shortcuts, self.page_optional,
+                    self.page_appearance, self.page_gamemode, self.page_lights, self.page_shortcuts, self.page_optional,
                     self.page_about]
         self.pages = []
         for (name, color, glyph, letter), builder in zip(PAGES, builders):
@@ -728,6 +1129,10 @@ class Settings(QMainWindow):
             page = builder()
             self.pages.append(page)
             self.stack.addWidget(page)
+        # pages for hardware this PC doesn't have stay out of the list (and out of search)
+        self.unavailable = set() if self.backend.lights_status().get("ally") else {"Controller Lights"}
+        for i, page in enumerate(self.pages):
+            self.nav.item(i).setHidden(page.title in self.unavailable)
         self.nav.currentRowChanged.connect(self.show_page)
         self.nav.setCurrentRow(0)
         self.refresh()
@@ -759,7 +1164,7 @@ class Settings(QMainWindow):
         text = text.strip().lower()
         first = None
         for i, page in enumerate(self.pages):
-            match = not text or any(text in k for k in page.keywords)
+            match = page.title not in self.unavailable and (not text or any(text in k for k in page.keywords))
             self.nav.item(i).setHidden(not match)
             if match and first is None:
                 first = i
@@ -1384,26 +1789,79 @@ class Settings(QMainWindow):
 
     def page_appearance(self):
         p = Page("Appearance")
-        mode = QWidget()
-        ml = QHBoxLayout(mode)
-        ml.setContentsMargins(0, 0, 0, 0)
-        ml.setSpacing(0)
-        self.mode_group = QButtonGroup(self)
-        for i, (label, scheme) in enumerate([("Dark", "GillOSaabDark"), ("Light", "GillOSaabLight")]):
-            b = QPushButton(label)
-            b.setCheckable(True)
-            b.setObjectName("segLeft" if i == 0 else "segRight")
-            b.setChecked(self.backend.color_scheme() == scheme)
-            b.clicked.connect(lambda _=False, s=scheme: self.apply_scheme(s))
-            self.mode_group.addButton(b)
-            ml.addWidget(b)
+        ap = self.backend.appearance()
+        th = self.backend.wallpaper_thumb
+        light, dark = th("GillOSaab", False), th("GillOSaab", True)
+
+        def set_mode(mode):
+            self.backend.set_appearance("mode", mode)
+            if mode in ("light", "dark") and self.backend.have("plasma-apply-colorscheme"):
+                self.apply_scheme("GillOSaabDark" if mode == "dark" else "GillOSaabLight")
+        self.mode_picker = picker([(m, PreviewTile(m.capitalize(), paint_mode(light, dark, m)))
+                                   for m in ("auto", "light", "dark")], ap.get("mode", "dark"), set_mode, 14)
+        self.accent_picker = picker([(c, ColorDot(c, n)) for c, n in ACCENTS], ap.get("accent", "#0a84ff"),
+                                    lambda c: self.backend.set_appearance("accent", c), 4)
+        p.section("Appearance", [
+            Row("", "", self.mode_picker),
+            Row("Accent colour", "Buttons, switches and selections.", self.accent_picker),
+        ], "Auto is light in the day and dark from 7 pm; the Tide wallpaper changes with it.")
+
+        self.icon_picker = picker([(st, PreviewTile(st.capitalize(), paint_icon_style(st), 104, 66))
+                                   for st in ("default", "dark", "clear", "tinted")], ap.get("iconStyle", "default"),
+                                  lambda v: self.backend.set_appearance("iconStyle", v), 8)
+        self.glass_seg = segmented([("clear", "Clear"), ("tinted", "Tinted")], ap.get("glass", "clear"),
+                                   lambda v: self.backend.set_appearance("glass", v))
+        self.menubar_switch = Switch()
+        self.menubar_switch.set_quiet(ap.get("menuBar", "transparent") == "glass")
+        self.menubar_switch.toggled.connect(
+            lambda on: (haptic("toggle"), self.backend.set_appearance("menuBar", "glass" if on else "transparent")))
+        p.section("Icon & widget style", [Row("", "", self.icon_picker)],
+                  "Dark, Clear and Tinted restyle every app icon in the Dock, Launchpad and Spotlight.")
+        p.section("Liquid Glass", [
+            Row("Glass", "Clear lets the wallpaper show through. Tinted is frostier and easier to read.", self.glass_seg),
+            Row("Show menu bar background", "Off: the menu bar floats clear over the wallpaper.", self.menubar_switch),
+        ])
+
+        walls = [("tide", "Tide", [light, dark]), ("tide-light", "Tide Light", [light]), ("tide-dark", "Tide Dark", [dark]),
+                 ("classic", "Aurora", [th("GillOSaab-Classic", True)])]
+        self.wall_picker = picker([(v, PreviewTile(n, paint_picture(paths), 104, 60)) for v, n, paths in walls],
+                                  ap.get("wallpaper", "tide"), lambda v: self.backend.set_appearance("wallpaper", v), 8)
+        own = QPushButton("Choose…")
+        own.setObjectName("pill")
+        own.clicked.connect(self.choose_wallpaper)
+        p.section("Wallpaper", [Row("", "", self.wall_picker), Row("Your own picture", "", own)],
+                  "Tide follows Light and Dark, cross-fading at sunset when Appearance is Auto.")
+
+        widgets = ap.get("widgets", {}) if isinstance(ap.get("widgets"), dict) else {}
+        rows = []
+        self.widget_switches = {}
+        for key, title, default in WIDGETS:
+            sw = Switch()
+            sw.set_quiet(bool(widgets.get(key, default)))
+            sw.toggled.connect(lambda on, k=key: (haptic("toggle"), self.set_widget(k, on)))
+            self.widget_switches[key] = sw
+            rows.append(Row(title, "", sw))
+        self.city = QLineEdit(ap.get("city", ""))
+        self.city.setPlaceholderText("e.g. Melbourne")
+        self.city.setObjectName("field")
+        self.city.setFixedWidth(200)
+        self.city.editingFinished.connect(lambda: self.backend.set_appearance("city", self.city.text().strip()))
+        rows.append(Row("Weather city", "Weather comes from Open-Meteo (no account).", self.city))
+        p.section("Desktop widgets", rows, "Widgets sit on the desktop under your windows. Android home-screen "
+                  "widgets and Windows 11 Widgets can't run outside their own systems; their apps still open in "
+                  "windows here.")
+
+        self.clip_switch = Switch()
+        self.clip_switch.set_quiet(ap.get("clipboardHistory", True) is not False)
+        self.clip_switch.toggled.connect(lambda on: (haptic("toggle"), self.backend.set_appearance("clipboardHistory", on)))
+        p.section("Spotlight", [Row("Clipboard history", "The last 25 things you copied, in Spotlight's Clipboard "
+                                    "view. Kept in memory only, cleared when you sign out. Passwords from password "
+                                    "managers are never kept.", self.clip_switch)])
+
         self.night = Switch()
         self.night.set_quiet(self.backend.kde_night_light())
         self.night.toggled.connect(self.apply_night_light)
-        p.section("", [
-            Row("Mode", "Dark is the default.", mode),
-            Row("Night light", "Warmer screen in the evening.", self.night),
-        ])
+        p.section("Display", [Row("Night light", "Warmer screen in the evening.", self.night)])
         p.section("Feedback", [Row("Haptic feedback", "A light buzz from the built-in controller when you flip a "
                                    "switch, move a slider or something finishes.",
                                    self.switch("features.conf", "haptics", default=True))])
@@ -1418,6 +1876,90 @@ class Settings(QMainWindow):
                   "space, up for Mission Control.")
         reset = p.button("Apply Gill-OSaab look (top bar + dock)")
         reset.clicked.connect(self.apply_look)
+        p.finish()
+        return p
+
+    def set_widget(self, key, on):
+        widgets = self.backend.appearance().get("widgets", {})
+        widgets = dict(widgets) if isinstance(widgets, dict) else {}
+        widgets[key] = on
+        self.backend.set_appearance("widgets", widgets)
+
+    def choose_wallpaper(self):
+        from PySide6.QtWidgets import QFileDialog
+        path, _ = QFileDialog.getOpenFileName(self, "Choose a wallpaper", str(Path.home() / "Pictures"),
+                                              "Pictures (*.png *.jpg *.jpeg *.webp)")
+        if path:
+            self.backend.set_appearance("wallpaper", path)
+            for b in self.wall_picker.group.buttons():
+                b.setChecked(False)
+
+    # ---- ROG Ally stick lights
+    def page_lights(self):
+        p = Page("Controller Lights")
+        f = self.backend.features()
+        get = lambda k, d: f.get(k, d)  # noqa: E731
+        self.lights = {"lights_mode": get("lights_mode", "gaming"), "lights_color": get("lights_color", "0a84ff"),
+                       "lights_game_color": get("lights_game_color", "ff2d55"),
+                       "lights_brightness": get("lights_brightness", "70"),
+                       "lights_vividness": get("lights_vividness", "100"), "lights_effect": get("lights_effect", "solid")}
+        self.lights_preview = LightsPreview(self)
+
+        def save(key, value):
+            if self.backend.set_value("features.conf", key, str(value)):
+                self.lights[key] = str(value)
+                self.lights_preview.update()
+                self.game_color_box.setVisible(self.lights["lights_mode"] == "gaming")
+
+        def colors(key):
+            row = picker([(c, ColorDot("#" + c, n)) for c, n in LIGHT_COLORS], self.lights[key],
+                         lambda c: save(key, c), 4)
+            custom = QPushButton("Custom…")
+            custom.setObjectName("pill")
+
+            def choose():
+                from PySide6.QtWidgets import QColorDialog
+                col = QColorDialog.getColor(QColor("#" + self.lights[key]), self, "Stick light colour")
+                if col.isValid():
+                    save(key, col.name()[1:])
+                    for b in row.group.buttons():
+                        b.setChecked(False)
+            custom.clicked.connect(choose)
+            row.layout().insertWidget(row.layout().count() - 1, custom)
+            return row
+
+        def slider(key):
+            sl = QSlider(Qt.Horizontal)
+            sl.setRange(0, 100)
+            sl.setValue(int(self.lights[key] or 0))
+            sl.setFixedWidth(220)
+            sl.valueChanged.connect(lambda v: (self.lights.__setitem__(key, str(v)), self.lights_preview.update()))
+            sl.sliderReleased.connect(lambda: (haptic("tick"), save(key, sl.value())))
+            return sl
+
+        self.lights_mode = segmented([("always", "Always"), ("gaming", "Game && Desktop"), ("off", "Off")],
+                                     self.lights["lights_mode"], lambda v: save("lights_mode", v))
+        p.lay.addWidget(self.lights_preview)
+        p.section("", [Row("Lights", "Game & desktop: one colour on the desktop, another while you play.",
+                           self.lights_mode)])
+        self.desktop_colors = colors("lights_color")
+        self.game_colors = colors("lights_game_color")
+        p.section("Colour", [Row("Desktop", "", self.desktop_colors)])
+        self.game_color_box = p.section("While gaming", [Row("Game", "", self.game_colors)])
+        self.game_color_box.setVisible(self.lights["lights_mode"] == "gaming")
+        self.lights_effect = segmented([("solid", "Solid"), ("breathing", "Breathing"), ("rainbow", "Rainbow")],
+                                       self.lights["lights_effect"], lambda v: save("lights_effect", v))
+        self.brightness_slider = slider("lights_brightness")
+        self.vivid_slider = slider("lights_vividness")
+        st = self.backend.lights_status()
+        how = {"led": "Driven by the kernel's Ally lights driver.", "hid": "Driven through the controller directly."}
+        note = (st.get("note") or st.get("error") or how.get(st.get("backend"))
+                or "The stick lights weren't found yet; settings are kept and used as soon as they are.")
+        p.section("Look", [
+            Row("Brightness", "", self.brightness_slider),
+            Row("Colour contrast", "Lower for softer, pastel colours; higher for deep, vivid colour.", self.vivid_slider),
+            Row("Effect", "", self.lights_effect),
+        ], note)
         p.finish()
         return p
 
@@ -1787,6 +2329,10 @@ QPushButton#segRight { border-top-right-radius: 9px; border-bottom-right-radius:
 QPushButton#segLeft:checked, QPushButton#segMid:checked, QPushButton#segRight:checked { background: #1fb6c9; color: #ffffff; }
 QSpinBox { background: #34343a; border: none; border-radius: 9px; padding: 4px 8px; min-width: 70px; }
 QScrollArea { background: transparent; }
+QLineEdit#field { background: #34343a; border: none; border-radius: 9px; padding: 6px 10px; }
+QSlider::groove:horizontal { height: 6px; background: #3a3a40; border-radius: 3px; }
+QSlider::sub-page:horizontal { background: #1fb6c9; border-radius: 3px; }
+QSlider::handle:horizontal { background: #ffffff; width: 22px; height: 22px; margin: -8px 0; border-radius: 11px; }
 QScrollBar:vertical { width: 8px; background: transparent; }
 QScrollBar::handle:vertical { background: #44444a; border-radius: 4px; }
 QScrollBar::add-line, QScrollBar::sub-line { height: 0; }
@@ -1798,7 +2344,14 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("Gill-OSaab Settings")
     app.setDesktopFileName("gosaab-settings")
-    app.setStyleSheet(STYLE)
+    # the accent colour picked in Appearance tints Settings too
+    accent = Backend().appearance().get("accent", "")
+    style = STYLE
+    if isinstance(accent, str) and len(accent) == 7 and accent.startswith("#"):
+        global ACCENT
+        ACCENT = QColor(accent)
+        style = style.replace("#1fb6c9", accent).replace("#27c7db", QColor(accent).lighter(115).name())
+    app.setStyleSheet(style)
     w = Settings()
     # open a page directly: gosaab-settings vpn | about | game | folders | glasses ...
     want = (sys.argv[1] if len(sys.argv) > 1 else "").lower()

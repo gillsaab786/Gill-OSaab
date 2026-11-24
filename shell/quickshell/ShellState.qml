@@ -12,7 +12,8 @@ Singleton {
     property bool systemMenu: false
     property bool launchpad: false
     property bool doNotDisturb: false
-    readonly property bool anyPopup: controlCenter || notificationCenter || systemMenu
+    property string dockPopup: "" // "downloads" (the stack fan) or "trash" (its menu)
+    readonly property bool anyPopup: controlCenter || notificationCenter || systemMenu || dockPopup !== ""
 
     // Haptic feedback from the built-in controller (gosaab-haptic): tick, toggle, success, error
     Socket {
@@ -30,6 +31,7 @@ Singleton {
         controlCenter = false
         notificationCenter = false
         systemMenu = false
+        dockPopup = ""
         spotlight = false
         launchpad = false
     }

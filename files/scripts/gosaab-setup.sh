@@ -29,6 +29,7 @@ systemctl enable gosaab-drivers.timer gosaab-battery.service gosaab-battery.path
 systemctl --global enable gosaab-diagnose.timer || log "warning: could not enable problem check"
 # Smart TDP (power follows what you do) and graphics switching on PCs with two graphics chips
 systemctl enable gosaab-smart-power.service || log "warning: smart power not enabled"
+systemctl enable gosaab-ally-lights.service || log "warning: Ally lights not enabled"
 # Driver search: describe every built-in driver once, at build time
 /usr/bin/gosaab-drivers index /usr/share/gill-osaab/driver-index.json || log "warning: driver index not built"
 

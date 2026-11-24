@@ -94,7 +94,7 @@
 #include "overview.h"
 #include "text.h"
 
-#define CORNER_RADIUS 10
+#define CORNER_RADIUS 16 /* Tahoe-style rounder windows */
 #define SHADOW_SIGMA 22.0f
 #define SHADOW_OFFSET_Y 8
 #define OPEN_MS 280.0

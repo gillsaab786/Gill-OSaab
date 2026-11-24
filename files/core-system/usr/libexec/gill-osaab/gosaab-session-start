@@ -28,8 +28,11 @@ command -v waydroid >/dev/null && /usr/libexec/gill-osaab/gosaab-android-notify 
 gosaab-fps apply >/dev/null 2>&1
 gosaab-gpu apply >/dev/null 2>&1 # games start on the dedicated graphics (PCs with two graphics chips)
 for f in "$HOME/.config/environment.d/61-gill-osaab-gpu.conf"; do [ -f "$f" ] && { set -a; . "$f"; set +a; }; done
-/usr/libexec/gill-osaab/gosaab-activity watch &
-/usr/libexec/gill-osaab/gosaab-haptic serve & # controller buzz for switches and sliders # Smart TDP: video/idle; pop-up when graphics change
+/usr/libexec/gill-osaab/gosaab-activity watch & # Smart TDP: video/idle; pop-up when graphics change
+/usr/libexec/gill-osaab/gosaab-haptic serve & # controller buzz for switches and sliders
+mkdir -p "$HOME/.config/gill-osaab"
+# clipboard history for Spotlight (text only, kept in memory, password-manager copies skipped)
+wl-paste --type text --watch /usr/libexec/gill-osaab/gosaab-clipboard store &
 fps_env="$HOME/.config/environment.d/60-gill-osaab-fps.conf"
 [ -f "$fps_env" ] && { set -a; . "$fps_env"; set +a; }
 # the menu bar, Dock, notifications, Control Centre, Spotlight, Launchpad, lock screen

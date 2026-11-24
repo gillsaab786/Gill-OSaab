@@ -1,10 +1,47 @@
 pragma Singleton
 import QtQuick
 import Quickshell
+import Quickshell.Io
 
 // Gill-OSaab look: dark glass, Apple-style system colours, Inter type.
+// Appearance choices live in ~/.config/gill-osaab/appearance.json, shared with Settings:
+//   mode auto|light|dark, accent "#rrggbb", iconStyle default|dark|clear|tinted, glass clear|tinted,
+//   menuBar transparent|glass, wallpaper tide|tide-light|tide-dark|classic|/path, widgets {...}, city
 Singleton {
-    property bool dark: true
+    id: theme
+    property var cfg: ({})
+    readonly property string configPath: (Quickshell.env("HOME") || "/tmp") + "/.config/gill-osaab/appearance.json"
+    FileView {
+        id: appearanceFile
+        path: theme.configPath
+        watchChanges: true
+        printErrors: false
+        onFileChanged: reload()
+        onLoaded: { try { theme.cfg = JSON.parse(text()) || {} } catch (e) { theme.cfg = {} } }
+        onLoadFailed: theme.cfg = {}
+    }
+    function setting(key, fallback) { return cfg[key] !== undefined ? cfg[key] : fallback }
+    // Change one appearance setting and save it (Settings sees it at once, and so does the shell)
+    function set(key, value) {
+        const c = JSON.parse(JSON.stringify(cfg))
+        c[key] = value
+        cfg = c
+        Quickshell.execDetached(["mkdir", "-p", configPath.substring(0, configPath.lastIndexOf("/"))])
+        appearanceFile.setText(JSON.stringify(c, null, 2) + "\n")
+    }
+    function widgetOn(name, fallback) {
+        const w = cfg.widgets || {}
+        return w[name] !== undefined ? !!w[name] : fallback
+    }
+
+    // Auto: dark from 7 pm to 7 am
+    property int hour: new Date().getHours()
+    Timer { interval: 60000; running: true; repeat: true; onTriggered: theme.hour = new Date().getHours() }
+    readonly property string mode: setting("mode", "dark")
+    property bool dark: mode === "light" ? false : mode === "auto" ? (hour >= 19 || hour < 7) : true
+    // apps follow along (GTK/libadwaita and Qt apps that read the portal setting)
+    onDarkChanged: Quickshell.execDetached(["gsettings", "set", "org.gnome.desktop.interface", "color-scheme",
+                                            dark ? "prefer-dark" : "default"])
     // 0 = light, 1 = dark; animates so switching Dark Mode cross-fades every colour
     property real darkness: dark ? 1 : 0
     Behavior on darkness { NumberAnimation { duration: 450; easing.type: Easing.InOutCubic } }
@@ -14,23 +51,42 @@ Singleton {
     }
 
     readonly property string font: "Inter"
-    readonly property color accent: "#0a84ff"
+    readonly property color accent: /^#[0-9a-fA-F]{6}$/.test(setting("accent", "")) ? setting("accent", "") : "#0a84ff"
+    readonly property string iconStyle: setting("iconStyle", "default") // default | dark | clear | tinted
+    readonly property bool tintedGlass: setting("glass", "clear") === "tinted"
+    readonly property bool clearMenuBar: setting("menuBar", "transparent") === "transparent"
     readonly property color green: "#30d158"
     readonly property color orange: "#ff9f0a"
     readonly property color red: "#ff453a"
 
-    // Liquid Glass: clear, lightly tinted glass; the blur behind does the work
-    readonly property color bar: mix(Qt.rgba(1, 1, 1, 0.18), Qt.rgba(0.06, 0.06, 0.08, 0.12))
-    readonly property color panel: mix(Qt.rgba(1, 1, 1, 0.45), Qt.rgba(0.10, 0.10, 0.13, 0.42))
+    // Liquid Glass: clear, lightly tinted glass; the blur behind does the work.
+    // "Tinted" glass is frostier, for people who find clear glass hard to read.
+    readonly property real glassBoost: tintedGlass ? 0.25 : 0
+    readonly property color bar: clearMenuBar ? "transparent"
+        : mix(Qt.rgba(1, 1, 1, 0.30 + glassBoost), Qt.rgba(0.06, 0.06, 0.08, 0.30 + glassBoost))
+    readonly property color panel: mix(Qt.rgba(1, 1, 1, 0.45 + glassBoost), Qt.rgba(0.10, 0.10, 0.13, 0.42 + glassBoost))
     readonly property color panelBorder: "transparent" // the GlassRim draws the edge
     readonly property color tile: mix(Qt.rgba(1, 1, 1, 0.35), Qt.rgba(1, 1, 1, 0.10))
     readonly property color tileHover: mix(Qt.rgba(1, 1, 1, 0.55), Qt.rgba(1, 1, 1, 0.18))
     readonly property color text: mix("#1c1c1e", "#f2f2f7")
     readonly property color subtext: mix(Qt.rgba(0.1, 0.1, 0.12, 0.60), Qt.rgba(0.92, 0.92, 0.96, 0.60))
-    readonly property color dock: mix(Qt.rgba(1, 1, 1, 0.35), Qt.rgba(0.14, 0.14, 0.18, 0.30))
+    readonly property color dock: mix(Qt.rgba(1, 1, 1, 0.22 + glassBoost), Qt.rgba(0.14, 0.14, 0.18, 0.18 + glassBoost))
 
-    readonly property string wallpaper: Quickshell.env("GOSAAB_WALLPAPER")
-        || "/usr/share/wallpapers/GillOSaab/contents/images_dark/3840x2160.png"
+    // Wallpaper: "tide" follows Light/Dark (cross-fading), the others are fixed pictures
+    readonly property string wallpaperDir: {
+        const env = Quickshell.env("GOSAAB_WALLPAPER") || ""
+        return env !== "" ? env.replace(/\/contents\/.*$/, "") : "/usr/share/wallpapers/GillOSaab"
+    }
+    readonly property string wallpaperChoice: setting("wallpaper", "tide")
+    function wallpaperFor(isDark) {
+        const w = wallpaperChoice
+        if (w.startsWith("/")) return w
+        const dir = w.startsWith("classic") ? wallpaperDir + "-Classic" : wallpaperDir
+        const d = w.endsWith("-light") ? false : w.endsWith("-dark") ? true : isDark
+        return dir + "/contents/" + (d ? "images_dark" : "images") + "/3840x2160.png"
+    }
+    readonly property bool dynamicWallpaper: !wallpaperChoice.startsWith("/") && !/-(light|dark)$/.test(wallpaperChoice)
+    readonly property string wallpaper: wallpaperFor(dark)
 
     readonly property int radius: 22
     readonly property int barHeight: 38

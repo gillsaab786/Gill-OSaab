@@ -43,6 +43,9 @@ check "Game Mode session listed" "[ -f /usr/share/wayland-sessions/gill-osaab-ga
 check "login screen uses our theme" "grep -q 'Current=gill-osaab' /etc/sddm.conf.d/10-gill-osaab.conf"
 check "no KDE Plasma in Core" "! rpm -q plasma-workspace >/dev/null 2>&1"
 check "wallpaper present" "[ -f /usr/share/wallpapers/GillOSaab/contents/images_dark/3840x2160.png ]"
+check "Tide wallpaper has light and dark versions, Aurora kept" "[ -f /usr/share/wallpapers/GillOSaab/contents/images/3840x2160.png ] && [ -f /usr/share/wallpapers/GillOSaab-Classic/contents/images_dark/3840x2160.png ]"
+check "weather and clipboard helpers run" "/usr/libexec/gill-osaab/gosaab-weather | grep -q Settings && XDG_RUNTIME_DIR=/tmp /usr/libexec/gill-osaab/gosaab-clipboard list | grep -q '\['"
+check "Ally stick lights service enabled (idles on other PCs)" "systemctl is-enabled gosaab-ally-lights.service >/dev/null 2>&1 && /usr/libexec/gill-osaab/gosaab-ally-lights status | grep -q '\"ally\": false'"
 
 # app sandbox: only its own files + up to two allowed folders
 mkdir -p /tmp/sbhome/secret /tmp/sbhome/Movies /tmp/sbhome/.config/gill-osaab/app-folders

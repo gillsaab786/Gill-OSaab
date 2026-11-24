@@ -1,0 +1,13 @@
+[Unit]
+Description=Gill-OSaab ROG Ally stick lights
+ConditionKernelCommandLine=!gosaab.nolights
+After=systemd-udevd.service
+
+[Service]
+ExecStart=/usr/libexec/gill-osaab/gosaab-ally-lights
+Restart=on-failure
+RestartSec=5
+Nice=10
+
+[Install]
+WantedBy=multi-user.target

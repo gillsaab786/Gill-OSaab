@@ -1,0 +1,95 @@
+#!/usr/bin/python3
+"""ROG Ally stick lights: colour, brightness and vividness from Settings > Controller Lights,
+with a different colour while a game is running if you like.
+
+  gosaab-ally-lights            run (system service); applies changes within 2 seconds
+  gosaab-ally-lights status     how the lights are driven, as JSON
+
+Settings live in /etc/gill-osaab/features.conf (lights_*); "gaming" comes from Smart TDP's
+/run/gill-osaab/power.json. Leaves the lights alone if Handheld Daemon is managing them.
+"""
+import json
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, "/usr/libexec/gill-osaab")
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+import gosaab_lights as gl  # noqa: E402
+from gosaab_common import ETC, read_conf  # noqa: E402
+
+POWER = Path("/run/gill-osaab/power.json")
+STATUS = Path("/run/gill-osaab/lights.json")
+
+
+def gaming():
+    try:
+        return json.loads(POWER.read_text()).get("mode") == "game"
+    except (OSError, ValueError):
+        return False
+
+
+def hhd_running():
+    return subprocess.run(["pgrep", "-x", "hhd"], capture_output=True, check=False).returncode == 0
+
+
+def backend():
+    led = gl.find_led()
+    if led:
+        return "led", led
+    dev = gl.find_hidraw()
+    if dev:
+        return "hid", dev
+    return None, None
+
+
+def apply(kind, target, want):
+    rgb, effect = want if want else (None, "solid")
+    if kind == "led":
+        gl.led_write(target, rgb or (0, 0, 0))
+    else:
+        with open(target, "wb", buffering=0) as f:
+            for packet in gl.hid_packets(rgb, effect):
+                f.write(packet)
+                time.sleep(0.005)
+
+
+def status():
+    kind, target = backend()
+    return {"ally": gl.is_rog_ally(), "backend": kind, "device": str(target or ""), "hhd": hhd_running()}
+
+
+def main(argv):
+    if argv[:1] == ["status"]:
+        print(json.dumps(status()))
+        return 0
+    if not gl.is_rog_ally():
+        print("Not a ROG Ally; nothing to do.")
+        return 0
+    last, stamp = None, 0.0
+    while True:
+        settings = {**gl.DEFAULTS, **read_conf(ETC / "features.conf")}
+        want = gl.wanted(settings, gaming())
+        info = status()
+        if info["hhd"]:
+            info["note"] = "Handheld Daemon is managing the lights"
+        elif info["backend"] and ((want, info["device"]) != last or time.monotonic() - stamp > 60):
+            # also every minute: the controller forgets its colour after sleep or a reconnect
+            try:
+                apply(info["backend"], Path(info["device"]), want)
+                last, stamp = (want, info["device"]), time.monotonic()
+            except OSError as e:
+                info["error"] = str(e)
+        info["color"] = "#%02x%02x%02x" % want[0] if want else "off"
+        STATUS.parent.mkdir(parents=True, exist_ok=True)
+        tmp = STATUS.with_suffix(".tmp")
+        tmp.write_text(json.dumps(info))
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, STATUS)
+        time.sleep(2)
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

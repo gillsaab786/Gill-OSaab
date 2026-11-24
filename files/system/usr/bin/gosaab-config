@@ -35,6 +35,13 @@ ALLOWED = {
         "tdp_game": "int:0:120",
         "gpu_mode": ("auto", "integrated", "dedicated"),
         "charge_limit": "int:50:100",
+        # ROG Ally stick lights
+        "lights_mode": ("always", "gaming", "off"),
+        "lights_color": "hex",
+        "lights_game_color": "hex",
+        "lights_brightness": "int:0:100",
+        "lights_vividness": "int:0:100",
+        "lights_effect": ("solid", "breathing", "rainbow"),
         **{k: ONOFF for k in OPTIONAL},
     },
 }
@@ -45,6 +52,8 @@ def validate(filename, key, value):
     if rules is None or key not in rules:
         return False
     rule = rules[key]
+    if rule == "hex":  # a colour as six hex digits, no "#" (that starts a comment in .conf files)
+        return len(value) == 6 and all(c in "0123456789abcdefABCDEF" for c in value)
     if isinstance(rule, str) and rule.startswith("int:"):
         _, lo, hi = rule.split(":")
         return value.isdigit() and int(lo) <= int(value) <= int(hi)

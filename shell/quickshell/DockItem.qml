@@ -42,29 +42,62 @@ Item {
         NumberAnimation { target: item; property: "bounce"; to: 0; duration: 260; easing.type: Easing.OutBounce }
     }
 
-    IconImage {
+    IconTile {
         id: img
         visible: item.builtinIcon === ""
         anchors.fill: parent
         anchors.bottomMargin: item.bounce
         source: visible ? Theme.icon(item.entry ? item.entry.icon : "", item.appId, (item.appId || "").toLowerCase(), "applications-games", "application-x-executable", "system-run") : ""
-        asynchronous: true
         scale: press.pressed ? 0.88 : 1
         Behavior on scale { NumberAnimation { duration: Theme.fast } }
     }
-    Rectangle { // built-in item: a glossy rounded tile with a drawn symbol
-        visible: item.builtinIcon !== ""
+    TrashIcon { // Trash: frosted glass bin, papers inside when full
+        visible: item.builtinIcon === "trash"
         anchors.fill: parent
-        anchors.margins: parent.width * 0.06
-        anchors.bottomMargin: item.bounce + parent.width * 0.06
-        radius: width * 0.23
+        anchors.bottomMargin: item.bounce
+        full: item.trashFull
+        lift: item.drop
+        scale: (press.pressed ? 0.88 : 1) * (dropZone.containsDrag ? 1.12 : 1)
+        Behavior on scale { SpringAnimation { spring: 5; damping: 0.35; epsilon: 0.002 } }
+    }
+    Rectangle { // Launchpad / Downloads: a glossy glass squircle with a drawn symbol
+        visible: item.builtinIcon !== "" && item.builtinIcon !== "trash"
+        anchors.fill: parent
+        anchors.margins: parent.width * 0.05
+        anchors.bottomMargin: item.bounce + parent.width * 0.05
+        radius: width * 0.26
         scale: press.pressed ? 0.88 : 1
         Behavior on scale { NumberAnimation { duration: Theme.fast } }
         gradient: Gradient {
-            GradientStop { position: 0; color: item.builtinIcon === "trash" ? "#8e8e93" : "#5e5ce6" }
-            GradientStop { position: 1; color: item.builtinIcon === "trash" ? "#48484a" : "#0a84ff" }
+            GradientStop { position: 0; color: item.builtinIcon === "downloads" ? "#64d2ff" : "#7d7aff" }
+            GradientStop { position: 1; color: item.builtinIcon === "downloads" ? "#0a84ff" : "#0a60ff" }
         }
-        Icon { anchors.centerIn: parent; width: parent.width * 0.58; height: width; name: item.builtinIcon; color: "white" }
+        GlassRim { radius: parent.radius; strength: 1.2 }
+        Icon { anchors.centerIn: parent; width: parent.width * 0.56; height: width; name: item.builtinIcon; color: "white" }
+    }
+
+    // Trash takes files dragged from Files and other apps
+    property bool trashFull: false
+    property real drop: 0
+    signal filesDropped(var urls)
+    signal menuRequested()
+    SequentialAnimation {
+        id: dropAnim
+        NumberAnimation { target: item; property: "drop"; to: 8; duration: 140; easing.type: Easing.OutQuad }
+        NumberAnimation { target: item; property: "drop"; to: 0; duration: 380; easing.type: Easing.OutBounce }
+    }
+    DropArea {
+        id: dropZone
+        anchors.fill: parent
+        enabled: item.builtinIcon === "trash"
+        keys: ["text/uri-list"]
+        onDropped: d => {
+            if (!d.hasUrls) return
+            item.filesDropped(d.urls)
+            dropAnim.restart()
+            ShellState.haptic("success")
+            d.accept(Qt.MoveAction)
+        }
     }
 
     // running indicator
@@ -92,8 +125,13 @@ Item {
         id: press
         anchors.fill: parent
         hoverEnabled: true
-        acceptedButtons: Qt.LeftButton | Qt.MiddleButton
+        acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
+        onPressAndHold: item.menuRequested()
         onClicked: m => {
+            if (m.button === Qt.RightButton) {
+                item.menuRequested()
+                return
+            }
             if (item.builtinIcon !== "") {
                 item.activated()
                 return

@@ -49,7 +49,7 @@ Popup {
         Tile { width: (parent.width - 10) / 2; icon: "moon"; label: "Focus"; detail: ShellState.doNotDisturb ? "Do Not Disturb" : "Off"
             on: ShellState.doNotDisturb; onToggled: ShellState.doNotDisturb = !ShellState.doNotDisturb }
         Tile { width: (parent.width - 10) / 2; icon: "darkmode"; label: "Dark Mode"; detail: Theme.dark ? "On" : "Off"; on: Theme.dark
-            onToggled: { Theme.dark = !Theme.dark; ShellState.run("gsettings set org.gnome.desktop.interface color-scheme " + (Theme.dark ? "prefer-dark" : "default")) } }
+            onToggled: Theme.set("mode", Theme.dark ? "light" : "dark") }
         Tile { width: (parent.width - 10) / 2; icon: "gamepad"; label: "Game Mode"; detail: "Switch now"
             onToggled: { ShellState.closeAll(); ShellState.run("gosaab-game-mode || steamos-session-select gamescope") } }
         Tile { width: (parent.width - 10) / 2; icon: "shield"; label: "VPN"; visible: cc.vpnEnabled

@@ -134,6 +134,19 @@ class FakeBackend:
     def color_scheme(self):
         return "GillOSaabDark"
 
+    def appearance(self):
+        return dict(getattr(self, "ap", {}))
+
+    def set_appearance(self, key, value):
+        self.ap = {**getattr(self, "ap", {}), key: value}
+        return True
+
+    def wallpaper_thumb(self, folder, dark):
+        return ""
+
+    def lights_status(self):
+        return getattr(self, "lights", {"ally": False})
+
     def drivers(self, check=False):
         return {"parts": [{"category": "Graphics", "name": "AMD Phoenix3", "driver": "amdgpu"},
                           {"category": "Wi-Fi", "name": "MEDIATEK MT7922", "driver": "mt7921e"},
@@ -249,7 +262,7 @@ class SettingsApp(unittest.TestCase):
 
     def test_every_page_builds(self):
         w = self.gs.Settings(FakeBackend())
-        self.assertEqual(w.stack.count(), 14)
+        self.assertEqual(w.stack.count(), 15)
         for i in range(14):
             w.nav.setCurrentRow(i)
             self.assertEqual(w.stack.currentIndex(), i)
@@ -336,7 +349,8 @@ class SettingsUpdates(unittest.TestCase):
         self.assertIn("Device & Drivers", visible)
         self.assertNotIn("Appearance", visible)
         w.search.setText("")
-        self.assertTrue(all(not w.nav.item(i).isHidden() for i in range(w.nav.count())))
+        self.assertTrue(all(not w.nav.item(i).isHidden() for i in range(w.nav.count())
+                            if w.nav.item(i).text() != "Controller Lights"))  # ROG Ally only
 
 
 if __name__ == "__main__":
@@ -554,3 +568,77 @@ class FaceUnlockPage(unittest.TestCase):
         self.assertIn("Set up…", names())
         b.face["enabled"] = True
         self.assertIn("Turn off and forget face", names())
+
+
+@unittest.skipUnless(HAVE_QT, "PySide6 not installed")
+class TahoeAppearance(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        from PySide6.QtWidgets import QApplication
+        cls.gs = load("usr/bin/gosaab-settings")
+        cls.app = QApplication.instance() or QApplication([])
+
+    def test_sidebar_icons_are_drawn_not_letters(self):
+        from PySide6.QtGui import QPainter, QPixmap
+        for _title, _colour, glyph, _letter in self.gs.PAGES:
+            pm = QPixmap(24, 24)
+            p = QPainter(pm)
+            self.assertTrue(self.gs.draw_glyph(p, glyph, 24), glyph)
+            p.end()
+
+    def test_mode_accent_icons_glass_wallpaper_widgets_saved_for_the_shell(self):
+        b = FakeBackend()
+        w = self.gs.Settings(b)
+        tiles = {t.label: t for t in w.mode_picker.group.buttons()}
+        self.assertTrue(tiles["Dark"].isChecked())  # dark is the default
+        tiles["Auto"].click()
+        self.assertEqual(b.ap["mode"], "auto")
+        w.accent_picker.group.buttons()[1].click()
+        self.assertEqual(b.ap["accent"], "#bf5af2")
+        {t.label: t for t in w.icon_picker.group.buttons()}["Tinted"].click()
+        self.assertEqual(b.ap["iconStyle"], "tinted")
+        w.glass_seg.group.buttons()[1].click()
+        self.assertEqual(b.ap["glass"], "tinted")
+        w.menubar_switch.setChecked(True)
+        self.assertEqual(b.ap["menuBar"], "glass")
+        {t.label: t for t in w.wall_picker.group.buttons()}["Aurora"].click()
+        self.assertEqual(b.ap["wallpaper"], "classic")
+        w.widget_switches["stats"].setChecked(True)
+        w.widget_switches["weather"].setChecked(False)
+        self.assertEqual(b.ap["widgets"], {"stats": True, "weather": False})
+        w.city.setText("Melbourne")
+        w.city.editingFinished.emit()
+        self.assertEqual(b.ap["city"], "Melbourne")
+        w.clip_switch.setChecked(False)
+        self.assertIs(b.ap["clipboardHistory"], False)
+
+    def test_previews_paint(self):
+        w = self.gs.Settings(FakeBackend())
+        for picker in (w.mode_picker, w.icon_picker, w.wall_picker):
+            for t in picker.group.buttons():
+                self.assertFalse(t.grab().isNull())
+
+    def test_controller_lights_only_on_rog_ally(self):
+        b = FakeBackend()
+        titles = lambda w: [w.nav.item(i).text() for i in range(w.nav.count()) if not w.nav.item(i).isHidden()]
+        w = self.gs.Settings(b)
+        self.assertNotIn("Controller Lights", titles(w))
+        w.search.setText("lights")
+        self.assertNotIn("Controller Lights", titles(w))
+        b.lights = {"ally": True, "backend": "hid"}
+        w = self.gs.Settings(b)
+        self.assertIn("Controller Lights", titles(w))
+        w.lights_mode.group.buttons()[0].click()
+        self.assertIn(("set", "features.conf", "lights_mode", "always"), b.calls)
+        self.assertFalse(w.game_color_box.isVisibleTo(w))
+        w.lights_mode.group.buttons()[1].click()
+        self.assertTrue(w.game_color_box.isVisibleTo(w.game_color_box.parentWidget()))
+        w.game_colors.group.buttons()[2].click()
+        self.assertIn(("set", "features.conf", "lights_game_color", "30d158"), b.calls)
+        w.brightness_slider.setValue(40)
+        w.brightness_slider.sliderReleased.emit()
+        self.assertIn(("set", "features.conf", "lights_brightness", "40"), b.calls)
+        w.vivid_slider.setValue(55)
+        w.vivid_slider.sliderReleased.emit()
+        self.assertIn(("set", "features.conf", "lights_vividness", "55"), b.calls)
+        self.assertFalse(w.lights_preview.grab().isNull())

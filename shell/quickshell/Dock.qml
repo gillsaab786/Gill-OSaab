@@ -2,6 +2,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Wayland
 import Quickshell.Widgets
+import Qt.labs.folderlistmodel
 
 // The Dock: pinned + running apps, magnifies under the pointer, bounces on launch.
 PanelWindow {
@@ -92,12 +93,7 @@ PanelWindow {
                     pointerX: dock.mouseX
                 }
             }
-            Rectangle {
-                width: 1; height: Theme.dockIcon - 10
-                anchors.bottom: parent.bottom; anchors.bottomMargin: 5
-                color: Qt.rgba(1, 1, 1, 0.25)
-            }
-            Repeater {
+            Repeater { // recently opened apps that aren't kept in the Dock
                 model: dock.running
                 DockItem {
                     entry: modelData.entry
@@ -107,11 +103,167 @@ PanelWindow {
                     pointerX: dock.mouseX
                 }
             }
-            DockItem { // Trash, always last
+            Rectangle { // macOS-style divider before Downloads and Trash
+                width: 1; height: Theme.dockIcon - 14
+                anchors.bottom: parent.bottom; anchors.bottomMargin: 7
+                color: Theme.dark ? Qt.rgba(1, 1, 1, 0.28) : Qt.rgba(0, 0, 0, 0.18)
+            }
+            DockItem { // Downloads: click for a fan of the newest files
+                id: downloadsItem
+                builtinIcon: "downloads"
+                label: "Downloads"
+                pointerX: dock.mouseX
+                onActivated: ShellState.dockPopup = ShellState.dockPopup === "downloads" ? "" : "downloads"
+                onMenuRequested: ShellState.run("xdg-open \"$HOME/Downloads\"")
+            }
+            DockItem { // Trash, always last: drop files on it; right-click to empty
+                id: trashItem
                 builtinIcon: "trash"
                 label: "Trash"
                 pointerX: dock.mouseX
+                trashFull: trashFolder.count > 0
                 onActivated: ShellState.run("gio open trash:/// || xdg-open trash:///")
+                onMenuRequested: ShellState.dockPopup = ShellState.dockPopup === "trash" ? "" : "trash"
+                onFilesDropped: urls => Quickshell.execDetached(["gio", "trash"].concat(urls.map(u => u.toString())))
+            }
+        }
+    }
+
+    readonly property string home: Quickshell.env("HOME") || "/tmp"
+    FolderListModel {
+        id: trashFolder
+        folder: "file://" + dock.home + "/.local/share/Trash/files"
+        showHidden: true
+        showDotAndDotDot: false
+    }
+    FolderListModel {
+        id: downloads
+        folder: "file://" + dock.home + "/Downloads"
+        sortField: FolderListModel.Time
+        showDotAndDotDot: false
+    }
+    function fileIcon(name, isDir) {
+        if (isDir) return Theme.icon("folder-download", "folder")
+        const ext = (name.split(".").pop() || "").toLowerCase()
+        const byExt = { pdf: "application-pdf", zip: "package-x-generic", gz: "package-x-generic", xz: "package-x-generic",
+            "7z": "package-x-generic", exe: "application-x-ms-dos-executable", msi: "application-x-msi",
+            apk: "application-vnd.android.package-archive", png: "image-x-generic", jpg: "image-x-generic",
+            jpeg: "image-x-generic", webp: "image-x-generic", gif: "image-x-generic", mp4: "video-x-generic",
+            mkv: "video-x-generic", webm: "video-x-generic", mp3: "audio-x-generic", flac: "audio-x-generic",
+            iso: "application-x-cd-image", txt: "text-x-generic", doc: "x-office-document", docx: "x-office-document",
+            xlsx: "x-office-spreadsheet", pptx: "x-office-presentation" }
+        return Theme.icon(byExt[ext] || "text-x-generic", "text-x-generic")
+    }
+
+    // The Downloads fan and the Trash menu float above everything (so the click-away layer
+    // doesn't cover them)
+    PanelWindow {
+        id: pop
+        screen: dock.modelData
+        visible: ShellState.dockPopup !== "" || card.opacity > 0.01
+        anchors { bottom: true; left: true }
+        readonly property Item anchorItem: ShellState.dockPopup === "trash" ? trashItem : downloadsItem
+        readonly property real anchorX: {
+            const sw = dock.modelData ? dock.modelData.width : 1920
+            const p = anchorItem.mapToItem(null, anchorItem.width / 2, 0)
+            return (sw - dock.width) / 2 + p.x
+        }
+        margins { bottom: Theme.dockIcon + 26; left: Math.max(8, anchorX - implicitWidth / 2) }
+        implicitWidth: ShellState.dockPopup === "trash" ? 200 : 340
+        implicitHeight: ShellState.dockPopup === "trash" ? 104 : Math.min(8, downloads.count) * 60 + 64
+        color: "transparent"
+        exclusionMode: ExclusionMode.Ignore
+        WlrLayershell.layer: WlrLayer.Overlay
+        WlrLayershell.namespace: "gosaab-dockpopup"
+        WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+
+        Item {
+            id: card
+            anchors.fill: parent
+            opacity: ShellState.dockPopup !== "" ? 1 : 0
+            Behavior on opacity { NumberAnimation { duration: Theme.fast } }
+
+            // Trash menu
+            Rectangle {
+                visible: ShellState.dockPopup === "trash"
+                anchors.fill: parent
+                radius: 16
+                color: Theme.panel
+                GlassRim { radius: 16 }
+                Column {
+                    anchors { fill: parent; margins: 6 }
+                    Repeater {
+                        model: [{ t: "Open", c: "gio open trash:/// || xdg-open trash:///" },
+                                { t: trashFolder.count > 0 ? "Empty Trash" : "Trash is empty", c: "gio trash --empty" }]
+                        Rectangle {
+                            required property var modelData
+                            required property int index
+                            width: parent.width; height: 46; radius: 11
+                            color: m.containsMouse && enabled ? Theme.accent : "transparent"
+                            enabled: index === 0 || trashFolder.count > 0
+                            Text { anchors { left: parent.left; leftMargin: 14; verticalCenter: parent.verticalCenter }
+                                text: modelData.t; font { family: Theme.font; pixelSize: 14 }
+                                color: m.containsMouse && parent.enabled ? "white" : parent.enabled ? Theme.text : Theme.subtext }
+                            MouseArea { id: m; anchors.fill: parent; hoverEnabled: true
+                                onClicked: { ShellState.run(modelData.c); ShellState.haptic("toggle"); ShellState.dockPopup = "" } }
+                        }
+                    }
+                }
+            }
+
+            // Downloads fan: newest file nearest the Dock, rising in a gentle arc
+            Item {
+                visible: ShellState.dockPopup === "downloads"
+                anchors.fill: parent
+                Repeater {
+                    model: downloads
+                    delegate: Item {
+                        id: fanItem
+                        required property int index
+                        required property string fileName
+                        required property url fileUrl
+                        required property bool fileIsDir
+                        visible: index < 8
+                        readonly property real t: index / 7
+                        width: card.width; height: 56
+                        x: (ShellState.dockPopup === "downloads" ? 1 : 0) * (index * index * 1.6)
+                        y: card.height - 60 - (ShellState.dockPopup === "downloads" ? index * 60 : 0)
+                        rotation: -index * 1.2
+                        transformOrigin: Item.Right
+                        Behavior on y { SpringAnimation { spring: 4; damping: 0.38; epsilon: 0.3 } }
+                        Behavior on x { NumberAnimation { duration: Theme.normal; easing.type: Easing.OutCubic } }
+                        Rectangle {
+                            anchors { right: icon.left; rightMargin: 8; verticalCenter: parent.verticalCenter }
+                            width: Math.min(name.implicitWidth + 22, card.width - 80); height: 28; radius: 14
+                            color: fanMouse.containsMouse ? Theme.accent : Theme.panel
+                            GlassRim { radius: 14; strength: 0.7 }
+                            Text { id: name; anchors.centerIn: parent; width: parent.width - 20; elide: Text.ElideMiddle
+                                horizontalAlignment: Text.AlignHCenter
+                                text: fanItem.fileName; color: fanMouse.containsMouse ? "white" : Theme.text
+                                font { family: Theme.font; pixelSize: 12; weight: Font.Medium } }
+                        }
+                        IconImage {
+                            id: icon
+                            anchors { right: parent.right; rightMargin: 4; verticalCenter: parent.verticalCenter }
+                            implicitSize: 50
+                            source: dock.fileIcon(fanItem.fileName, fanItem.fileIsDir)
+                            scale: fanMouse.pressed ? 0.9 : fanMouse.containsMouse ? 1.08 : 1
+                            Behavior on scale { NumberAnimation { duration: Theme.fast } }
+                        }
+                        MouseArea { id: fanMouse; anchors.fill: parent; hoverEnabled: true
+                            onClicked: { Quickshell.execDetached(["xdg-open", fanItem.fileUrl.toString()]); ShellState.dockPopup = "" } }
+                    }
+                }
+                Rectangle { // "Open in Files" at the top of the fan
+                    anchors { right: parent.right; top: parent.top }
+                    width: 140; height: 30; radius: 15
+                    color: openAll.containsMouse ? Theme.accent : Theme.panel
+                    GlassRim { radius: 15; strength: 0.7 }
+                    Text { anchors.centerIn: parent; font { family: Theme.font; pixelSize: 12; weight: Font.DemiBold }
+                        text: downloads.count > 0 ? "Open in Files" : "No downloads yet"; color: openAll.containsMouse ? "white" : Theme.text }
+                    MouseArea { id: openAll; anchors.fill: parent; hoverEnabled: true
+                        onClicked: { ShellState.run("xdg-open \"$HOME/Downloads\""); ShellState.dockPopup = "" } }
+                }
             }
         }
     }

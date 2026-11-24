@@ -303,6 +303,10 @@ pkill foot 2>/dev/null
 if command -v qs >/dev/null; then
   SHELLDIR=$(pwd)/shell/quickshell
   export QT_QUICK_BACKEND=software QT_QPA_PLATFORM=wayland GOSAAB_TEST=1 GOSAAB_WALLPAPER=$(pwd)/$WALL
+  export GOSAAB_LIBEXEC=$(pwd)/files/system/usr/libexec/gill-osaab
+  # Downloads (for the Dock's stack) and something in the Trash
+  mkdir -p "$HOME/Downloads" "$HOME/.local/share/Trash/files"
+  for f in Gill-OSaab.iso photo.jpg report.pdf game-setup.exe app.apk notes.txt; do echo x > "$HOME/Downloads/$f"; sleep 0.05; done
   export GOSAAB_SHELL_IPC="qs -p $SHELLDIR ipc call"
   # a session bus, for notifications
   DBUS_SESSION_BUS_ADDRESS=$(dbus-daemon --session --fork --print-address 2>/dev/null) && export DBUS_SESSION_BUS_ADDRESS
@@ -346,7 +350,20 @@ if command -v qs >/dev/null; then
   # volume / brightness bezel (keys and handheld volume rocker)
   qs -p "$SHELLDIR" ipc call osd volume up; sleep 0.5; shot 23c-volume-bezel
   check "volume key shows the bezel" "[ \"\$(qs -p $SHELLDIR ipc call osd isShown)\" = true ]"
-  sleep 2
+  sleep 2.5
+  # Tahoe look: desktop widgets, Dock stack + Trash, light mode with the light wallpaper, icon styles
+  check "desktop widgets show (clock, weather, calendar)" "qs -p $SHELLDIR ipc call widgets shown | grep -q 'clock,weather,calendar'"
+  qs -p "$SHELLDIR" ipc call shell dockPopup downloads; sleep 1.2; shot 23d-dock-downloads-stack
+  qs -p "$SHELLDIR" ipc call shell dockPopup ""; sleep 0.5
+  echo x > "$HOME/.local/share/Trash/files/old-file.txt"; sleep 1
+  qs -p "$SHELLDIR" ipc call shell dockPopup trash; sleep 1; shot 23e-trash-full-menu
+  qs -p "$SHELLDIR" ipc call shell dockPopup ""; sleep 0.5
+  qs -p "$SHELLDIR" ipc call shell appearance mode light; sleep 1.5; shot 23f-light-mode
+  check "light mode saved for Settings to see" "grep -q '\"mode\": \"light\"' $HOME/.config/gill-osaab/appearance.json"
+  qs -p "$SHELLDIR" ipc call shell appearance menuBar glass; sleep 0.8; shot 23g-light-glass-menubar
+  qs -p "$SHELLDIR" ipc call shell appearance mode dark; qs -p "$SHELLDIR" ipc call shell appearance menuBar transparent; sleep 1.5
+  check "icon style setting reaches the shell" "qs -p $SHELLDIR ipc call shell appearance iconStyle tinted && [ \"\$(qs -p $SHELLDIR ipc call shell iconStyle)\" = tinted ]"
+  qs -p "$SHELLDIR" ipc call shell appearance iconStyle default; sleep 0.5
   # on-screen keyboard (Control Centre > Keyboard)
   if command -v wvkbd-mobintl >/dev/null; then
     qs -p "$SHELLDIR" ipc call shell keyboard; sleep 1.5; shot 23b-onscreen-keyboard
@@ -369,6 +386,11 @@ if command -v qs >/dev/null; then
   qs -p "$SHELLDIR" ipc call spotlight search "netflix"; sleep 1; R=$(qs -p "$SHELLDIR" ipc call spotlight results); echo "netflix -> $R"
   check "app on only one system: just its name (Netflix)" "[ '$R' = Netflix ]"
   qs -p "$SHELLDIR" ipc call spotlight search "12*(3+4)"; sleep 0.8; shot 26-spotlight-maths
+  qs -p "$SHELLDIR" ipc call spotlight search "lock"; sleep 0.8; shot 26a-spotlight-actions
+  check "Spotlight finds actions (Lock Screen)" "qs -p $SHELLDIR ipc call spotlight rowKinds | grep -q action"
+  qs -p "$SHELLDIR" ipc call spotlight search "report"; sleep 1.5; shot 26b-spotlight-files
+  check "Spotlight finds files (~/Downloads/report.pdf)" "qs -p $SHELLDIR ipc call spotlight rowKinds | grep -q file"
+  qs -p "$SHELLDIR" ipc call spotlight search ""; qs -p "$SHELLDIR" ipc call spotlight show apps; sleep 1; shot 26c-spotlight-apps-view
   qs -p "$SHELLDIR" ipc call spotlight toggle; sleep 0.8; shot 27-after-spotlight
   qs -p "$SHELLDIR" ipc call launchpad toggle; sleep 1.2; shot 28-launchpad
   qs -p "$SHELLDIR" ipc call launchpad toggle; sleep 0.8; shot 29-after-launchpad
@@ -405,6 +427,8 @@ checks = [
   ("spotlight closes", changed("21-shell-window", "27-after-spotlight", (W // 2 - 320, int(H * 0.2), W // 2 + 320, int(H * 0.2) + 200)) < 0.02),
   ("launchpad opens", changed("27-after-spotlight", "28-launchpad", (0, 30, W, H - 120)) > 0.05),
   ("launchpad closes", changed("27-after-spotlight", "29-after-launchpad", (0, 30, W, H - 120)) < 0.01),
+  ("Downloads stack fans out above the Dock", changed("23c-volume-bezel", "23d-dock-downloads-stack", (W // 2, H // 2, W, H - 110)) > 0.01),
+  ("light mode switches to the light wallpaper", changed("23e-trash-full-menu", "23f-light-mode", (0, H // 3, W, 2 * H // 3)) > 0.3),
 ]
 bad = 0
 for name, ok in checks:

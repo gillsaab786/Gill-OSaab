@@ -122,7 +122,7 @@ PanelWindow {
                                     Column {
                                         anchors.centerIn: parent
                                         spacing: 8
-                                        IconImage {
+                                        IconTile {
                                             anchors.horizontalCenter: parent.horizontalCenter
                                             width: 72; height: 72
                                             source: Theme.icon(modelData.icon, "application-x-executable")

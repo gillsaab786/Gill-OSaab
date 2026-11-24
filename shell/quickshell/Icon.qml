@@ -132,6 +132,46 @@ Canvas {
             c.beginPath(); c.moveTo(6, 6.5); c.lineTo(7.2, 20); c.lineTo(16.8, 20); c.lineTo(18, 6.5); c.stroke()
             line([10, 10, 10.3, 17]); line([14, 10, 13.7, 17])
             break
+        case "downloads": // arrow into a tray
+            line([12, 3.5, 12, 14]); line([7.5, 9.8, 12, 14.3, 16.5, 9.8])
+            line([4, 14.5, 4, 19, 20, 19, 20, 14.5])
+            break
+        case "folder":
+            rrect(3, 6, 18, 13, 2.2); c.stroke(); line([3, 9, 9.5, 9, 11, 6.5])
+            break
+        case "file":
+            c.beginPath(); c.moveTo(6, 3); c.lineTo(14, 3); c.lineTo(19, 8); c.lineTo(19, 21); c.lineTo(6, 21); c.closePath(); c.stroke()
+            line([14, 3, 14, 8, 19, 8])
+            break
+        case "clipboard":
+            rrect(5, 4.5, 14, 16.5, 2.2); c.stroke(); rrect(9, 3, 6, 3.4, 1.2); c.fill()
+            line([8.5, 11, 15.5, 11]); line([8.5, 15, 13.5, 15])
+            break
+        case "bolt": // actions
+            c.beginPath(); c.moveTo(13.5, 2.5); c.lineTo(5.5, 13.5); c.lineTo(11.5, 13.5); c.lineTo(10.5, 21.5); c.lineTo(18.5, 10.5); c.lineTo(12.5, 10.5); c.closePath(); c.fill()
+            break
+        case "apps": // 2x2 rounded squares
+            for (let r = 0; r < 2; r++) for (let q = 0; q < 2; q++) { rrect(3.5 + q * 9.5, 3.5 + r * 9.5, 7.5, 7.5, 2.2); c.fill() }
+            break
+        case "cloud": case "rain": case "snow": case "storm": {
+            const cloud = () => { c.beginPath(); c.moveTo(7, 16); c.arc(7, 12.5, 3.5, Math.PI * 0.5, Math.PI * 1.5)
+                c.arc(12, 9, 5, Math.PI * 1.1, Math.PI * 1.95); c.arc(17, 12.5, 3.5, Math.PI * 1.5, Math.PI * 0.5); c.closePath() }
+            cloud(); c.fill()
+            if (name === "rain") { line([8, 19, 7, 21.5]); line([12, 19, 11, 21.5]); line([16, 19, 15, 21.5]) }
+            if (name === "snow") { dot(8, 20, 1.1); dot(12, 21, 1.1); dot(16, 20, 1.1) }
+            if (name === "storm") { c.beginPath(); c.moveTo(12.5, 16.5); c.lineTo(10, 20); c.lineTo(12.5, 20); c.lineTo(11, 23); c.stroke() }
+            break
+        }
+        case "play":
+            c.beginPath(); c.moveTo(7, 4.5); c.lineTo(19.5, 12); c.lineTo(7, 19.5); c.closePath(); c.fill()
+            break
+        case "pause":
+            rrect(6, 4.5, 4, 15, 1.2); c.fill(); rrect(14, 4.5, 4, 15, 1.2); c.fill()
+            break
+        case "next":
+            c.beginPath(); c.moveTo(4, 6); c.lineTo(12, 12); c.lineTo(4, 18); c.closePath(); c.fill()
+            c.beginPath(); c.moveTo(12, 6); c.lineTo(20, 12); c.lineTo(12, 18); c.closePath(); c.fill()
+            break
         case "close":
             line([6, 6, 18, 18]); line([18, 6, 6, 18])
             break

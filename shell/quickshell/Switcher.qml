@@ -98,9 +98,9 @@ PanelWindow {
                         opacity: parent.sel ? 1 : 0
                         Behavior on opacity { NumberAnimation { duration: Theme.fast } }
                     }
-                    IconImage {
+                    IconTile {
                         anchors.centerIn: parent
-                        implicitSize: 72
+                        width: 72; height: 72
                         scale: parent.sel ? 1.06 : 1
                         Behavior on scale { SpringAnimation { spring: 5; damping: 0.35; epsilon: 0.002 } }
                         source: Theme.icon(parent.entry ? parent.entry.icon : "", parent.modelData.appId,

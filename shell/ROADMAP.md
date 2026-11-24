@@ -16,6 +16,19 @@ Qt Quick via Quickshell. Runs on the Gill-OSaab Core image (minimal Fedora bootc
   workspace, so use the ci-shots branch.
 
 ## Next up (asked by Jas, do these first)
+Done 2026-11-25 (macOS Tahoe look, from Jas's two videos): original "Tide" wallpaper (light + dark,
+tools/make-wallpaper.py; Aurora kept as Classic) drawn by the shell and cross-faded with Dark Mode;
+appearance.json shared by shell + Settings (Auto/Light/Dark, accent, icon style Default/Dark/Clear/
+Tinted via MultiEffect, Clear/Tinted glass, clear menu bar, wallpaper picker); Dock: clearer glass,
+divider, Downloads stack fan, glass Trash (empty/full, drop files, right-click Empty); top-right
+volume/brightness pill with draggable slider + device name; Spotlight views (Apps/Files/Actions/
+Clipboard, Tab cycles) + clipboard history (gosaab-clipboard, RAM only, skips password managers);
+desktop widgets (clock, weather via Open-Meteo, calendar, battery, now playing, CPU/memory); Settings
+sidebar glyphs drawn in code, Tahoe Appearance page, Settings follows the accent; rounder windows
+(16 px). ROG Ally only: Controller Lights page + gosaab-ally-lights (kernel multicolour LED if present,
+else the controller's HID commands; colour, game colour, brightness, colour contrast, effect).
+Not possible: Android home-screen widgets / Windows 11 Widgets outside their systems.
+Untested on hardware: Ally lights packets, icon-style effects (need GPU; CI renders in software).
 Done 2026-11-24 (morning): touch-size window buttons in a glass pill + bigger shell, Bluetooth
 batteries + 20%/10% reminders, Brave default (sandboxed, /usr/lib/brave.com), Android on by default
 (first sign-in, progress) + Settings on/off, Bazaar + Play Store + Bottles, drivers (printers,

@@ -9,6 +9,14 @@ import Quickshell.Io
 ShellRoot {
     Variants {
         model: Quickshell.screens
+        delegate: Component { Wallpaper {} }
+    }
+    Variants {
+        model: Quickshell.screens
+        delegate: Component { DesktopWidgets {} }
+    }
+    Variants {
+        model: Quickshell.screens
         delegate: Component { TopBar {} }
     }
     Variants {
@@ -41,8 +49,12 @@ ShellRoot {
     IpcHandler {
         target: "shell"
         function closeAll(): void { ShellState.closeAll() }
-        function setDark(on: bool): void { Theme.dark = on }
+        function setDark(on: bool): void { Theme.set("mode", on ? "dark" : "light") }
+        function appearance(key: string, value: string): void { Theme.set(key, value) }
+        function iconStyle(): string { return Theme.iconStyle }
+        function wallpaper(): string { return Theme.wallpaper }
         function ping(): string { return "gill-osaab shell ok" }
         function keyboard(): void { ShellState.toggleKeyboard() }
+        function dockPopup(name: string): void { ShellState.dockPopup = name }
     }
 }
