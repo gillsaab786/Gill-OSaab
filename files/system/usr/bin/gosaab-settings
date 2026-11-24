@@ -392,8 +392,13 @@ class Backend:
         return True
 
     def wallpaper_thumb(self, folder, dark):
-        path = self.WALLPAPERS / folder / "contents" / ("images_dark" if dark else "images") / "3840x2160.png"
-        return str(path) if path.exists() else ""
+        """A small preview (thumb-*.jpg ships next to each wallpaper; the 4K picture is the fallback)."""
+        contents = self.WALLPAPERS / folder / "contents"
+        for path in (contents / ("thumb-dark.jpg" if dark else "thumb-light.jpg"),
+                     contents / ("images_dark" if dark else "images") / "3840x2160.png"):
+            if path.exists():
+                return str(path)
+        return ""
 
     # ---- ROG Ally stick lights (gosaab-ally-lights service)
     def lights_status(self):
@@ -857,16 +862,22 @@ def paint_icon_style(style):
     return paint
 
 
+_PICTURES = {}
+
+
 def paint_picture(paths):
     """Wallpaper thumbnail(s); two paths are drawn split diagonally (light/dark, like macOS Auto)."""
-    cache = {}
-
     def load(path, size):
         key = (path, size.width(), size.height())
-        if key not in cache:
-            pm = QPixmap(path) if path else QPixmap()
-            cache[key] = pm.scaled(size, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation) if not pm.isNull() else pm
-        return cache[key]
+        if key not in _PICTURES:  # shared by every tile, so each picture is decoded once
+            from PySide6.QtGui import QImageReader
+            reader = QImageReader(path) if path else None
+            if reader and reader.size().isValid():  # decode straight to preview size (fast even for 4K)
+                full = reader.size()
+                reader.setScaledSize(full.scaled(size, Qt.KeepAspectRatioByExpanding))
+            img = reader.read() if reader else None
+            _PICTURES[key] = QPixmap.fromImage(img) if img is not None and not img.isNull() else QPixmap()
+        return _PICTURES[key]
 
     def paint(p, r):
         size = QSize(int(r.width()), int(r.height()))
