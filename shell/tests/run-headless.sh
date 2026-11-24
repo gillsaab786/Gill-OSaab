@@ -457,7 +457,7 @@ def changed(a, b, box=None):
     if box: A, B = A.crop(box), B.crop(box)
     d = ImageChops.difference(A, B)
     return ImageStat.Stat(d.convert("L").point(lambda v: 255 if v > 24 else 0)).mean[0] / 255
-r = (changed("39-before-lock", "40-locked", (700, 360, 1220, 690)), changed("40-locked", "41-locked-new-window"), changed("39-before-lock", "42-unlocked"))
+r = (changed("39-before-lock", "40-locked", (700, 360, 1220, 690)), changed("40c-wrong-password", "41-locked-new-window"), changed("39-before-lock", "42-unlocked"))
 print("lock changes", [round(x, 4) for x in r])
 for name, ok in [("lock screen covers the desktop", r[0] > 0.1), ("windows stay hidden while locked", r[1] < 0.01),
                  ("unlocking shows the desktop again", r[2] < 0.6 and r[2] < r[0])]:
