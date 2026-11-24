@@ -57,7 +57,7 @@ Popup {
             onToggled: {
                 if (cc.vpnName === "") { ShellState.closeAll(); ShellState.run("gosaab-settings vpn"); return }
                 cc.vpnOn = !cc.vpnOn
-                ShellState.run("nmcli connection " + (cc.vpnOn ? "up" : "down") + " id '" + cc.vpnName + "'")
+                Quickshell.execDetached(["nmcli", "connection", cc.vpnOn ? "up" : "down", "id", cc.vpnName]) // no shell: names can't run commands
             } }
         Tile { width: (parent.width - 10) / 2; icon: "screenoff"; label: "Screen Off"; detail: "Wakes when done"
             onToggled: { ShellState.closeAll(); ShellState.run("gosaab-screen-off") } }

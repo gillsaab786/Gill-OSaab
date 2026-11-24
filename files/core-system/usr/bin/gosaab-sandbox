@@ -1,10 +1,16 @@
-#!/bin/sh
+#!/bin/bash
 # Run an app sealed off from your files: it sees only its own private home plus at most two
-# folders you allow in Settings > Privacy > App folders.
+# folders you allow in Settings > App Folders.
 #   gosaab-sandbox <app-name> <command> [args...]
+#
+# Inside the sandbox the app can't see other processes, raw keyboards/controllers, the system bus,
+# or the session bus (only a filtered proxy: notifications, portals, media keys, screen-saver
+# inhibit), so it can't start programs outside the sandbox.
 app=$1; shift
 [ -n "$app" ] && [ $# -gt 0 ] || { echo "usage: gosaab-sandbox APP COMMAND..." >&2; exit 2; }
+case "$app" in *[!A-Za-z0-9._-]*) echo "bad app name" >&2; exit 2 ;; esac
 command -v bwrap >/dev/null || exec "$@"
+
 conf="$HOME/.config/gill-osaab/app-folders/$app.conf"
 if [ ! -f "$conf" ]; then # first run: sensible defaults
   mkdir -p "$(dirname "$conf")"
@@ -19,33 +25,56 @@ fi
 home=$(realpath "$HOME")
 private="$home/.local/share/gill-osaab/sandbox/$app"
 mkdir -p "$private"
-binds=""
+rt=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+
+args=(--die-with-parent --new-session --unshare-pid --unshare-ipc --cap-drop ALL
+      --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp --tmpfs /run
+      --ro-bind-try /run/systemd/resolve /run/systemd/resolve
+      --ro-bind-try /run/NetworkManager/resolv.conf /run/NetworkManager/resolv.conf
+      --ro-bind-try /run/udev /run/udev
+      --dev-bind-try /dev/dri /dev/dri
+      --ro-bind-try /tmp/.X11-unix /tmp/.X11-unix
+      --tmpfs "$(dirname "$home")" --bind "$private" "$home"
+      --ro-bind-try "$home/.config/gill-osaab" "$home/.config/gill-osaab"
+      --dir "$rt" --chmod 0700 "$rt" --setenv XDG_RUNTIME_DIR "$rt")
+# webcams for browsers (video calls); other apps don't get cameras
+case "$app" in brave|firefox|browser)
+  for v in /dev/video*; do [ -e "$v" ] && args+=(--dev-bind "$v" "$v"); done ;;
+esac
+# display and sound
+for s in "${WAYLAND_DISPLAY:-wayland-0}" pipewire-0 pulse/native; do
+  [ -S "$rt/$s" ] && args+=(--ro-bind "$rt/$s" "$rt/$s")
+done
+# allowed folders (at most two)
 n=0
 while IFS= read -r dir && [ $n -lt 2 ]; do
   case "$dir" in ""|\#*) continue ;; esac
   mkdir -p "$dir" 2>/dev/null
   [ -d "$dir" ] || continue
-  binds="$binds$(realpath "$dir")
-"
-  n=$((n + 1))
+  d=$(realpath "$dir")
+  case "$d" in "$home"/*|/run/media/*|/media/*|/mnt/*) args+=(--bind "$d" "$d"); n=$((n + 1)) ;; esac
 done < "$conf"
-# options in order: base system read-only, empty /home, the app's private home, allowed folders
-set -- "$@" # command stays last
-opts="--die-with-parent --ro-bind / / --dev-bind /dev /dev --proc /proc --tmpfs /tmp"
-cmd_count=$#
-set -- $opts --ro-bind-try /tmp/.X11-unix /tmp/.X11-unix --tmpfs "$(dirname "$home")" \
-  --bind "$private" "$home" --ro-bind-try "$home/.config/gill-osaab" "$home/.config/gill-osaab" "$@"
-IFS='
-'
-for b in $binds; do
-  # insert "--bind b b" just before the command (the last cmd_count arguments)
-  i=0; total=$#
-  for arg in "$@"; do
-    i=$((i + 1))
-    if [ $i -eq $((total - cmd_count + 1)) ]; then set -- "$@" --bind "$b" "$b"; fi
-    set -- "$@" "$arg"
-  done
-  shift $total
-done
-unset IFS
-exec bwrap "$@"
+
+# filtered session bus
+proxy_pid=""
+if command -v xdg-dbus-proxy >/dev/null && [ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ]; then
+  mkdir -p "$rt/gosaab-sandbox"
+  bus="$rt/gosaab-sandbox/$app-$$.bus"
+  xdg-dbus-proxy "$DBUS_SESSION_BUS_ADDRESS" "$bus" --filter \
+    --talk=org.freedesktop.Notifications --talk=org.freedesktop.portal.Desktop \
+    --talk=org.freedesktop.portal.FileChooser --talk=org.freedesktop.portal.OpenURI \
+    --talk=org.freedesktop.ScreenSaver --talk=org.freedesktop.portal.Documents \
+    --talk=org.kde.StatusNotifierWatcher --own="org.mpris.MediaPlayer2.$app.*" \
+    --own="org.mpris.MediaPlayer2.$app" --own="org.mpris.MediaPlayer2.chromium.*" &
+  proxy_pid=$!
+  for _ in $(seq 1 40); do [ -S "$bus" ] && break; sleep 0.05; done
+  if [ -S "$bus" ]; then
+    args+=(--ro-bind "$bus" "$rt/bus" --setenv DBUS_SESSION_BUS_ADDRESS "unix:path=$rt/bus")
+  fi
+fi
+[ -n "$proxy_pid" ] || args+=(--unsetenv DBUS_SESSION_BUS_ADDRESS)
+
+bwrap "${args[@]}" "$@"
+rc=$?
+[ -n "$proxy_pid" ] && kill "$proxy_pid" 2>/dev/null && rm -f "$bus"
+exit $rc

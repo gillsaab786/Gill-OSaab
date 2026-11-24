@@ -21,6 +21,8 @@ ALLOWED = {
         "sandbox_windows_apps": ONOFF,
         "screen_off_overnight": ONOFF,
         "screen_off_idle_seconds": "int:5:600",
+        "auto_drivers": ONOFF,
+        "charge_limit": "int:50:100",
         **{k: ONOFF for k in OPTIONAL},
     },
 }

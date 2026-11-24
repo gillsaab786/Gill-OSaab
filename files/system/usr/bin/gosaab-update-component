@@ -5,7 +5,7 @@
   gosaab-update-component --versions  print installed versions as JSON
   gosaab-update-component --list      list the parts
 
-Parts: all, os, drivers, firmware, bios, android, proton, wine, apps, containers, decky, nvidia
+Parts: all, os, drivers, rollback, firmware, bios, android, proton, wine, apps, containers, decky, nvidia
 """
 import hashlib
 import json
@@ -39,6 +39,7 @@ PARTS = {
     "containers": ("Linux containers", "Apps installed from .deb and .rpm", "user"),
     "decky": ("Game Mode plugins", "Gill-OSaab Notifications for Decky", "root"),
     "nvidia": ("Nvidia edition", "Switches to the Gill-OSaab build with Nvidia drivers", "root"),
+    "rollback": ("Previous version", "Goes back to the system version before the last update", "root"),
 }
 GROUPS = {
     "drivers": ["os", "firmware"],
@@ -212,6 +213,8 @@ def message_for(results, failed):
         return "Not available on this device."
     if all(rc in (UP_TO_DATE, NOT_AVAILABLE) for rc in results.values()):
         return "Already up to date."
+    if results.get("rollback") == 0:
+        return "Restart to go back to the previous version."
     if "os" in results and results["os"] == 0:
         return "Updated. Restart to finish."
     return "Updated."

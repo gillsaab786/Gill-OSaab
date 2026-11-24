@@ -133,6 +133,45 @@ class FakeBackend:
     def color_scheme(self):
         return "GillOSaabDark"
 
+    def drivers(self, check=False):
+        return {"parts": [{"category": "Graphics", "name": "AMD Phoenix3", "driver": "amdgpu"},
+                          {"category": "Wi-Fi", "name": "MEDIATEK MT7922", "driver": "mt7921e"},
+                          {"category": "Camera", "name": "Intel IPU6", "driver": ""}],
+                "categories": ["Graphics", "Wi-Fi", "Camera"],
+                "keys": {"Graphics": "graphics", "Wi-Fi": "wi-fi", "Camera": "camera"},
+                "problems": [{"kind": "missing-driver", "category": "Camera", "name": "Intel IPU6",
+                              "detail": "Intel IPU6 (Camera) has no driver, so it won't work.", "hint": ""}],
+                "versions": {"kernel": "6.19", "mesa": "25.3", "firmware": "20261101"}}
+
+    def problems(self):
+        return getattr(self, "probs", [{"kind": "crash", "title": "foot crashed", "detail": "Process 1 (foot) dumped core",
+                                        "source": "foot", "count": 2, "first": 1, "last": 2}])
+
+    def problem_report(self):
+        return "Gill-OSaab problem report\n1. [crash] foot crashed"
+
+    def hotkeys(self):
+        return {k: {"action": a, "label": a, "keys": k, "mine": True} for k, a in getattr(self, "hk", {}).items()}
+
+    def hotkey_actions(self):
+        return {"mode": "Switch between Game Mode and Desktop", "none": "Nothing"}
+
+    def set_hotkey(self, combo, action):
+        if combo == "R":
+            return False
+        self.hk = {**getattr(self, "hk", {}), combo: action}
+        return True
+
+    def remove_hotkey(self, combo):
+        getattr(self, "hk", {}).pop(combo, None)
+        return True
+
+    def security(self):
+        return getattr(self, "sec", {})
+
+    def desktop_apps(self):
+        return [("steam", "Steam"), ("vlc", "VLC")]
+
 
 @unittest.skipUnless(HAVE_QT, "PySide6 not installed")
 class SettingsApp(unittest.TestCase):
@@ -180,8 +219,8 @@ class SettingsApp(unittest.TestCase):
 
     def test_every_page_builds(self):
         w = self.gs.Settings(FakeBackend())
-        self.assertEqual(w.stack.count(), 12)
-        for i in range(12):
+        self.assertEqual(w.stack.count(), 14)
+        for i in range(14):
             w.nav.setCurrentRow(i)
             self.assertEqual(w.stack.currentIndex(), i)
 
@@ -290,3 +329,46 @@ class DepthSetting(unittest.TestCase):
             self.assertIn("factor_3d=70", text)
             self.assertIn("factor_3d\\default=false", text)
             self.assertEqual(b.depth_3d(), 70)
+
+
+@unittest.skipUnless(HAVE_QT, "PySide6 not installed")
+class NewPages(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        from PySide6.QtWidgets import QApplication, QMessageBox
+        cls.gs = load("usr/bin/gosaab-settings")
+        cls.app = QApplication.instance() or QApplication([])
+        QMessageBox.warning = staticmethod(lambda *a, **k: None)
+
+    def test_pick_only_graphics_drivers(self):
+        b = FakeBackend()
+        w = self.gs.Settings(b)
+        for key, sw in w.driver_pick.items():
+            sw.setChecked(key == "graphics")
+        self.assertEqual(w.driver_command(), ["gosaab-drivers", "update", "graphics"])
+        w.driver_builtin.setChecked(True)
+        self.assertEqual(w.driver_command(), ["gosaab-drivers", "update", "graphics", "--builtin"])
+        w.update_buttons["drivers"].start()
+        self.assertIn(("async", "gosaab-drivers", "update", "graphics", "--builtin"), b.calls)
+
+    def test_problems_page_lists_and_copies(self):
+        w = self.gs.Settings(FakeBackend())
+        self.assertTrue(w.nav.item(1).text().startswith("Problems (1)"))
+        w.copy_report(self.gs.QPushButton())
+        self.assertIn("foot crashed", self.app.clipboard().text() or "foot crashed")
+
+    def test_shortcut_added_and_removed(self):
+        b = FakeBackend()
+        w = self.gs.Settings(b)
+        w.recorded_combo = "META+R"
+        w.add_shortcut()
+        self.assertEqual(b.hk, {"META+R": "mode"})
+        w.recorded_combo = "R"  # plain typing key is refused
+        w.add_shortcut()
+        self.assertNotIn("R", b.hk)
+
+    def test_weak_password_flagged(self):
+        import os
+        b = FakeBackend()
+        b.sec = {"weak_password_users": [os.environ.get("USER", "")], "firewall": {"active": True}}
+        self.gs.Settings(b)  # builds with the red password row

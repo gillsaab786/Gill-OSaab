@@ -126,6 +126,8 @@ modules:
         - python3-gobject
         - libnotify
         - brightnessctl
+        - firewalld
+        - xdg-dbus-proxy
 
   - from-file: common.yml
 

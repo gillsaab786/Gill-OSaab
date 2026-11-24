@@ -28,11 +28,13 @@ check "boot screen: progress ring theme" "plymouth-set-default-theme 2>/dev/null
 check "printers, scanners, firmware ready" "command -v lpstat >/dev/null && command -v scanimage >/dev/null && command -v fwupdmgr >/dev/null"
 check "Android folders service ready" "command -v bindfs >/dev/null && systemctl is-enabled gosaab-android-folders.service >/dev/null 2>&1"
 check "start-up choice applied at boot" "systemctl is-enabled gosaab-boot-mode.service >/dev/null 2>&1"
-/usr/libexec/gill-osaab/gosaab-session-select-root --boot root game
+id smokeuser >/dev/null 2>&1 || useradd -m smokeuser
+check "can't set sign-in for someone else (or root) without a password" "! PKEXEC_UID=\$(id -u smokeuser) /usr/libexec/gill-osaab/gosaab-session-select-root --boot root game 2>/dev/null && [ ! -e /etc/sddm.conf.d/zz-gill-osaab-autologin.conf ]"
+/usr/libexec/gill-osaab/gosaab-session-select-root --boot smokeuser game
 check "Settings: start in Game Mode" "grep -q 'Session=gill-osaab-gamemode.desktop' /etc/sddm.conf.d/zz-gill-osaab-autologin.conf"
-/usr/libexec/gill-osaab/gosaab-session-select-root --boot root desktop
+/usr/libexec/gill-osaab/gosaab-session-select-root --boot smokeuser desktop
 check "Settings: start in Desktop" "grep -q 'Session=gill-osaab.desktop' /etc/sddm.conf.d/zz-gill-osaab-autologin.conf"
-/usr/libexec/gill-osaab/gosaab-session-select-root --boot root ask
+/usr/libexec/gill-osaab/gosaab-session-select-root --boot smokeuser ask
 check "Settings: ask at the login screen" "[ ! -e /etc/sddm.conf.d/zz-gill-osaab-autologin.conf ]"
 check "shell config installed" "[ -f /etc/xdg/quickshell/gill-osaab/shell.qml ]"
 check "login theme installed" "[ -f /usr/share/sddm/themes/gill-osaab/Main.qml ]"
@@ -52,6 +54,36 @@ check "Brave installed (kept in /usr/lib, linked into /opt at boot)" "[ -x /usr/
 check "Brave opens sandboxed" "grep -qs '^Exec=gosaab-sandbox brave' /usr/share/applications/brave-browser.desktop"
 check "Brave is the default browser" "grep -q 'https=brave-browser.desktop' /etc/xdg/mimeapps.list"
 check "VLC opens sandboxed" "grep -qs '^Exec=gosaab-sandbox vlc' /usr/share/applications/*vlc*.desktop /usr/share/applications/*VLC*.desktop"
+check "sandboxed app can't see other programs" "[ \$(HOME=/tmp/sbhome gosaab-sandbox testapp sh -c 'ls -d /proc/[0-9]* | wc -l') -le 4 ]"
+check "sandboxed app can't read keyboards/controllers directly" "! HOME=/tmp/sbhome gosaab-sandbox testapp ls /dev/input >/dev/null 2>&1"
+check "sandboxed app can't reach the session bus (no escape)" "HOME=/tmp/sbhome DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/0/bus gosaab-sandbox testapp sh -c '[ ! -e /run/user/0/bus ] && [ ! -e /run/dbus/system_bus_socket ]'"
+
+# security
+check "remote login (SSH) off by default" "! systemctl is-enabled sshd.service >/dev/null 2>&1"
+check "firewall on, nothing open but discovery and Steam" "systemctl is-enabled firewalld.service >/dev/null 2>&1 && ! firewall-offline-cmd --zone=public --list-services | grep -qw ssh"
+check "no surprise restarts from automatic updates" "! systemctl is-enabled bootc-fetch-apply-updates.timer >/dev/null 2>&1"
+check "apps can't read each other's memory (ptrace)" "grep -q 'ptrace_scope = 1' /usr/lib/sysctl.d/60-gill-osaab.conf"
+id weakuser >/dev/null 2>&1 || useradd -m weakuser; echo weakuser:gill | chpasswd
+/usr/libexec/gill-osaab/gosaab-security-check >/dev/null 2>&1
+check "default password is detected (asks you to change it)" "grep -q weakuser /run/gill-osaab/security.json && ! grep -q smokeuser /run/gill-osaab/security.json"
+
+# drivers, problems, shortcuts
+for unit in gosaab-drivers.timer gosaab-hotkeyd.service gosaab-security-check.service gosaab-battery.path; do
+  check "enabled: $unit" "systemctl is-enabled $unit >/dev/null 2>&1"
+done
+check "problem check runs hourly after sign-in" "systemctl --global is-enabled gosaab-diagnose.timer >/dev/null 2>&1"
+gosaab-drivers list > /tmp/drivers.json 2>/tmp/drivers.err; echo "drivers: $(python3 -c 'import json;d=json.load(open("/tmp/drivers.json"));print(d["categories"], len(d["parts"]), "parts", len(d["problems"]), "problems")' 2>&1)"
+check "every part and its driver is listed" "python3 -c 'import json;d=json.load(open(\"/tmp/drivers.json\"));assert d[\"parts\"]'"
+gosaab-drivers auto >/dev/null 2>&1
+check "drivers recorded at start-up" "[ -s /var/lib/gill-osaab/drivers.json ]"
+check "problems are collected" "HOME=/tmp/diag gosaab-diagnose --collect"
+HOME=/tmp/diag gosaab-diagnose --report > /tmp/report.txt; head -8 /tmp/report.txt
+check "problem report can be copied (personal details removed)" "grep -q 'Gill-OSaab problem report' /tmp/report.txt && ! grep -q \"\$(hostname)\" /tmp/report.txt"
+check "button shortcuts: Windows+R switches Game Mode/Desktop" "grep -q '^META+R = mode' /etc/gill-osaab/hotkeys.conf"
+check "button shortcuts: add your own" "HOME=/tmp/hk gosaab-hotkeys set BTN_MODE+BTN_SOUTH app:steam && HOME=/tmp/hk gosaab-hotkeys list | grep -q 'Home button + A'"
+check "button shortcuts: typing keys refused" "! HOME=/tmp/hk gosaab-hotkeys set R mode 2>/dev/null"
+timeout 3 /usr/libexec/gill-osaab/gosaab-hotkeyd; rc=$?
+check "shortcut service starts (Desktop and Game Mode)" "[ $rc -eq 124 ]"
 
 # start the real session the way the login screen does (headless, software GPU)
 VKMS=
@@ -78,6 +110,9 @@ qs -c gill-osaab ipc call launchpad toggle; sleep 0.5
 qs -c gill-osaab ipc call spotlight search "fire"; sleep 1.5; grim "$OUT/05-core-spotlight.png"
 qs -c gill-osaab ipc call spotlight toggle; sleep 0.5
 QT_QPA_PLATFORM=wayland gosaab-settings >/dev/null 2>&1 & sleep 4; grim "$OUT/06-core-settings.png"
+for pg in problems device buttons security; do
+  QT_QPA_PLATFORM=wayland gosaab-settings $pg >/dev/null 2>&1 & sp=$!; sleep 4; grim "$OUT/07-settings-$pg.png"; kill $sp
+done
 check "desktop still running" "pgrep -x gosaab-wm >/dev/null"
 grep -E "ERROR|TypeError|ReferenceError|is not a type" "$OUT/session.log" | grep -v "EGL\|pipewire\|renderer" | sort -u | head -10
 exit $fail

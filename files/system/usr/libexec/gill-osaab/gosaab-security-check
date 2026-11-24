@@ -1,0 +1,97 @@
+#!/usr/bin/python3 -I
+"""(admin, at boot) Security checkup for Settings > Apps & Security and Settings > Problems.
+
+Writes /run/gill-osaab/security.json. Never stores passwords: it only checks whether an account
+still uses a well-known one (the test build's "gill", or the account name itself).
+"""
+import ctypes
+import json
+import os
+import pwd
+import subprocess
+from pathlib import Path
+
+OUT = Path("/run/gill-osaab/security.json")
+WEAK = ["gill", "password", "123456", "12345678"]
+
+
+def crypt_fn():
+    for lib in ("libcrypt.so.2", "libcrypt.so.1"):
+        try:
+            c = ctypes.CDLL(lib)
+            c.crypt.restype = ctypes.c_char_p
+            c.crypt.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
+            return c.crypt
+        except OSError:
+            continue
+    return None
+
+
+def weak_password_users(shadow="/etc/shadow"):
+    crypt = crypt_fn()
+    users = []
+    try:
+        lines = Path(shadow).read_text().splitlines()
+    except OSError:
+        return users
+    for line in lines:
+        f = line.split(":")
+        if len(f) < 2:
+            continue
+        try:
+            pw = pwd.getpwnam(f[0])
+        except KeyError:
+            continue
+        if pw.pw_uid < 1000 or pw.pw_shell.endswith(("nologin", "false")):
+            continue
+        h = f[1]
+        if h == "":
+            users.append(f[0])
+            continue
+        if crypt is None or h.startswith(("!", "*")):
+            continue
+        for guess in WEAK + [f[0]]:
+            out = crypt(guess.encode(), h.encode())
+            if out and out.decode() == h:
+                users.append(f[0])
+                break
+    return users
+
+
+def unit_state(unit):
+    def q(*a):
+        return subprocess.run(["systemctl", *a, unit], capture_output=True, text=True, check=False).stdout.strip()
+    return {"enabled": q("is-enabled") in ("enabled", "enabled-runtime"), "active": q("is-active") == "active"}
+
+
+def secure_boot():
+    for f in Path("/sys/firmware/efi/efivars").glob("SecureBoot-*"):
+        try:
+            return f.read_bytes()[-1] == 1
+        except OSError:
+            pass
+    return False
+
+
+def encrypted_root():
+    out = subprocess.run(["lsblk", "-sno", "TYPE", subprocess.run(
+        ["findmnt", "-no", "SOURCE", "/sysroot"], capture_output=True, text=True, check=False).stdout.split("[")[0].strip()
+        or "/"], capture_output=True, text=True, check=False).stdout
+    return "crypt" in out
+
+
+def main():
+    data = {"weak_password_users": weak_password_users(),
+            "ssh": unit_state("sshd.service"), "firewall": unit_state("firewalld.service"),
+            "secure_boot": secure_boot(), "encrypted": encrypted_root(),
+            "auto_reboot_updates": unit_state("bootc-fetch-apply-updates.timer")["enabled"]}
+    OUT.parent.mkdir(parents=True, exist_ok=True)
+    tmp = OUT.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data))
+    os.chmod(tmp, 0o644)
+    os.replace(tmp, OUT)
+    print(json.dumps(data))
+
+
+if __name__ == "__main__":
+    main()

@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Admin half of Gill-OSaab updates (run through pkexec by gosaab-update-component).
 
-  gosaab-update-root <os|firmware|bios|android|decky|nvidia>
+  gosaab-update-root <os|firmware|bios|android|decky|nvidia|rollback>
+  gosaab-update-root firmware-device <fwupd device id>   one part's firmware only
 
 Exit codes: 0 updated, 3 not available on this device, 4 already up to date, 1 failed.
 """
 import json
+import re
 import os
 import shutil
 import subprocess
@@ -63,13 +65,25 @@ def fwupd(args):
     return UP_TO_DATE if rc == 2 else (0 if rc == 0 else FAILED)
 
 
+def bootc_or_ostree(ostree_args, bootc_args):
+    if shutil.which("rpm-ostree"):
+        return run(["rpm-ostree", *ostree_args])
+    return run(["bootc", *bootc_args])
+
+
 def main(argv):
+    if len(argv) == 2 and argv[0] == "firmware-device":
+        if not re.fullmatch(r"[0-9a-f]{40}", argv[1]):  # fwupd device ids only; nothing else reaches fwupdmgr
+            return 2
+        return fwupd([argv[1]])
     if len(argv) != 1:
         print(__doc__.strip(), file=sys.stderr)
         return 2
     action = argv[0]
     if action == "os":
-        return 0 if run(["rpm-ostree", "upgrade"]) == 0 else FAILED
+        return 0 if bootc_or_ostree(["upgrade"], ["upgrade"]) == 0 else FAILED
+    if action == "rollback":  # go back to the version before the last update (on the next restart)
+        return 0 if bootc_or_ostree(["rollback"], ["rollback"]) == 0 else FAILED
     if action == "firmware":
         return fwupd([])
     if action == "bios":

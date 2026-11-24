@@ -1,0 +1,150 @@
+#!/usr/bin/env python3
+"""Drivers on this device: list them, update only the ones you pick, install missing ones at boot.
+
+  gosaab-drivers list [--check]                    parts, drivers, problems (JSON); --check looks for updates
+  gosaab-drivers update CATEGORY[,CATEGORY] [--builtin]
+                                                   e.g. "graphics" or "graphics,wi-fi"; --builtin also updates
+                                                   the drivers built into the system (kernel, Mesa, firmware files)
+  gosaab-drivers auto                              (admin, at boot) record every part and its driver and install
+                                                   firmware/driver updates when automatic drivers are on
+"""
+import json
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, "/usr/libexec/gill-osaab")
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "../libexec/gill-osaab"))
+import gosaab_drivers as drv  # noqa: E402
+from gosaab_common import ETC, Progress, is_on, log, read_conf  # noqa: E402
+
+ROOT_HELPER = "/usr/libexec/gill-osaab/gosaab-update-root"
+NOT_AVAILABLE, UP_TO_DATE, FAILED = 3, 4, 1
+
+
+def fwupd_json():
+    if not shutil.which("fwupdmgr"):
+        return ""
+    out = subprocess.run(["fwupdmgr", "get-updates", "--json"], capture_output=True, text=True, check=False,
+                         timeout=120)
+    return out.stdout
+
+
+def as_root(*args):
+    cmd = [ROOT_HELPER, *args]
+    if os.geteuid() != 0:
+        if not shutil.which("pkexec"):
+            return FAILED
+        cmd = ["pkexec", *cmd]
+    return subprocess.run(cmd, check=False).returncode
+
+
+def cmd_list(check):
+    inv = drv.inventory()
+    inv["updates"] = drv.fwupd_updates(fwupd_json()) if check else []
+    inv["flatpak_gl"] = drv.flatpak_gl_refs()
+    inv["keys"] = {c: drv.KEYS[c] for c in inv["categories"]}
+    print(json.dumps(inv))
+    return 0
+
+
+def run_target(target, gl_refs):
+    if target == "gfx-apps":
+        rc = subprocess.run(["flatpak", "update", "-y", "--noninteractive", *gl_refs], check=False).returncode
+        return 0 if rc == 0 else FAILED
+    if target.startswith("fw:"):
+        return as_root("firmware-device", target[3:])
+    if target == "builtin":
+        return as_root("os")
+    return NOT_AVAILABLE
+
+
+def cmd_update(keys, builtin):
+    cats = [drv.BY_KEY[k] for k in keys if k in drv.BY_KEY]
+    if not cats and not builtin:
+        print("unknown category; use: " + ", ".join(drv.KEYS.values()), file=sys.stderr)
+        return 2
+    title = "Updating " + (", ".join(cats) if cats else "built-in") + " drivers"
+    progress = Progress(title, app="gosaab-settings").start("Checking for updates")
+    gl = drv.flatpak_gl_refs()
+    targets = drv.targets_for(cats, drv.fwupd_updates(fwupd_json()), builtin, bool(gl))
+    if not targets:
+        progress.finish(True, "Already up to date.")
+        return UP_TO_DATE
+    results = {}
+    for i, t in enumerate(targets):
+        progress.update(percent=i * 100 // len(targets), message=t)
+        log("drivers", f"update {t}")
+        results[t] = run_target(t, gl)
+    failed = [t for t, rc in results.items() if rc not in (0, UP_TO_DATE, NOT_AVAILABLE)]
+    progress.update(percent=100)
+    restart = results.get("builtin") == 0
+    progress.finish(not failed, "Couldn't update: " + ", ".join(failed) if failed else
+                    ("Drivers updated. Restart to finish." if restart else "Drivers updated."))
+    return FAILED if failed else 0
+
+
+def on_ac_power(root=Path("/sys/class/power_supply")):
+    supplies = list(root.glob("*"))
+    if not any(drv.gosaab_hw.read(s / "type") == "Battery" for s in supplies):
+        return True  # desktop PC
+    return any(drv.gosaab_hw.read(s / "type") in ("Mains", "USB", "USB_C") and drv.gosaab_hw.read(s / "online") == "1"
+               for s in supplies)
+
+
+def cmd_auto():
+    """Boot-time (admin): record the device, then fetch what can be installed on its own."""
+    inv = drv.inventory()
+    done, skipped = [], []
+    if is_on(read_conf(ETC / "features.conf"), "auto_drivers", default=True):
+        if shutil.which("fwupdmgr"):
+            subprocess.run(["fwupdmgr", "refresh", "--force"], capture_output=True, check=False, timeout=300)
+            for u in drv.fwupd_updates(fwupd_json()):
+                if not on_ac_power():
+                    skipped.append(f"{u['name']} firmware {u['to']} (waiting for the charger)")
+                    continue
+                rc = subprocess.run(["fwupdmgr", "update", u["id"][3:], "--assume-yes", "--no-reboot-check"],
+                                    capture_output=True, check=False, timeout=1800).returncode
+                if rc == 0:
+                    done.append(f"{u['name']} firmware {u['to']}")
+                else:
+                    inv["problems"].append({
+                        "kind": "update-failed", "category": u["category"], "name": u["name"],
+                        "detail": f"Firmware {u['to']} for {u['name']} failed to install.",
+                        "hint": "Try again from Settings > Device & Drivers."})
+        gl = drv.flatpak_gl_refs()
+        if gl:
+            subprocess.run(["flatpak", "update", "--system", "-y", "--noninteractive", *gl], capture_output=True,
+                           check=False, timeout=1800)
+    inv["installed"], inv["waiting"] = done, skipped
+    drv.STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = drv.STATE_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(inv, indent=1))
+    os.chmod(tmp, 0o644)
+    os.replace(tmp, drv.STATE_FILE)
+    print(f"{len(inv['parts'])} parts, {len(inv['problems'])} problems, installed {len(done)}")
+    return 0
+
+
+def main(argv):
+    if not argv or argv[0] in ("-h", "--help"):
+        print(__doc__.strip())
+        return 0 if argv else 2
+    if argv[0] == "list":
+        return cmd_list("--check" in argv)
+    if argv[0] == "update" and len(argv) >= 2:
+        keys = [] if argv[1] == "--builtin" else argv[1].split(",")
+        return cmd_update(keys, "--builtin" in argv)
+    if argv[0] == "auto":
+        if os.geteuid() != 0:
+            print("auto runs as admin at boot (gosaab-drivers.service)", file=sys.stderr)
+            return 2
+        return cmd_auto()
+    print(__doc__.strip(), file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

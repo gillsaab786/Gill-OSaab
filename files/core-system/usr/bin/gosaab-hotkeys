@@ -1,0 +1,158 @@
+#!/usr/bin/python3
+"""Button and key-combo shortcuts (Settings > Buttons & Shortcuts uses this).
+
+  gosaab-hotkeys list                 shortcuts in use (JSON: combo -> {action, label, keys, mine})
+  gosaab-hotkeys actions              what a shortcut can do (JSON)
+  gosaab-hotkeys set COMBO ACTION     e.g.  set META+R mode   set BTN_MODE+BTN_SOUTH app:steam
+  gosaab-hotkeys remove COMBO
+  gosaab-hotkeys record               press the button(s) now; prints the combo (8 s)
+  gosaab-hotkeys run ACTION           do it now (the shortcut service calls this)
+"""
+import json
+import os
+import shutil
+import socket
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, "/usr/libexec/gill-osaab")
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "../libexec/gill-osaab"))
+import gosaab_hotkeys as hk  # noqa: E402
+
+USER_CONF = Path.home() / hk.USER_CONF_NAME
+QS = ["qs", "-c", "gill-osaab", "ipc", "call"]
+
+
+def user_bindings():
+    try:
+        return hk.parse_config(USER_CONF.read_text())
+    except OSError:
+        return {}
+
+
+def system_bindings():
+    try:
+        return hk.parse_config(hk.SYSTEM_CONF.read_text())
+    except OSError:
+        return {}
+
+
+def save(bindings):
+    USER_CONF.parent.mkdir(parents=True, exist_ok=True)
+    tmp = USER_CONF.with_suffix(".tmp")
+    tmp.write_text(hk.format_config(bindings))
+    os.replace(tmp, USER_CONF)
+
+
+def in_game_mode():
+    return subprocess.run(["pgrep", "-u", str(os.getuid()), "-x", "gamescope"], capture_output=True,
+                          check=False).returncode == 0
+
+
+def find_desktop_file(app_id):
+    dirs = [Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share"))]
+    dirs += [Path(d) for d in os.environ.get("XDG_DATA_DIRS", "/usr/local/share:/usr/share").split(":") if d]
+    dirs += [Path("/var/lib/flatpak/exports/share"), Path.home() / ".local/share/flatpak/exports/share"]
+    for d in dirs:
+        f = d / "applications" / f"{app_id}.desktop"
+        if f.is_file():
+            return f
+    return None
+
+
+def run_action(action):
+    if action in ("mode", "game", "desktop"):
+        to_desktop = action == "desktop" or (action == "mode" and in_game_mode())
+        cmd = ["steamos-session-select", "desktop"] if to_desktop else ["gosaab-game-mode"]
+        return subprocess.run(cmd, check=False).returncode
+    if action in ("launchpad", "spotlight", "controlcenter", "notifications"):
+        return subprocess.run(QS + [action, "toggle"], check=False).returncode
+    if action == "lock":
+        return subprocess.run(QS + ["lock", "lock"], check=False).returncode
+    if action == "settings":
+        subprocess.Popen(["gosaab-settings"])
+        return 0
+    if action == "screenshot":
+        pics = Path(subprocess.run(["xdg-user-dir", "PICTURES"], capture_output=True, text=True,
+                                   check=False).stdout.strip() or Path.home() / "Pictures")
+        pics.mkdir(parents=True, exist_ok=True)
+        out = pics / time.strftime("Screenshot %Y-%m-%d %H.%M.%S.png")
+        rc = subprocess.run(["grim", str(out)], check=False).returncode
+        if rc == 0 and shutil.which("notify-send"):
+            subprocess.run(["notify-send", "-a", "Screenshot", "-i", str(out), "Screenshot saved", out.name],
+                           check=False)
+        return rc
+    if action.startswith("app:") and hk.valid_action(action):
+        f = find_desktop_file(action[4:])
+        if not f:
+            return 1
+        subprocess.Popen(["gio", "launch", str(f)])
+        return 0
+    if action.startswith("run:"):
+        subprocess.Popen(["sh", "-c", action[4:]])
+        return 0
+    return 2
+
+
+def record():
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(10)
+    try:
+        s.connect(hk.SOCKET)
+        s.sendall(b"record\n")
+        combo = s.recv(256).decode().strip()
+    except OSError:
+        print("the shortcut service isn't running (gosaab-hotkeyd)", file=sys.stderr)
+        return 1
+    if not combo:
+        return 1
+    print(combo)
+    return 0
+
+
+def main(argv):
+    if not argv or argv[0] in ("-h", "--help"):
+        print(__doc__.strip())
+        return 0 if argv else 2
+    cmd = argv[0]
+    if cmd == "list":
+        mine = user_bindings()
+        eff = hk.effective(system_bindings(), mine)
+        print(json.dumps({c: {"action": a, "label": hk.describe_action(a), "keys": hk.describe(c),
+                              "mine": c in mine} for c, a in eff.items()}))
+        return 0
+    if cmd == "actions":
+        print(json.dumps(hk.ACTIONS))
+        return 0
+    if cmd == "set" and len(argv) >= 3:
+        combo, action = hk.parse_combo(argv[1]), " ".join(argv[2:])
+        if not combo or not hk.is_allowed(combo):
+            print("that combo would fire while typing; add Windows, Ctrl or Alt, or use a button", file=sys.stderr)
+            return 2
+        if not hk.valid_action(action):
+            print("unknown action", file=sys.stderr)
+            return 2
+        b = user_bindings()
+        b[combo] = action
+        save(b)
+        return 0
+    if cmd == "remove" and len(argv) == 2:
+        combo = hk.parse_combo(argv[1])
+        b = user_bindings()
+        b.pop(combo, None)
+        if combo in system_bindings():
+            b[combo] = "none"  # turn the built-in one off
+        save(b)
+        return 0
+    if cmd == "record":
+        return record()
+    if cmd == "run" and len(argv) == 2:
+        return run_action(argv[1])
+    print(__doc__.strip(), file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

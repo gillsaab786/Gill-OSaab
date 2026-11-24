@@ -38,6 +38,24 @@ systemctl enable gosaab-android-folders.service || log "warning: android folders
 # printers/scanners appear by themselves (driverless IPP, USB printers), firmware updates
 for unit in cups.socket ipp-usb.service fwupd-refresh.timer; do systemctl enable "$unit" 2>/dev/null || true; done
 
+# Button/combo shortcuts (handheld buttons, Windows+R -> Game Mode) in both sessions
+systemctl enable gosaab-hotkeyd.service || log "warning: shortcut service not enabled"
+
+# Firewall: nothing on this PC is reachable from the network unless allowed. Allowed: finding printers
+# and other devices (mDNS), Steam Remote Play/LAN game downloads; Android (Waydroid) gets its own
+# trusted network link so its apps keep internet access.
+if command -v firewall-offline-cmd >/dev/null; then
+    firewall-offline-cmd --set-default-zone=public || log "warning: firewall zone not set"
+    firewall-offline-cmd --zone=public --remove-service=ssh >/dev/null 2>&1 || true
+    for svc in mdns ipp-client steam-streaming steam-lan-transfer; do
+        firewall-offline-cmd --zone=public --add-service="$svc" >/dev/null 2>&1 || log "note: no firewalld service $svc"
+    done
+    firewall-offline-cmd --zone=trusted --add-interface=waydroid0 >/dev/null 2>&1 || true
+    systemctl enable firewalld.service || log "warning: firewalld not enabled"
+else
+    log "warning: firewalld missing"
+fi
+
 # Frame generation (off by default) comes from the lsfg-vk package (recipe); games opt in from
 # Settings > Game Mode or with the launch option LSFG_PROCESS=gosaab %command%
 ls /usr/share/vulkan/implicit_layer.d/ 2>/dev/null | grep -qi lsfg || log "warning: lsfg-vk layer not installed"

@@ -1,0 +1,309 @@
+#!/usr/bin/env python3
+"""Find and record problems on this device: errors, crashes, failed services, missing drivers.
+
+  gosaab-diagnose --collect [--notify]   look for new problems and record them (hourly, automatic)
+  gosaab-diagnose --json                 recorded problems as JSON (Settings > Problems)
+  gosaab-diagnose --report               a report to copy and paste when asking for a fix
+                                         (names, addresses and serial numbers are removed)
+  gosaab-diagnose --clear                forget the recorded problems
+"""
+import json
+import os
+import platform
+import re
+import shutil
+import socket
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, "/usr/libexec/gill-osaab")
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "../libexec/gill-osaab"))
+from gosaab_common import STATE, notify  # noqa: E402
+
+PROBLEMS = STATE / "problems.json"
+KEEP_DAYS = 30
+MAX_ITEMS = 300
+
+# Harmless messages almost every PC logs; they'd only bury the real problems
+NOISE = [
+    r"ACPI (BIOS )?Error", r"AE_NOT_FOUND", r"ACPI Error", r"\bucsi_acpi\b.*(error|failed)", r"sap-server",
+    r"gkr-pam", r"Failed to (connect to|resolve) .*avahi", r"pcieport .*AER", r"PCIe Bus Error",
+    r"Bluetooth: hci\d+: Malformed", r"kauditd", r"tpm tpm\d+: \[Firmware Bug\]", r"x86/cpu: SGX disabled",
+    r"usb .*: device descriptor read/64, error", r"Direct firmware load for .*\.ucode failed",
+    r"wireplumber.*(SPA|spa)\.bluez5", r"Failed to start .*rtkit", r"sddm-helper.*pam_kwallet",
+]
+NOISE_RE = re.compile("|".join(NOISE), re.I)
+SEVERITY = {"security": 3, "crash": 3, "missing-driver": 3, "failed-service": 2, "missing-firmware": 2, "update-failed": 2,
+            "limited-driver": 1, "error": 1, "app-error": 1}
+
+
+# ------------------------------------------------------------------ helpers (tested)
+def normalize(message):
+    """Same problem, different numbers/addresses -> same key."""
+    m = re.sub(r"0x[0-9a-fA-F]+|\b[0-9a-fA-F]{8,}\b", "#", message)
+    m = re.sub(r"\d+", "#", m)
+    return re.sub(r"\s+", " ", m).strip()[:200]
+
+
+def is_noise(message):
+    return bool(NOISE_RE.search(message))
+
+
+def redact(text, user=None, host=None, home=None):
+    """Remove personal details before a report is shared."""
+    user = user if user is not None else os.environ.get("USER", "")
+    host = host if host is not None else socket.gethostname()
+    home = home if home is not None else str(Path.home())
+    if home and home not in ("/", "/root"):
+        text = text.replace(home, "~")
+    text = re.sub(r"\b([0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}\b", "<mac>", text)
+    text = re.sub(r"[\w.+-]+@[\w-]+\.[\w.-]+", "<email>", text)
+    text = re.sub(r"\b(?!127\.)(\d{1,3}\.){3}\d{1,3}\b", "<ip>", text)
+    text = re.sub(r"\b([0-9a-fA-F]{1,4}:){4,7}[0-9a-fA-F]{1,4}\b", "<ip6>", text)
+    text = re.sub(r"(?i)(serial(?: ?number)?[\s:=]+)\S+", r"\1<serial>", text)
+    text = re.sub(r"(?i)(ssid[\s:=]+)('[^']*'|\"[^\"]*\"|\S+)", r"\1<wifi>", text)
+    for word, tag in ((user, "<user>"), (host, "<host>")):
+        if word and len(word) >= 3 and word not in ("localhost", "fedora", "root"):
+            text = re.sub(rf"\b{re.escape(word)}\b", tag, text)
+    return text
+
+
+def journal_entries(json_lines, kind="error"):
+    """journalctl -o json lines -> problems."""
+    out = []
+    for line in json_lines.splitlines():
+        try:
+            e = json.loads(line)
+        except ValueError:
+            continue
+        msg = e.get("MESSAGE")
+        if isinstance(msg, list):  # binary message
+            continue
+        msg = (msg or "").strip()
+        if not msg or is_noise(msg):
+            continue
+        src = e.get("SYSLOG_IDENTIFIER") or e.get("_COMM") or e.get("_SYSTEMD_UNIT") or "system"
+        ts = int(e.get("__REALTIME_TIMESTAMP", "0") or 0) // 1_000_000
+        if src == "systemd-coredump":
+            m = re.search(r"Process \d+ \(([^)]+)\).*dumped core", msg)
+            if not m:
+                continue
+            out.append({"kind": "crash", "title": f"{m.group(1)} crashed", "detail": msg.splitlines()[0],
+                        "source": m.group(1), "time": ts})
+        else:
+            out.append({"kind": kind, "title": f"Error in {src}", "detail": msg.splitlines()[0][:500],
+                        "source": src, "time": ts})
+    return out
+
+
+def failed_units(text, scope):
+    out = []
+    for line in text.splitlines():
+        cols = line.split()
+        if cols and cols[0].endswith((".service", ".mount", ".socket", ".timer")):
+            out.append({"kind": "failed-service", "title": f"{cols[0]} failed to start",
+                        "detail": f"The {scope} service {cols[0]} is in a failed state.", "source": cols[0],
+                        "time": int(time.time()), "state": True})
+    return out
+
+
+def driver_problems(state):
+    return [{"kind": p["kind"], "title": {"missing-driver": f"Missing driver: {p['name']}",
+                                          "missing-firmware": f"Missing firmware: {p['name']}",
+                                          "update-failed": f"Driver update failed: {p['name']}"}.get(
+                                              p["kind"], f"{p['category']}: {p['name']}"),
+             "detail": p["detail"] + (" " + p["hint"] if p.get("hint") else ""), "source": "drivers",
+             "time": int(time.time()), "state": True} for p in state.get("problems", [])]
+
+
+def security_problems(sec, user=None):
+    user = user or os.environ.get("USER", "")
+    now = int(time.time())
+    out = []
+    if user in sec.get("weak_password_users", []):
+        out.append({"kind": "security", "title": "Your password is the default one",
+                    "detail": "Anyone who knows the test build's password can sign in or approve changes. "
+                              "Change it: Settings > Apps & Security > Change password.",
+                    "source": "security", "time": now, "state": True})
+    if sec.get("ssh", {}).get("active"):
+        out.append({"kind": "security", "title": "Remote login (SSH) is on",
+                    "detail": "Other devices on the network can try to sign in. Turn it off if you don't use it: "
+                              "sudo systemctl disable --now sshd", "source": "security", "time": now, "state": True})
+    if sec.get("firewall") and not sec["firewall"].get("active"):
+        out.append({"kind": "security", "title": "Firewall is off",
+                    "detail": "Turn it on: sudo systemctl enable --now firewalld", "source": "security",
+                    "time": now, "state": True})
+    return out
+
+
+def app_log_problems(state_dir):
+    out = []
+    for log in sorted(Path(state_dir).glob("*.log")):
+        try:
+            lines = log.read_text(errors="replace").splitlines()[-400:]
+        except OSError:
+            continue
+        for line in lines:
+            if re.search(r"\b(failed|error|traceback)\b", line, re.I):
+                try:
+                    ts = int(time.mktime(time.strptime(line[:19], "%Y-%m-%d %H:%M:%S")))
+                except ValueError:
+                    continue
+                out.append({"kind": "app-error", "title": f"Gill-OSaab {log.stem}", "detail": line[20:][:400],
+                            "source": log.stem, "time": ts})
+    return out
+
+
+def merge(recorded, found, now=None):
+    """Add newly found problems; count repeats; forget ones not seen for KEEP_DAYS. Returns new keys."""
+    now = now or int(time.time())
+    new, seen = [], set()
+    for p in found:
+        key = f"{p['kind']}|{p['source']}|{normalize(p['detail'])}"
+        seen.add(key)
+        if key in recorded:
+            r = recorded[key]
+            if p.get("state"):  # still there (a failed service, a missing driver): not a new occurrence
+                r["last"] = max(r["last"], p["time"])
+            elif p["time"] > r["last"]:
+                r["count"] += 1
+                r["last"] = p["time"]
+        else:
+            recorded[key] = {**p, "first": p["time"] or now, "last": p["time"] or now, "count": 1}
+            new.append(key)
+    # conditions (a failed service, a missing driver, a weak password) disappear once fixed
+    for key in [k for k, r in recorded.items() if r.get("state") and k not in seen]:
+        del recorded[key]
+    for key in [k for k, r in recorded.items() if now - r["last"] > KEEP_DAYS * 86400]:
+        del recorded[key]
+    if len(recorded) > MAX_ITEMS:
+        for key in sorted(recorded, key=lambda k: recorded[k]["last"])[:len(recorded) - MAX_ITEMS]:
+            del recorded[key]
+    return new
+
+
+def sorted_problems(recorded):
+    return sorted(recorded.values(), key=lambda r: (-SEVERITY.get(r["kind"], 1), -r["last"]))
+
+
+# ------------------------------------------------------------------ collecting
+def run(cmd):
+    if not shutil.which(cmd[0]):
+        return ""
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=60).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+
+
+def load():
+    try:
+        return json.loads(PROBLEMS.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def save(recorded):
+    PROBLEMS.parent.mkdir(parents=True, exist_ok=True)
+    tmp = PROBLEMS.with_suffix(".tmp")
+    tmp.write_text(json.dumps(recorded))
+    os.replace(tmp, PROBLEMS)
+
+
+def drivers_state():
+    try:
+        import gosaab_drivers
+        state = gosaab_drivers.load_state()
+        return state if state else gosaab_drivers.inventory()
+    except Exception:
+        return {}
+
+
+def collect():
+    found = []
+    since = "-2d"
+    found += journal_entries(run(["journalctl", "--since", since, "-p", "3", "-o", "json", "--no-pager",
+                                  "-n", "3000"]))
+    found += journal_entries(run(["journalctl", "--user", "--since", since, "-p", "3", "-o", "json",
+                                  "--no-pager", "-n", "1000"]))
+    found += journal_entries(run(["journalctl", "--since", "-7d", "-t", "systemd-coredump", "-o", "json",
+                                  "--no-pager", "-n", "200"]))
+    found += failed_units(run(["systemctl", "--failed", "--plain", "--no-legend"]), "system")
+    found += failed_units(run(["systemctl", "--user", "--failed", "--plain", "--no-legend"]), "user")
+    found += driver_problems(drivers_state())
+    found += app_log_problems(STATE)
+    try:
+        found += security_problems(json.loads(Path("/run/gill-osaab/security.json").read_text()))
+    except (OSError, ValueError):
+        pass
+    recorded = load()
+    new = merge(recorded, found)
+    save(recorded)
+    return recorded, new
+
+
+def system_info():
+    info = {}
+    try:
+        out = run(["gosaab-update-component", "--versions"])
+        info = json.loads(out) if out else {}
+    except ValueError:
+        pass
+    try:
+        import gosaab_hw
+        hw = gosaab_hw.summary()
+    except Exception:
+        hw = {"model": {}, "cpu": "", "gpus": []}
+    lines = [f"Gill-OSaab {info.get('gill_osaab', '?')} · image {info.get('image', '?')} · OS {info.get('os', '?')}",
+             f"Kernel {platform.release()} · Mesa {info.get('mesa', '?')} · Wine {info.get('wine', '?')}",
+             f"Device {hw.get('model', {}).get('name', '?')} · BIOS {hw.get('model', {}).get('bios_version', '?')}",
+             f"CPU {hw.get('cpu', '?')}"]
+    lines += [f"GPU {g['vendor']} {g['device']} (driver {g['driver'] or 'none'})" for g in hw.get("gpus", [])]
+    session = "Game Mode" if run(["pgrep", "-x", "gamescope"]).strip() else "Desktop"
+    lines.append(f"Session {session} · {time.strftime('%Y-%m-%d %H:%M %Z')}")
+    return lines
+
+
+def report(recorded):
+    problems = sorted_problems(recorded)
+    out = ["Gill-OSaab problem report", "=" * 25, *system_info(), ""]
+    if not problems:
+        out.append("No problems recorded.")
+    for i, p in enumerate(problems, 1):
+        when = time.strftime("%Y-%m-%d %H:%M", time.localtime(p["last"]))
+        times = f" · {p['count']}×" if p["count"] > 1 else ""
+        out.append(f"{i}. [{p['kind']}] {p['title']} (last {when}{times})")
+        out.append(f"   {p['detail']}")
+    return redact("\n".join(out))
+
+
+def main(argv):
+    if not argv or argv[0] in ("-h", "--help"):
+        print(__doc__.strip())
+        return 0 if argv else 2
+    if argv[0] == "--collect":
+        recorded, new = collect()
+        serious = [k for k in new if SEVERITY.get(recorded[k]["kind"], 1) >= 2]
+        if "--notify" in argv and serious:
+            first = recorded[serious[0]]["title"]
+            more = f" and {len(serious) - 1} more" if len(serious) > 1 else ""
+            notify("Problem found", f"{first}{more}. See Settings > Problems to copy a report.")
+        print(f"{len(recorded)} recorded, {len(new)} new")
+        return 0
+    if argv[0] == "--json":
+        print(json.dumps(sorted_problems(load())))
+        return 0
+    if argv[0] == "--report":
+        print(report(load()))
+        return 0
+    if argv[0] == "--clear":
+        save({})
+        return 0
+    print(__doc__.strip(), file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

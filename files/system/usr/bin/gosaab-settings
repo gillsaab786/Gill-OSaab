@@ -257,6 +257,70 @@ class Backend:
         (self.APP_FOLDERS / f"{app}.conf").write_text("".join(f + "\n" for f in folders[:2]))
         return 0
 
+    # ---- drivers, problems, shortcuts, security
+    def _json(self, cmd, default, timeout=30):
+        if not shutil.which(cmd[0]):
+            return default
+        try:
+            out = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
+            return json.loads(out.stdout)
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            return default
+
+    def drivers(self, check=False):
+        state = Path("/var/lib/gill-osaab/drivers.json")
+        if not check and state.exists():  # recorded at start-up (includes firmware that failed to load)
+            try:
+                return json.loads(state.read_text())
+            except (OSError, ValueError):
+                pass
+        return self._json(["gosaab-drivers", "list"] + (["--check"] if check else []),
+                          {"parts": [], "categories": [], "problems": [], "versions": {}}, 120 if check else 30)
+
+    def problems(self):
+        return self._json(["gosaab-diagnose", "--json"], [])
+
+    def problem_report(self):
+        out = subprocess.run(["gosaab-diagnose", "--report"], capture_output=True, text=True, check=False) \
+            if shutil.which("gosaab-diagnose") else None
+        return out.stdout if out else "gosaab-diagnose is not installed."
+
+    def hotkeys(self):
+        return self._json(["gosaab-hotkeys", "list"], {})
+
+    def hotkey_actions(self):
+        return self._json(["gosaab-hotkeys", "actions"], {})
+
+    def set_hotkey(self, combo, action):
+        return self.have("gosaab-hotkeys") and subprocess.run(
+            ["gosaab-hotkeys", "set", combo, action], capture_output=True, check=False).returncode == 0
+
+    def remove_hotkey(self, combo):
+        return subprocess.run(["gosaab-hotkeys", "remove", combo], check=False).returncode == 0
+
+    def security(self):
+        try:
+            return json.loads(Path("/run/gill-osaab/security.json").read_text())
+        except (OSError, ValueError):
+            return {}
+
+    def desktop_apps(self):
+        """(desktop id, name) of every app in the menus."""
+        dirs = [Path.home() / ".local/share/applications", Path("/var/lib/flatpak/exports/share/applications"),
+                Path.home() / ".local/share/flatpak/exports/share/applications", Path("/usr/share/applications")]
+        apps = {}
+        for d in dirs:
+            for f in sorted(d.glob("*.desktop")) if d.is_dir() else []:
+                try:
+                    text = f.read_text(errors="replace")
+                except OSError:
+                    continue
+                if "NoDisplay=true" in text or f.stem in apps:
+                    continue
+                name = next((ln[5:] for ln in text.splitlines() if ln.startswith("Name=")), f.stem)
+                apps[f.stem] = name
+        return sorted(apps.items(), key=lambda kv: kv[1].lower())
+
     def decky_plugin_installed(self):
         return (Path.home() / "homebrew/plugins/gill-osaab-notify/plugin.json").exists()
 
@@ -397,9 +461,10 @@ def progress_ring_pixmap(percent, size):
 class UpdateButton(QPushButton):
     """Runs one updater part in the background and shows the result."""
 
-    def __init__(self, window, part, label="Update"):
+    def __init__(self, window, part, label="Update", command=None):
         super().__init__(label)
         self.window, self.part, self.label = window, part, label
+        self.command = command  # callable -> argv, for jobs other than gosaab-update-component
         self.setObjectName("pill")
         self.setCursor(Qt.PointingHandCursor)
         self.clicked.connect(self.start)
@@ -407,9 +472,12 @@ class UpdateButton(QPushButton):
         self.last_code = None
 
     def start(self):
+        cmd = self.command() if self.command else [UPDATER, self.part]
+        if not cmd:
+            return
         self.setEnabled(False)
         self.show_progress(0)
-        self.proc = self.window.backend.run_async([UPDATER, self.part], self, self.finished)
+        self.proc = self.window.backend.run_async(cmd, self, self.finished)
         if hasattr(self.proc, "readyReadStandardOutput"):
             self.proc.readyReadStandardOutput.connect(self.read_progress)
 
@@ -536,6 +604,7 @@ class Page(QScrollArea):
 PAGES = [
     # title, tile colour, symbolic glyph, letter
     ("Updates", "#0A84FF", "system-software-update-symbolic", "U"),
+    ("Problems", "#FF453A", "dialog-warning-symbolic", "!"),
     ("Device & Drivers", "#30D158", "computer-symbolic", "D"),
     ("Apps & Security", "#5E5CE6", "security-high-symbolic", "S"),
     ("App Folders", "#64D2FF", "folder-symbolic", "F"),
@@ -545,6 +614,7 @@ PAGES = [
     ("Screen Off", "#FF9F0A", "video-display-symbolic", "O"),
     ("Appearance", "#1FB6C9", "preferences-desktop-appearance-symbolic", "A"),
     ("Game Mode", "#32D74B", "input-gaming-symbolic", "G"),
+    ("Buttons & Shortcuts", "#FF9F0A", "input-keyboard-symbolic", "B"),
     ("Optional Features", "#BF5AF2", "view-more-symbolic", "+"),
     ("About", "#8E8E93", "help-about-symbolic", "i"),
 ]
@@ -591,8 +661,10 @@ class Settings(QMainWindow):
         layout.addWidget(self.stack, 1)
         self.setCentralWidget(root)
 
-        builders = [self.page_updates, self.page_device, self.page_security, self.page_folders, self.page_vpn_cloud, self.page_glasses, self.page_notifications,
-                    self.page_screen, self.page_appearance, self.page_gamemode, self.page_optional, self.page_about]
+        builders = [self.page_updates, self.page_problems, self.page_device, self.page_security, self.page_folders,
+                    self.page_vpn_cloud, self.page_glasses, self.page_notifications, self.page_screen,
+                    self.page_appearance, self.page_gamemode, self.page_shortcuts, self.page_optional,
+                    self.page_about]
         self.pages = []
         for (name, color, glyph, letter), builder in zip(PAGES, builders):
             item = QListWidgetItem(tile_icon(color, glyph, letter), name)
@@ -606,6 +678,12 @@ class Settings(QMainWindow):
         self.refresh()
 
     # -------------------------------------------------------- navigation
+    def go_to(self, title):
+        for i, page in enumerate(self.pages):
+            if page.title == title:
+                self.nav.setCurrentRow(i)
+                return
+
     def show_page(self, index):
         if index < 0:
             return
@@ -703,6 +781,14 @@ class Settings(QMainWindow):
             Row("Linux containers", "Apps installed from .deb and .rpm", self.update_button("containers")),
             Row("Game Mode plugins", "Gill-OSaab Notifications", self.update_button("decky")),
         ], note="Drivers, device firmware and the BIOS are in Device & Drivers.")
+        only = QPushButton("Choose drivers…")
+        only.setObjectName("pill")
+        only.clicked.connect(lambda: self.go_to("Device & Drivers"))
+        p.section("Drivers only", [Row("Update only drivers", "Pick which ones, e.g. just graphics or just Wi-Fi.",
+                                       only)])
+        p.section("Something broke after an update?", [
+            Row("Go back to the previous version", "The system before the last update comes back after a "
+                "restart. Your files and apps aren't touched.", self.update_button("rollback", "Go back"))])
         p.section("Automatic updates", [
             Row("All updates", "Master switch. Off stops every automatic update below.",
                 self.switch("updates.conf", "all")),
@@ -712,6 +798,173 @@ class Settings(QMainWindow):
         ], note="Steam updates itself and isn't controlled here.")
         p.finish()
         return p
+
+    def page_problems(self):
+        p = Page("Problems")
+        p.keywords += ["errors", "glitches", "crash", "report", "missing driver", "log"]
+        intro = QLabel("Errors, crashes, failed services and missing drivers found on this device. Copy the "
+                       "report and paste it to get them fixed – names, addresses and serial numbers are removed.")
+        intro.setObjectName("note")
+        intro.setWordWrap(True)
+        p.lay.addWidget(intro)
+        bar = QHBoxLayout()
+        copy = QPushButton("Copy report")
+        copy.setObjectName("primary")
+        copy.clicked.connect(lambda: self.copy_report(copy))
+        save = QPushButton("Save report…")
+        save.clicked.connect(self.save_report)
+        check = QPushButton("Check now")
+        check.clicked.connect(lambda: self.check_problems(check))
+        clear = QPushButton("Clear list")
+        clear.clicked.connect(lambda: (self.backend.run(["gosaab-diagnose", "--clear"]), self.fill_problems()))
+        for b in (copy, save, check, clear):
+            b.setCursor(Qt.PointingHandCursor)
+            bar.addWidget(b)
+        bar.addStretch(1)
+        p.lay.addLayout(bar)
+        self.problems_holder = QWidget()
+        self.problems_lay = QVBoxLayout(self.problems_holder)
+        self.problems_lay.setContentsMargins(0, 0, 0, 0)
+        p.lay.addWidget(self.problems_holder)
+        self.fill_problems()
+        p.finish()
+        return p
+
+    def fill_problems(self):
+        while self.problems_lay.count():
+            w = self.problems_lay.takeAt(0).widget()
+            if w:
+                w.deleteLater()
+        items = self.backend.problems()
+        if not items:
+            ok = QLabel("●  No problems found")
+            ok.setObjectName("ok")
+            self.problems_lay.addWidget(Card([Row("All good", "Nothing has gone wrong that needs fixing.", ok)]))
+            return
+        names = {"security": "Security", "crash": "Crash", "missing-driver": "Missing driver",
+                 "missing-firmware": "Missing firmware", "failed-service": "Failed service",
+                 "update-failed": "Update failed", "limited-driver": "Limited driver", "error": "Error",
+                 "app-error": "App error"}
+        rows = []
+        for it in items[:80]:
+            lab = QLabel(names.get(it["kind"], it["kind"]) + (f" · {it['count']}×" if it.get("count", 1) > 1 else ""))
+            lab.setObjectName("bad" if it["kind"] in ("security", "crash", "missing-driver") else "note")
+            rows.append(Row(it["title"], it["detail"][:300], lab))
+        self.problems_lay.addWidget(Card(rows))
+        nav = self.nav.item(1) if hasattr(self, "nav") and self.nav.count() > 1 else None
+        if nav:
+            nav.setText(f"Problems ({len(items)})")
+
+    def copy_report(self, button):
+        QApplication.clipboard().setText(self.backend.problem_report())
+        button.setText("Copied ✓")
+
+    def save_report(self):
+        from PySide6.QtWidgets import QFileDialog
+        path, _ = QFileDialog.getSaveFileName(self, "Save problem report",
+                                              str(Path.home() / "Gill-OSaab problem report.txt"))
+        if path:
+            Path(path).write_text(self.backend.problem_report())
+
+    def check_problems(self, button):
+        button.setEnabled(False)
+        button.setText("Checking…")
+
+        def done(_code):
+            button.setEnabled(True)
+            button.setText("Check now")
+            self.fill_problems()
+        self.backend.run_async(["gosaab-diagnose", "--collect"], button, done)
+
+    def page_shortcuts(self):
+        p = Page("Buttons & Shortcuts")
+        p.keywords += ["hotkey", "button", "combo", "rog ally", "legion go", "gpd", "windows+r", "game mode"]
+        intro = QLabel("Make any button or combo open an app or switch between Game Mode and Desktop – in both "
+                       "modes. Handheld buttons (ROG Ally, Legion Go, GPD…), controller buttons and keyboard "
+                       "combos like Windows + R all work.")
+        intro.setObjectName("note")
+        intro.setWordWrap(True)
+        p.lay.addWidget(intro)
+        self.shortcut_holder = QWidget()
+        self.shortcut_lay = QVBoxLayout(self.shortcut_holder)
+        self.shortcut_lay.setContentsMargins(0, 0, 0, 0)
+        p.lay.addWidget(self.shortcut_holder)
+
+        self.recorded_combo = ""
+        self.record_btn = QPushButton("Press buttons…")
+        self.record_btn.setObjectName("pill")
+        self.record_btn.clicked.connect(self.record_shortcut)
+        self.action_pick = QComboBox()
+        for key, label in self.backend.hotkey_actions().items():
+            if key != "none":
+                self.action_pick.addItem(label, key)
+        for app_id, name in self.backend.desktop_apps():
+            self.action_pick.addItem(f"Open {name}", f"app:{app_id}")
+        self.command_edit = QLineEdit()
+        self.command_edit.setPlaceholderText("or a command to run, e.g. brave-browser --incognito")
+        add = QPushButton("Add shortcut")
+        add.setObjectName("primary")
+        add.clicked.connect(self.add_shortcut)
+        p.section("New shortcut", [Row("1. Buttons", "Click, then hold the button(s) together and let go.",
+                                       self.record_btn),
+                                   Row("2. What it does", "", self.action_pick),
+                                   Row("Custom command", "Optional – used instead of the choice above.",
+                                       self.command_edit),
+                                   Row("3. Save", "", add)])
+        self.fill_shortcuts()
+        p.finish()
+        return p
+
+    def fill_shortcuts(self):
+        while self.shortcut_lay.count():
+            w = self.shortcut_lay.takeAt(0).widget()
+            if w:
+                w.deleteLater()
+        rows = []
+        for combo, info in sorted(self.backend.hotkeys().items()):
+            rm = QPushButton("Remove")
+            rm.setObjectName("pill")
+            rm.clicked.connect(lambda _=False, c=combo: (self.backend.remove_hotkey(c), self.fill_shortcuts()))
+            rows.append(Row(info.get("keys", combo), info.get("label", info.get("action", "")), rm))
+        if not rows:
+            rows = [Row("No shortcuts yet", "Add one below.")]
+        box = QWidget()
+        bl = QVBoxLayout(box)
+        bl.setContentsMargins(0, 0, 0, 0)
+        lab = QLabel("YOUR SHORTCUTS")
+        lab.setObjectName("sectionLabel")
+        bl.addWidget(lab)
+        bl.addWidget(Card(rows))
+        self.shortcut_lay.addWidget(box)
+
+    def record_shortcut(self):
+        self.record_btn.setEnabled(False)
+        self.record_btn.setText("Hold the buttons now…")
+        proc = QProcess(self)
+
+        def done(_code, _status=None):
+            combo = bytes(proc.readAllStandardOutput()).decode().strip()
+            self.recorded_combo = combo
+            self.record_btn.setEnabled(True)
+            self.record_btn.setText(combo.replace("+", " + ") if combo else "Nothing pressed – try again")
+        proc.finished.connect(done)
+        proc.start("gosaab-hotkeys", ["record"])
+        self._record_proc = proc
+
+    def add_shortcut(self):
+        if not self.recorded_combo:
+            QMessageBox.warning(self, "Shortcut", "Press the buttons first (step 1).")
+            return
+        cmd = self.command_edit.text().strip()
+        action = f"run:{cmd}" if cmd else self.action_pick.currentData()
+        if not self.backend.set_hotkey(self.recorded_combo, action):
+            QMessageBox.warning(self, "Shortcut", "That combo would fire while typing. Add Windows, Ctrl or Alt, "
+                                                  "or use a controller/handheld button.")
+            return
+        self.recorded_combo = ""
+        self.command_edit.clear()
+        self.record_btn.setText("Press buttons…")
+        self.fill_shortcuts()
 
     def page_device(self):
         p = Page("Device & Drivers")
@@ -733,21 +986,76 @@ class Settings(QMainWindow):
                       "system. Printers, scanners, controllers, webcams and USB/Thunderbolt docks work as soon "
                       "as they are plugged in; firmware for them is checked automatically.")
 
+        self.driver_section(p)
         actions = [
-            Row("Update all drivers", "Kernel, graphics, Wi-Fi, Bluetooth and audio drivers plus device firmware, "
-                                      "matched to this device.", self.update_button("drivers")),
             Row("Device firmware", "Controllers, SSDs, docks and other parts that publish updates (LVFS).",
                 self.update_button("firmware")),
             Row("BIOS", "Installed only when the maker publishes it for your exact model. Plug in the charger "
                         "first.", self.update_button("bios")),
+            Row("Install drivers automatically", "At start-up and daily: finds every part, installs firmware and "
+                "driver updates for it (only on the charger) and lists anything missing in Problems.",
+                self.switch("features.conf", "auto_drivers", default=True)),
         ]
         if hw.get("nvidia") and "nvidia" not in self.versions.get("image", ""):
             actions.insert(0, Row("Nvidia graphics found", "Switch to the Gill-OSaab Nvidia edition for full "
                                                            "Nvidia driver support. Restart after.",
                                   self.update_button("nvidia", "Switch")))
-        p.section("Drivers and firmware", actions)
+        p.section("Firmware and BIOS", actions)
+        limit = QComboBox()
+        choices = [("Off (charge to 100%)", "100"), ("90%", "90"), ("80% – best for battery life", "80"),
+                   ("60% – always on the charger", "60")]
+        for label, value in choices:
+            limit.addItem(label, value)
+        cur = self.backend.features().get("charge_limit", "100")
+        limit.setCurrentIndex(max(0, [v for _, v in choices].index(cur)) if cur in [v for _, v in choices] else 0)
+        limit.currentIndexChanged.connect(
+            lambda i: self.backend.set_value("features.conf", "charge_limit", limit.itemData(i)))
+        p.section("Battery", [Row("Charge limit", "Stops charging early so the battery lasts more years "
+                                  "(handhelds and laptops that support it).", limit)])
         p.finish()
         return p
+
+    def driver_section(self, p):
+        info = self.backend.drivers()
+        missing = [x for x in info.get("problems", []) if x.get("kind") in ("missing-driver", "missing-firmware")]
+        if missing:
+            rows = []
+            for m in missing:
+                lab = QLabel("●  Missing")
+                lab.setObjectName("bad")
+                rows.append(Row(m["name"], m["detail"], lab))
+            p.section("Missing drivers", rows, "Copy the report in Problems and send it to get these added.")
+        self.driver_pick = {}
+        rows = []
+        keys = info.get("keys", {})
+        for cat in info.get("categories", []):
+            parts = [x for x in info.get("parts", []) if x["category"] == cat]
+            names = ", ".join(sorted({x["name"] for x in parts}))
+            drivers = ", ".join(sorted({x["driver"] for x in parts if x["driver"]})) or "no driver"
+            sw = Switch()
+            sw.setChecked(True)
+            self.driver_pick[keys.get(cat) or cat.lower().replace(" & ", "-").replace(" ", "-")] = sw
+            rows.append(Row(cat, f"{names[:140]} · driver: {drivers}", sw))
+        v = info.get("versions", {})
+        self.driver_builtin = Switch()
+        rows.append(Row("Built-in drivers too", f"Kernel {v.get('kernel') or '?'} · Mesa {v.get('mesa') or '?'} · "
+                        f"firmware files {v.get('firmware') or '?'}. Wi-Fi, sound and most drivers live here; "
+                        "this updates the system and needs a restart.", self.driver_builtin))
+        go = UpdateButton(self, "drivers", "Update selected", command=self.driver_command)
+        go.setObjectName("primary")
+        self.update_buttons["drivers"] = go
+        rows.append(Row("Update the drivers chosen above", "Graphics updates the Mesa/Vulkan drivers games and "
+                        "emulators use; every part gets its firmware updates.", go))
+        p.section("Choose drivers to update", rows)
+
+    def driver_command(self):
+        keys = [k for k, sw in self.driver_pick.items() if sw.isChecked()]
+        if not keys and not self.driver_builtin.isChecked():
+            return None
+        cmd = ["gosaab-drivers", "update", ",".join(keys) if keys else "--builtin"]
+        if keys and self.driver_builtin.isChecked():
+            cmd.append("--builtin")
+        return cmd
 
     def driver_label(self, dev):
         lab = QLabel(f"●  {dev['driver']}" if dev.get("driver") else "●  No driver")
@@ -767,11 +1075,40 @@ class Settings(QMainWindow):
             Row("Android (with Google Play)", "On: Android is installed and Android apps run in their own windows. "
                 "Off: Android and all Android apps and their data are removed (about 3 GB freed).", android),
         ])
+        self.security_section(p)
         win = QPushButton("Get Windows apps (Bottles)…")
         win.clicked.connect(lambda: self.backend.run(["flatpak", "run", "com.usebottles.bottles"], wait=False))
         p.lay.addWidget(win)
         p.finish()
         return p
+
+    def security_section(self, p):
+        sec = self.backend.security()
+        user = os.environ.get("USER", "")
+
+        def state(good, good_text, bad_text):
+            lab = QLabel(f"●  {good_text if good else bad_text}")
+            lab.setObjectName("ok" if good else "bad")
+            return lab
+        weak = user in sec.get("weak_password_users", [])
+        change = QPushButton("Change password…")
+        change.setObjectName("primary" if weak else "pill")
+        change.clicked.connect(lambda: self.backend.run(["foot", "-T", "Change password", "-e", "passwd"], wait=False))
+        rows = [Row("Password", "The test build's default password must be changed." if weak else
+                    "Your own password is set.", change),
+                Row("Firewall", "Blocks connections from other devices unless you allow them.",
+                    state(sec.get("firewall", {}).get("active", True), "On", "Off")),
+                Row("Remote login (SSH)", "Off unless you need to control this PC from another one.",
+                    state(not sec.get("ssh", {}).get("active", False), "Off", "On")),
+                Row("Apps sandboxed", "Browser, VLC and Windows apps only see the folders you allow.",
+                    state(is_on(self.backend.features(), "sandbox_windows_apps", True), "On", "Off")),
+                Row("Secure Boot", "Firmware only starts signed system software.",
+                    state(sec.get("secure_boot", False), "On", "Off (normal for a test USB)")),
+                Row("Disk encryption", "Your files can't be read if the device is stolen.",
+                    state(sec.get("encrypted", False), "On", "Off"))]
+        if weak:
+            rows[0].subtitle.setStyleSheet("color: #ff453a;")
+        p.section("Security checkup", rows)
 
     def page_notifications(self):
         p = Page("Notifications")

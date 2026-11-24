@@ -1,0 +1,9 @@
+[Unit]
+Description=Gill-OSaab battery charge limit (protects the battery on handhelds and laptops)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/gill-osaab/gosaab-battery
+
+[Install]
+WantedBy=multi-user.target

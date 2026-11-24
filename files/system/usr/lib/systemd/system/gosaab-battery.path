@@ -1,0 +1,9 @@
+[Unit]
+Description=Re-apply the battery charge limit when it is changed in Settings
+
+[Path]
+PathChanged=/etc/gill-osaab/features.conf
+Unit=gosaab-battery.service
+
+[Install]
+WantedBy=multi-user.target

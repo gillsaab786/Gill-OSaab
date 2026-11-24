@@ -1,0 +1,12 @@
+#!/bin/sh
+# Apply the charge limit from Settings (features.conf charge_limit=50..100; 100 = off) to every battery
+# that supports it (ASUS ROG Ally, Lenovo Legion Go, GPD, most laptops).
+limit=$(sed -n 's/^charge_limit=\([0-9]*\).*/\1/p' /etc/gill-osaab/features.conf 2>/dev/null | tail -1)
+case "$limit" in ''|*[!0-9]*) limit=100 ;; esac
+[ "$limit" -lt 50 ] && limit=50
+[ "$limit" -gt 100 ] && limit=100
+for f in /sys/class/power_supply/*/charge_control_end_threshold; do
+  [ -w "$f" ] || continue
+  echo "$limit" > "$f" && echo "$(dirname "$f"): charge limit $limit%"
+done
+exit 0

@@ -9,7 +9,8 @@ chmod 0755 /usr/bin/gosaab-* /usr/libexec/gill-osaab/* 2>/dev/null || true
 
 # --- Updates: Gill-OSaab's own updater replaces the stock ones so the
 # on/off switches in /etc/gill-osaab/updates.conf are the single source of truth.
-for unit in uupd.timer rpm-ostreed-automatic.timer flatpak-system-update.timer; do
+# bootc-fetch-apply-updates restarts the PC by itself (mid-game!) — ours asks first
+for unit in uupd.timer rpm-ostreed-automatic.timer flatpak-system-update.timer bootc-fetch-apply-updates.timer; do
     if systemctl list-unit-files "$unit" >/dev/null 2>&1; then
         systemctl disable "$unit" >/dev/null 2>&1 || true
         systemctl mask "$unit" >/dev/null 2>&1 || true
@@ -18,6 +19,14 @@ for unit in uupd.timer rpm-ostreed-automatic.timer flatpak-system-update.timer; 
 done
 systemctl --global disable flatpak-user-update.timer >/dev/null 2>&1 || true
 systemctl enable gosaab-update.timer
+
+# --- Security: no remote login by default (the test build has a known password)
+for unit in sshd.service sshd.socket; do systemctl disable "$unit" >/dev/null 2>&1 || true; done
+systemctl enable gosaab-security-check.service gosaab-security-check.path || log "warning: security check not enabled"
+
+# --- Drivers: record every part, install missing firmware/driver updates; Problems page; battery limit
+systemctl enable gosaab-drivers.timer gosaab-battery.service gosaab-battery.path || log "warning: driver units"
+systemctl --global enable gosaab-diagnose.timer || log "warning: could not enable problem check"
 
 # --- Notifications in Game Mode (starts and stops with the Steam session)
 systemctl --global enable gosaab-notify-hub.service || log "warning: could not enable notify hub"

@@ -1,0 +1,9 @@
+[Unit]
+Description=Re-check security when a password changes
+
+[Path]
+PathChanged=/etc/shadow
+Unit=gosaab-security-check.service
+
+[Install]
+WantedBy=multi-user.target

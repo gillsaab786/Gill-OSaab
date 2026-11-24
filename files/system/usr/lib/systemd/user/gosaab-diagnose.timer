@@ -1,0 +1,10 @@
+[Unit]
+Description=Gill-OSaab problem check (after sign-in and hourly)
+
+[Timer]
+OnStartupSec=3min
+OnUnitActiveSec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,7 @@
+[Unit]
+Description=Gill-OSaab: record errors, crashes and missing drivers for Settings > Problems
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/gosaab-diagnose --collect --notify
+Nice=15

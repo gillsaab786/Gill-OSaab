@@ -1,0 +1,11 @@
+[Unit]
+Description=Gill-OSaab: record every part and its driver, install missing firmware/driver updates
+Wants=network-online.target
+After=network-online.target fwupd.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/gosaab-drivers auto
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=1h

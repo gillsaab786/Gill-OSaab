@@ -1,0 +1,19 @@
+[Unit]
+Description=Gill-OSaab button and key-combo shortcuts (Desktop and Game Mode)
+After=systemd-logind.service
+
+[Service]
+ExecStart=/usr/libexec/gill-osaab/gosaab-hotkeyd
+Restart=on-failure
+RestartSec=2
+# only needs to read input devices and start actions as the signed-in person
+ProtectHome=read-only
+ProtectSystem=strict
+ReadWritePaths=/run
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+
+[Install]
+WantedBy=graphical.target

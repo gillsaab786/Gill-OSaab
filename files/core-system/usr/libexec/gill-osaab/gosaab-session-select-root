@@ -5,13 +5,20 @@
 set -eu
 CONF=/etc/sddm.conf.d/zz-gill-osaab-autologin.conf
 STATE=/etc/gill-osaab
+# Only for yourself: through pkexec (no password asked) you may change sign-in for your own account,
+# never someone else's (or root's).
+own_user_only() {
+  uid=$(id -u "$1" 2>/dev/null) || { echo "unknown user" >&2; exit 2; }
+  [ "$uid" -ge 1000 ] || { echo "not a regular user" >&2; exit 2; }
+  if [ -n "${PKEXEC_UID:-}" ] && [ "$uid" != "$PKEXEC_UID" ]; then echo "only your own account" >&2; exit 2; fi
+}
 autologin() { # user session
   mkdir -p /etc/sddm.conf.d
   printf '[Autologin]\nUser=%s\nSession=%s.desktop\nRelogin=true\n' "$1" "$2" > "$CONF"
 }
 if [ "${1:-}" = "--boot" ]; then
   user=$2 mode=$3
-  id "$user" >/dev/null 2>&1 || { echo "unknown user" >&2; exit 2; }
+  own_user_only "$user"
   case "$mode" in game|desktop|ask) ;; *) echo "unknown mode" >&2; exit 2 ;; esac
   mkdir -p "$STATE"
   echo "$mode" > "$STATE/boot-mode"
@@ -25,5 +32,5 @@ if [ "${1:-}" = "--boot" ]; then
 fi
 user=$1 session=$2
 case "$session" in gill-osaab|gill-osaab-gamemode) ;; *) echo "unknown session" >&2; exit 2 ;; esac
-id "$user" >/dev/null 2>&1 || { echo "unknown user" >&2; exit 2; }
+own_user_only "$user"
 autologin "$user" "$session"

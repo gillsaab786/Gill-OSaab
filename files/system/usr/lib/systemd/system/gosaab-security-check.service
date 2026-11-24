@@ -1,0 +1,10 @@
+[Unit]
+Description=Gill-OSaab security checkup (default password, firewall, remote login)
+After=local-fs.target firewalld.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/gill-osaab/gosaab-security-check
+
+[Install]
+WantedBy=multi-user.target
