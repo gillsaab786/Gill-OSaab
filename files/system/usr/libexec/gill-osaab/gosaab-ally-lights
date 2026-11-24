@@ -6,7 +6,8 @@ with a different colour while a game is running if you like.
   gosaab-ally-lights status     how the lights are driven, as JSON
 
 Settings live in /etc/gill-osaab/features.conf (lights_*); "gaming" comes from Smart TDP's
-/run/gill-osaab/power.json. Leaves the lights alone if Handheld Daemon is managing them.
+/run/gill-osaab/power.json. Handheld Daemon (hhd) only sends colours when its own RGB setting
+changes, so the colour is re-sent every 30 seconds to win after hhd starts or the Ally wakes.
 """
 import json
 import os
@@ -73,10 +74,8 @@ def main(argv):
         settings = {**gl.DEFAULTS, **read_conf(ETC / "features.conf")}
         want = gl.wanted(settings, gaming())
         info = status()
-        if info["hhd"]:
-            info["note"] = "Handheld Daemon is managing the lights"
-        elif info["backend"] and ((want, info["device"]) != last or time.monotonic() - stamp > 60):
-            # also every minute: the controller forgets its colour after sleep or a reconnect
+        if info["backend"] and ((want, info["device"]) != last or time.monotonic() - stamp > 30):
+            # also every 30 s: the controller forgets its colour after sleep, and hhd may set its own
             try:
                 apply(info["backend"], Path(info["device"]), want)
                 last, stamp = (want, info["device"]), time.monotonic()

@@ -1955,6 +1955,8 @@ class Settings(QMainWindow):
         how = {"led": "Driven by the kernel's Ally lights driver.", "hid": "Driven through the controller directly."}
         note = (st.get("note") or st.get("error") or how.get(st.get("backend"))
                 or "The stick lights weren't found yet; settings are kept and used as soon as they are.")
+        if st.get("hhd"):
+            note += " Tip: set RGB to Disabled in Handheld Daemon's menu so it never flashes its own colour."
         p.section("Look", [
             Row("Brightness", "", self.brightness_slider),
             Row("Colour contrast", "Lower for softer, pastel colours; higher for deep, vivid colour.", self.vivid_slider),

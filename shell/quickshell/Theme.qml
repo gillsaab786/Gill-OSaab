@@ -99,7 +99,8 @@ Singleton {
             const n = arguments[i]
             if (!n) continue
             const name = n.startsWith("image://icon/") ? n.substring(13) : n
-            if (name.startsWith("/") || name.startsWith("file:") || name.startsWith("image:")) return name
+            if (name.startsWith("/")) return "file://" + name // an app's own picture file
+            if (name.startsWith("file:") || name.startsWith("image:")) return name
             const p = Quickshell.iconPath(name, true)
             if (p !== "") return p
         }
