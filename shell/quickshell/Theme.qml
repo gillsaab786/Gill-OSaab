@@ -52,6 +52,8 @@ Singleton {
 
     readonly property string font: "Inter"
     readonly property color accent: /^#[0-9a-fA-F]{6}$/.test(setting("accent", "")) ? setting("accent", "") : "#0a84ff"
+    // text and symbols on the accent colour: dark on light accents (Mint, Yellow), else white
+    readonly property color onAccent: (0.299 * accent.r + 0.587 * accent.g + 0.114 * accent.b) > 0.67 ? "#0b1a12" : "white"
     readonly property string iconStyle: setting("iconStyle", "default") // default | dark | clear | tinted
     readonly property bool tintedGlass: setting("glass", "clear") === "tinted"
     readonly property bool clearMenuBar: setting("menuBar", "transparent") === "transparent"

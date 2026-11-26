@@ -917,7 +917,7 @@ def segmented(options, current, on_pick):
     return box
 
 
-ACCENTS = [("#0a84ff", "Blue"), ("#1fb6c9", "Teal"), ("#bf5af2", "Purple"), ("#ff375f", "Pink"), ("#ff453a", "Red"),
+ACCENTS = [("#0a84ff", "Blue"), ("#1fb6c9", "Teal"), ("#bf5af2", "Purple"), ("#70e3aa", "Mint"), ("#ff453a", "Red"),
            ("#ff9f0a", "Orange"), ("#ffd60a", "Yellow"), ("#30d158", "Green"), ("#8e8e93", "Graphite")]
 LIGHT_COLORS = [("0a84ff", "Blue"), ("64d2ff", "Cyan"), ("30d158", "Green"), ("ffd60a", "Yellow"),
                 ("ff9f0a", "Orange"), ("ff2d55", "Red"), ("ff64d2", "Pink"), ("bf5af2", "Purple"), ("ffffff", "White")]
@@ -2867,14 +2867,14 @@ QWidget { color: #ececf1; font-family: Inter, 'Noto Sans', sans-serif; font-size
 QPushButton { background: #2f2f34; border: none; border-radius: 10px; padding: 8px 16px; }
 QPushButton:hover { background: #3a3a40; }
 QPushButton:disabled { color: #8e8e98; }
-QPushButton#primary { background: #1fb6c9; color: #ffffff; font-weight: 600; }
+QPushButton#primary { background: #1fb6c9; color: #fffffe; font-weight: 600; }
 QPushButton#primary:hover { background: #27c7db; }
 QPushButton#pill { background: #34343a; border-radius: 14px; padding: 6px 16px; color: #5ad2e2; font-weight: 600; }
 QPushButton#pill:hover { background: #3d3d44; }
 QPushButton#segLeft, QPushButton#segMid, QPushButton#segRight { background: #34343a; padding: 6px 18px; border-radius: 0; }
 QPushButton#segLeft { border-top-left-radius: 9px; border-bottom-left-radius: 9px; }
 QPushButton#segRight { border-top-right-radius: 9px; border-bottom-right-radius: 9px; }
-QPushButton#segLeft:checked, QPushButton#segMid:checked, QPushButton#segRight:checked { background: #1fb6c9; color: #ffffff; }
+QPushButton#segLeft:checked, QPushButton#segMid:checked, QPushButton#segRight:checked { background: #1fb6c9; color: #fffffe; }
 QSpinBox { background: #34343a; border: none; border-radius: 9px; padding: 4px 8px; min-width: 70px; }
 QScrollArea { background: transparent; }
 QLineEdit#field, QLineEdit { background: #34343a; color: #f2f2f7; border: none; border-radius: 9px; padding: 6px 10px;
@@ -2918,8 +2918,11 @@ def accent_style(color, amoled=None):
         for old, new in AMOLED_COLOURS.items():
             style = style.replace(old, new)
         style += AMOLED_EXTRA
+    # light accents (Mint, Yellow): dark text on them, so labels stay readable
+    on = "#0b1a12" if (0.299 * c.red() + 0.587 * c.green() + 0.114 * c.blue()) > 170 else "#ffffff"
     return (style.replace("#1fb6c9", c.name()).replace("#27c7db", c.lighter(115).name())
-            .replace("#5ad2e2", c.lighter(140).name() if c.lightness() < 150 else c.name()))
+            .replace("#5ad2e2", c.lighter(140).name() if c.lightness() < 150 else c.name())
+            .replace("#fffffe", on))
 
 
 def apply_accent(color, amoled=None):

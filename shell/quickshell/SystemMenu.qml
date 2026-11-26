@@ -16,7 +16,7 @@ Popup {
         height: 42; radius: 14
         color: m.containsMouse ? Theme.accent : "transparent"
         Text { anchors { left: parent.left; leftMargin: 10; verticalCenter: parent.verticalCenter }
-            text: parent.label; color: m.containsMouse ? "white" : Theme.text; font { family: Theme.font; pixelSize: 15 } }
+            text: parent.label; color: m.containsMouse ? Theme.onAccent : Theme.text; font { family: Theme.font; pixelSize: 15 } }
         MouseArea { id: m; anchors.fill: parent; hoverEnabled: true
             onClicked: { ShellState.closeAll(); ShellState.run(parent.command) } }
     }

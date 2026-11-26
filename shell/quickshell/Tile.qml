@@ -29,7 +29,7 @@ Rectangle {
                 NumberAnimation { to: 1.16; duration: 110; easing.type: Easing.OutQuad }
                 SpringAnimation { to: 1; spring: 5; damping: 0.3; epsilon: 0.002 }
             }
-            Icon { anchors.centerIn: parent; name: tile.icon; width: 21; height: 21; color: "white" }
+            Icon { anchors.centerIn: parent; name: tile.icon; width: 21; height: 21; color: tile.on ? Theme.onAccent : "white" }
         }
         Column {
             anchors.verticalCenter: parent.verticalCenter

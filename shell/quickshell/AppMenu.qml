@@ -78,7 +78,7 @@ PanelWindow {
                         anchors.fill: parent; radius: 10
                         color: row.containsMouse ? Theme.accent : "transparent"
                         Text { anchors { left: parent.left; leftMargin: 12; verticalCenter: parent.verticalCenter }
-                            text: modelData.t || ""; color: row.containsMouse ? "white" : Theme.text
+                            text: modelData.t || ""; color: row.containsMouse ? Theme.onAccent : Theme.text
                             font { family: Theme.font; pixelSize: 14 } }
                         MouseArea { id: row; anchors.fill: parent; hoverEnabled: true; onClicked: menu.pick(modelData) }
                     }

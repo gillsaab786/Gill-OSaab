@@ -214,7 +214,7 @@ PanelWindow {
                             enabled: index === 0 || trashFolder.count > 0
                             Text { anchors { left: parent.left; leftMargin: 14; verticalCenter: parent.verticalCenter }
                                 text: modelData.t; font { family: Theme.font; pixelSize: 14 }
-                                color: m.containsMouse && parent.enabled ? "white" : parent.enabled ? Theme.text : Theme.subtext }
+                                color: m.containsMouse && parent.enabled ? Theme.onAccent : parent.enabled ? Theme.text : Theme.subtext }
                             MouseArea { id: m; anchors.fill: parent; hoverEnabled: true
                                 onClicked: { ShellState.run(modelData.c); ShellState.haptic("toggle"); ShellState.dockPopup = "" } }
                         }
@@ -251,7 +251,7 @@ PanelWindow {
                             GlassRim { radius: 14; strength: 0.7 }
                             Text { id: name; anchors.centerIn: parent; width: parent.width - 20; elide: Text.ElideMiddle
                                 horizontalAlignment: Text.AlignHCenter
-                                text: fanItem.fileName; color: fanMouse.containsMouse ? "white" : Theme.text
+                                text: fanItem.fileName; color: fanMouse.containsMouse ? Theme.onAccent : Theme.text
                                 font { family: Theme.font; pixelSize: 12; weight: Font.Medium } }
                         }
                         Item {
@@ -285,7 +285,7 @@ PanelWindow {
                     color: openAll.containsMouse ? Theme.accent : Theme.panel
                     GlassRim { radius: 15; strength: 0.7 }
                     Text { anchors.centerIn: parent; font { family: Theme.font; pixelSize: 12; weight: Font.DemiBold }
-                        text: fan.count > 0 ? "Open in Files" : "No downloads yet"; color: openAll.containsMouse ? "white" : Theme.text }
+                        text: fan.count > 0 ? "Open in Files" : "No downloads yet"; color: openAll.containsMouse ? Theme.onAccent : Theme.text }
                     MouseArea { id: openAll; anchors.fill: parent; hoverEnabled: true
                         onClicked: { ShellState.run("xdg-open \"$HOME/Downloads\""); ShellState.dockPopup = "" } }
                 }

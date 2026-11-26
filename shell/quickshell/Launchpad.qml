@@ -98,7 +98,7 @@ PanelWindow {
             color: pad.show3d ? Theme.accent : shelfMouse.containsMouse ? Qt.rgba(1, 1, 1, 0.22) : Qt.rgba(1, 1, 1, 0.12)
             border { color: Qt.rgba(1, 1, 1, 0.12); width: 1 }
             Behavior on color { ColorAnimation { duration: Theme.fast } }
-            Text { id: shelfLabel; anchors.centerIn: parent; color: "white"; font { family: Theme.font; pixelSize: 13; weight: Font.Medium }
+            Text { id: shelfLabel; anchors.centerIn: parent; color: pad.show3d ? Theme.onAccent : "white"; font { family: Theme.font; pixelSize: 13; weight: Font.Medium }
                 text: pad.show3d ? "All apps" : "3D Games" }
             MouseArea { id: shelfMouse; anchors.fill: parent; hoverEnabled: true
                 onClicked: { pad.show3d = !pad.show3d; pad.showHidden = false; pad.page = 0; ShellState.haptic("tick") } }
@@ -110,7 +110,7 @@ PanelWindow {
             color: pad.showHidden ? Theme.accent : hiddenMouse.containsMouse ? Qt.rgba(1, 1, 1, 0.22) : Qt.rgba(1, 1, 1, 0.12)
             border { color: Qt.rgba(1, 1, 1, 0.12); width: 1 }
             Behavior on color { ColorAnimation { duration: Theme.fast } }
-            Text { id: hiddenLabel; anchors.centerIn: parent; color: "white"; font { family: Theme.font; pixelSize: 13; weight: Font.Medium }
+            Text { id: hiddenLabel; anchors.centerIn: parent; color: pad.showHidden ? Theme.onAccent : "white"; font { family: Theme.font; pixelSize: 13; weight: Font.Medium }
                 text: pad.showHidden ? "Done" : "Hidden apps (" + pad.hiddenCount + ")" }
             MouseArea { id: hiddenMouse; anchors.fill: parent; hoverEnabled: true
                 onClicked: { pad.showHidden = !pad.showHidden; pad.page = 0; ShellState.haptic("tick") } }

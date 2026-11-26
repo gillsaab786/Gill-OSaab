@@ -205,7 +205,7 @@ PanelWindow {
                     scale: vb.pressed ? 0.9 : 1
                     Behavior on scale { NumberAnimation { duration: Theme.fast } }
                     Behavior on color { ColorAnimation { duration: Theme.fast } }
-                    Icon { anchors.centerIn: parent; width: 18; height: 18; name: modelData.g; color: parent.on ? "white" : Theme.text }
+                    Icon { anchors.centerIn: parent; width: 18; height: 18; name: modelData.g; color: parent.on ? Theme.onAccent : Theme.text }
                     MouseArea { id: vb; anchors.fill: parent; hoverEnabled: true
                         onClicked: { spot.view = parent.on ? "" : modelData.v; ShellState.haptic("tick"); input.forceActiveFocus() } }
                 }
@@ -262,7 +262,7 @@ PanelWindow {
                                 anchors.verticalCenter: parent.verticalCenter
                                 width: parent.width - 42
                                 Text { width: parent.width; elide: Text.ElideRight; text: modelData.title
-                                    color: sel ? "white" : Theme.text; font { family: Theme.font; pixelSize: 14 } }
+                                    color: sel ? Theme.onAccent : Theme.text; font { family: Theme.font; pixelSize: 14 } }
                                 Text { visible: text !== ""; width: parent.width; elide: Text.ElideMiddle; text: modelData.sub
                                     color: sel ? Qt.rgba(1, 1, 1, 0.8) : Theme.subtext; font { family: Theme.font; pixelSize: 11 } }
                             }
