@@ -10,6 +10,7 @@ layout(std140, binding = 0) uniform buf {
     float aspect; // width / height
     float phase;  // 0 new moon .. pi full .. 2 pi
     float dark;   // 0 light mode .. 1 dark mode
+    float south;  // 1 in the southern hemisphere: the moon is lit from the other side
 };
 
 float hash13(vec3 p) {
@@ -92,7 +93,7 @@ void main() {
     vec2 d = (p - c) / R;
     float r2 = dot(d, d);
     float rr = sqrt(r2);
-    vec3 sun = vec3(sin(phase), 0.08, -cos(phase)); // full moon: the sun is behind us
+    vec3 sun = vec3(sin(phase) * (south > 0.5 ? -1.0 : 1.0), 0.08, -cos(phase)); // full moon: the sun is behind us
     sun = normalize(sun);
     if (r2 < 1.0) {
         vec3 n = vec3(d.x, -d.y, sqrt(1.0 - r2));

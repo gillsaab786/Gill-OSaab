@@ -39,6 +39,8 @@ feature phone_link && [ -x /usr/libexec/kdeconnectd ] && /usr/libexec/kdeconnect
 feature shared_game_library && (pgrep -x steam >/dev/null || /usr/libexec/gill-osaab/gosaab-library sync >/dev/null 2>&1) &
 # Netflix & co in Brave: protected streaming (Widevine) on, once
 /usr/libexec/gill-osaab/gosaab-widevine ensure 2>/dev/null
+# where this PC is, from Wi-Fi (BeaconDB) or the weather city: live wallpapers follow the real sun
+( sleep 20; while true; do /usr/libexec/gill-osaab/gosaab-location >/dev/null 2>&1; sleep 10800; done ) &
 # clipboard history for Spotlight (text only, kept in memory, password-manager copies skipped)
 wl-paste --type text --watch /usr/libexec/gill-osaab/gosaab-clipboard store &
 fps_env="$HOME/.config/environment.d/60-gill-osaab-fps.conf"

@@ -10,6 +10,8 @@ layout(std140, binding = 0) uniform buf {
     float aspect;  // width / height
     float daytime; // 0..1 through the local day (0.5 = noon)
     float dark;    // 0 light mode .. 1 dark mode
+    float sunElev; // the real sun where you are: radians above the horizon
+    float sunX;    // -1 left .. 1 right
 };
 
 float hash11(float p) { p = fract(p * 0.1031); p *= p + 33.33; p *= p + p; return fract(p); }
@@ -38,8 +40,8 @@ void main() {
     float x = (uv.x - 0.5) * aspect, y = uv.y;
     // the sun's height through the day: -1 midnight, 1 noon
     float t = daytime;
-    float elev = -cos(t * 6.28318);
-    float sunX = (t - 0.5) * 1.6 * aspect;
+    float elev = clamp(sunElev / 0.9, -1.0, 1.0);   // from your location and the clock
+    float sx = sunX * 0.8 * aspect;
     float sunY = 0.62 - elev * 0.48;
     float dayAmt = smoothstep(-0.12, 0.35, elev);
     float golden = exp(-pow(elev / 0.22, 2.0));
@@ -51,7 +53,7 @@ void main() {
     zenith = mix(zenith, vec3(0.28, 0.22, 0.42), golden * 0.5);
     vec3 col = mix(zenith, horizon, pow(smoothstep(0.0, 0.62, y), 1.6));
     // the sun (or its glow below the horizon)
-    float sd = length(vec2(x - sunX, (y - sunY) * 1.0));
+    float sd = length(vec2(x - sx, (y - sunY) * 1.0));
     col += vec3(1.0, 0.85, 0.6) * smoothstep(0.035, 0.028, sd) * step(-0.1, elev) * 1.2;
     col += vec3(1.0, 0.6, 0.35) * exp(-sd * 6.0) * (0.25 + golden * 0.5) * smoothstep(-0.3, 0.0, elev);
     // stars at night
@@ -81,7 +83,7 @@ void main() {
             float slope = (ridge(xs + e, fi) - ridge(xs - e, fi)) / (2.0 * e);
             float below = (y - top) / amp;                       // 0 at the crest, ~1 at the foot
             // the face toward the sun is lit; the slip face away from it falls into shadow
-            float lightX = clamp(sunX / (0.8 * aspect), -1.0, 1.0); // sun to the left or right
+            float lightX = clamp(sx / (0.8 * aspect), -1.0, 1.0); // sun to the left or right
             float toward = slope * lightX;
             // leeward faces sit in a soft shadow that fades down the dune (no hard columns)
             float shadow = smoothstep(0.05, -0.25, toward) * exp(-below * 2.2) * (0.35 + 0.65 * abs(lightX));

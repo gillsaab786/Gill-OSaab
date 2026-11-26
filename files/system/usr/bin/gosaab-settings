@@ -895,6 +895,7 @@ def picker(options, current, on_pick, spacing=10):
         lay.addWidget(w)
     lay.addStretch(1)
     box.group = group
+    box.values = [v for v, _ in options]
     return box
 
 
@@ -2160,10 +2161,18 @@ class Settings(QMainWindow):
         self.wall_picker = picker([(v, PreviewTile(n, paint_picture(paths), 104, 60)) for v, n, paths in walls],
                                   ap.get("wallpaper", "tide"), lambda v: self.backend.set_appearance("wallpaper", v), 8)
         live_dir = self.backend.WALLPAPERS / "GillOSaab-Live" / "contents"
-        lives = [("live:earth", "Earth"), ("live:moon", "Moon"), ("live:dunes", "Dunes"), ("live:flow", "Flow")]
-        self.live_picker = picker([(v, PreviewTile(n, paint_picture([str(live_dir / f"thumb-{v[5:]}.jpg")]), 104, 60))
-                                   for v, n in lives], ap.get("wallpaper", "tide"), lambda v: self.pick_wallpaper(v), 8)
-        self.wall_picker.group.buttonClicked.connect(lambda _b: self.clear_picker(self.live_picker))
+        def live_row(items):
+            return picker([(v, PreviewTile(n, paint_picture([str(live_dir / f"thumb-{v[5:]}.jpg")]), 104, 60))
+                           for v, n in items], ap.get("wallpaper", "tide"), lambda v: self.pick_wallpaper(v), 8)
+        self.live_picker = live_row([("live:earth", "Earth"), ("live:moon", "Moon"), ("live:pluto", "Pluto"),
+                                     ("live:city", "City"), ("live:lake", "Lake")])
+        self.live_picker2 = live_row([("live:dunes", "Dunes"), ("live:shore", "Shore"), ("live:flow", "Flow"),
+                                      ("live:bubbles", "Bubbles"), ("live:shapes", "Shapes")])
+        self.wall_pickers = [self.wall_picker, self.live_picker, self.live_picker2]
+        self.wall_picker.group.buttonClicked.connect(lambda _b: self.clear_pickers(self.wall_picker))
+        self.wifi_location = Switch()
+        self.wifi_location.set_quiet(ap.get("wifiLocation", True) is not False)
+        self.wifi_location.toggled.connect(self.set_wifi_location)
         self.live_motion = Switch()
         self.live_motion.set_quiet(ap.get("liveMotion", True) is not False)
         self.live_motion.toggled.connect(lambda on: (haptic("toggle"), self.backend.set_appearance("liveMotion", on)))
@@ -2172,11 +2181,15 @@ class Settings(QMainWindow):
         own.clicked.connect(self.choose_wallpaper)
         p.section("Wallpaper", [Row("", "", self.wall_picker), Row("Your own picture", "", own)],
                   "Tide follows Light and Dark, cross-fading at sunset when Appearance is Auto.")
-        p.section("Live wallpapers", [Row("", "", self.live_picker),
+        p.section("Live wallpapers", [Row("", "", self.live_picker), Row("", "", self.live_picker2),
                                       Row("Motion", "Off: a still picture (saves a little battery). On battery "
-                                          "they move at half speed.", self.live_motion)],
-                  "Earth shows the real day and night from your clock and time zone, Moon tonight's phase, "
-                  "Dunes the sky through your day. Flow follows Light and Dark and your accent colour.")
+                                          "they move at half speed.", self.live_motion),
+                                      Row("Find my location with Wi-Fi", "PCs have no GPS: the Wi-Fi networks "
+                                          "around you are looked up in BeaconDB (an open database; only the "
+                                          "networks' hardware addresses are sent). Off: the weather city is used.",
+                                          self.wifi_location)],
+                  "Earth, City, Lake, Shore and Dunes show the real sun and sky where you are; Moon tonight's "
+                  "phase. Flow, Bubbles and Shapes follow Light and Dark (Flow your accent colour too).")
 
         widgets = ap.get("widgets", {}) if isinstance(ap.get("widgets"), dict) else {}
         rows = []
@@ -2237,8 +2250,19 @@ class Settings(QMainWindow):
         return p
 
     def pick_wallpaper(self, value):
+        """One wallpaper at a time across the pickers: uncheck the rows the choice isn't in."""
         self.backend.set_appearance("wallpaper", value)
-        self.clear_picker(self.wall_picker)
+        self.clear_pickers(None, value)
+
+    def clear_pickers(self, keep, value=None):
+        for pk in self.wall_pickers:
+            if pk is not keep and (value is None or value not in getattr(pk, "values", [])):
+                self.clear_picker(pk)
+
+    def set_wifi_location(self, on):
+        haptic("toggle")
+        self.backend.set_appearance("wifiLocation", on)
+        self.backend.run(["/usr/libexec/gill-osaab/gosaab-location"], wait=False)
 
     @staticmethod
     def clear_picker(box):

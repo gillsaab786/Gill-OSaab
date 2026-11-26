@@ -28,6 +28,11 @@ wallpapers (shaders/*.frag -> .qsb at build): Earth (real day/night), Moon (real
 follows the day), Flow (accent + light/dark); stills in GillOSaab-Live. Not tested on real hardware.
 Note: shell CI runs Qt's software renderer (QT_QUICK_BACKEND=software): ShaderEffect draws nothing
 there, so live wallpapers show their stills in CI; the shaders are checked by qsb at build time.
+Live wallpapers 2 (original designs inspired by the Pixel 2018 set, no Google assets): Pluto, City,
+Lake, Shore, Bubbles, Shapes. Sun position from location: gosaab-location (nmcli Wi-Fi -> BeaconDB,
+else weather city via Open-Meteo geocoding) -> ~/.cache/gill-osaab/location.json, every 3 h.
+SoundViz (audio-reactive) not done. Torrent Search Cloudflare on Linux: lib/desktop/linux_browser.dart
+(Brave --app window for Verify, headless --dump-dom with a cookie copy for searches).
 Torrent Search Engine (apps/torrent-search, copy of gillsaab786/torrent-search-engine-ipa at fe86afa):
 Flutter Linux build with lib/desktop/gill_desktop.dart (glass sidebar, Gill(OS) buttons, accent from
 appearance.json, see-through window). Runner patched by gill/patch_runner.py; apps.yml builds, tests

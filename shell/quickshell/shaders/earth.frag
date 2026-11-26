@@ -13,6 +13,7 @@ layout(std140, binding = 0) uniform buf {
     float sunLon;  // radians: longitude where the sun is overhead now
     float sunLat;  // radians: the sun's declination (season)
     float viewLon; // radians: longitude facing you
+    float viewLat; // radians: your latitude (the globe tilts to show your side of it)
     float dark;    // 0 light mode .. 1 dark mode
 };
 
@@ -77,7 +78,7 @@ void main() {
     float R = 0.66;
     vec2 d = (p - c) / R;
     float r2 = dot(d, d);
-    mat3 M = rotY(viewLon) * rotX(-0.32); // view -> Earth, tilted so more of the globe shows
+    mat3 M = rotY(viewLon) * rotX(-clamp(viewLat, -1.0, 1.0) * 0.75); // view -> Earth, tilted towards you
     vec3 sunW = vec3(cos(sunLat) * sin(sunLon), sin(sunLat), cos(sunLat) * cos(sunLon));
     vec3 sunV = transpose(M) * sunW; // sun direction seen from here
     float rr = sqrt(r2);

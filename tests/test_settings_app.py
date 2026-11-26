@@ -294,10 +294,15 @@ class SettingsApp(unittest.TestCase):
     def test_live_wallpapers(self):
         b = FakeBackend()
         w = self.gs.Settings(b)
-        self.assertEqual(len(w.live_picker.group.buttons()), 4)
+        self.assertEqual(len(w.live_picker.group.buttons()) + len(w.live_picker2.group.buttons()), 10)
         w.live_picker.group.buttons()[0].click()
         self.assertEqual(b.appearance().get("wallpaper"), "live:earth")
         self.assertFalse(any(x.isChecked() for x in w.wall_picker.group.buttons()), "one wallpaper at a time")
+        w.live_picker2.group.buttons()[3].click()
+        self.assertEqual(b.appearance().get("wallpaper"), "live:bubbles")
+        self.assertFalse(any(x.isChecked() for x in w.live_picker.group.buttons()))
+        w.wifi_location.setChecked(False)
+        self.assertIs(b.appearance().get("wifiLocation"), False)
         w.live_motion.setChecked(False)
         self.assertIs(b.appearance().get("liveMotion"), False)
 

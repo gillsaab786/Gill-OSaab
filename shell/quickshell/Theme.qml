@@ -85,11 +85,12 @@ Singleton {
     readonly property string wallpaperChoice: setting("wallpaper", "tide")
     // Live wallpapers (shaders/*.frag): "live:earth", "live:moon", "live:dunes", "live:flow".
     // The lock screen and previews use a still picture of each.
-    readonly property string liveWallpaper: /^live:(earth|moon|dunes|flow)$/.test(wallpaperChoice) ? wallpaperChoice.substring(5) : ""
+    readonly property string liveWallpaper: /^live:(earth|moon|dunes|flow|pluto|bubbles|shapes|city|lake|shore)$/.test(wallpaperChoice) ? wallpaperChoice.substring(5) : ""
     readonly property bool liveMotion: setting("liveMotion", true) !== false
     function liveStill(name, isDark) {
         const dir = wallpaperDir + "-Live/contents/"
-        return dir + (name === "flow" && !isDark ? "flow-light" : name) + ".jpg"
+        const lightToo = name === "flow" || name === "bubbles" || name === "shapes"
+        return dir + (lightToo && !isDark ? name + "-light" : name) + ".jpg"
     }
     function wallpaperFor(isDark) {
         const w = wallpaperChoice

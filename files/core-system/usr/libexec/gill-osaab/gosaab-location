@@ -1,0 +1,108 @@
+#!/usr/bin/python3
+"""Where this PC is, for the live wallpapers (the real sun and sky where you are) and the weather.
+
+Gill(OS) PCs have no GPS, so like a phone indoors it uses Wi-Fi: the networks it can see are
+looked up in BeaconDB (beacondb.net, an open, privacy-respecting Wi-Fi location database; only the
+networks' hardware addresses and signal strengths are sent, never their names). If that fails,
+the weather city from Settings > Appearance is used. Turn Wi-Fi location off in Settings >
+Appearance > Live wallpapers to only use the city.
+
+Writes ~/.cache/gill-osaab/location.json: {"lat", "lon", "source", "accuracy", "updated"}.
+"""
+import json
+import os
+import subprocess
+import sys
+import time
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+HOME = Path.home()
+OUT = HOME / ".cache/gill-osaab/location.json"
+APPEARANCE = HOME / ".config/gill-osaab/appearance.json"
+BEACONDB = "https://api.beacondb.net/v1/geolocate"
+UA = {"User-Agent": "Gill(OS) location (https://github.com/gillsaab786/Gill-OSaab)"}
+
+
+def settings():
+    try:
+        data = json.loads(APPEARANCE.read_text())
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def parse_nmcli(text):
+    """`nmcli -t -f BSSID,SIGNAL dev wifi list` -> [{macAddress, signalStrength (dBm)}]"""
+    aps = []
+    for line in text.splitlines():
+        line = line.replace("\\:", "-")            # nmcli escapes the colons in BSSIDs
+        parts = line.rsplit(":", 1)
+        if len(parts) != 2 or not parts[1].strip().isdigit():
+            continue
+        mac = parts[0].replace("-", ":").lower()
+        if len(mac) != 17:
+            continue
+        quality = int(parts[1])
+        aps.append({"macAddress": mac, "signalStrength": int(quality / 2 - 100)})
+    return aps
+
+
+def wifi_location():
+    try:
+        out = subprocess.run(["nmcli", "-t", "-f", "BSSID,SIGNAL", "dev", "wifi", "list", "--rescan", "auto"],
+                             capture_output=True, text=True, timeout=20).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    aps = parse_nmcli(out)
+    if len(aps) < 2:                               # one network isn't enough to place you
+        return None
+    body = json.dumps({"considerIp": False, "wifiAccessPoints": aps[:40]}).encode()
+    req = urllib.request.Request(BEACONDB, data=body, headers={**UA, "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            d = json.load(r)
+        loc = d["location"]
+        return {"lat": float(loc["lat"]), "lon": float(loc["lng"]), "source": "wifi",
+                "accuracy": float(d.get("accuracy", 0))}
+    except Exception:
+        return None
+
+
+def city_location(city):
+    if not city:
+        return None
+    url = "https://geocoding-api.open-meteo.com/v1/search?" + urllib.parse.urlencode({"name": city, "count": 1})
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=15) as r:
+            res = json.load(r).get("results") or []
+        if res:
+            return {"lat": float(res[0]["latitude"]), "lon": float(res[0]["longitude"]), "source": "city",
+                    "accuracy": 20000.0}
+    except Exception:
+        return None
+    return None
+
+
+def main():
+    s = settings()
+    loc = None
+    if s.get("wifiLocation", True) is not False:
+        loc = wifi_location()
+    if loc is None:
+        loc = city_location(str(s.get("city", "")).strip())
+    if loc is None:
+        print("location: not found (no Wi-Fi networks known to BeaconDB, no weather city)")
+        return 1
+    loc["updated"] = int(time.time())
+    OUT.parent.mkdir(parents=True, exist_ok=True)
+    tmp = OUT.with_suffix(".tmp")
+    tmp.write_text(json.dumps(loc) + "\n")
+    os.replace(tmp, OUT)
+    print(f"location: {loc['lat']:.3f}, {loc['lon']:.3f} from {loc['source']}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
