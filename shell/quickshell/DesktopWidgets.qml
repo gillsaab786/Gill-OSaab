@@ -87,6 +87,8 @@ PanelWindow {
         id: cards
         width: 362
         spacing: 12
+        opacity: ShellState.intro
+        transform: Translate { x: (1 - ShellState.intro) * -40 }
 
         Card { // Clock
             visible: Theme.widgetOn("clock", true)

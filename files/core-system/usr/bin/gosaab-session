@@ -1,5 +1,5 @@
 #!/bin/sh
-# Starts the Gill-OSaab desktop session (chosen at the login screen).
+# Starts the Gill(OS) desktop session (chosen at the login screen).
 export XDG_CURRENT_DESKTOP=Gill-OSaab
 export XDG_SESSION_DESKTOP=gill-osaab
 export XDG_SESSION_TYPE=wayland

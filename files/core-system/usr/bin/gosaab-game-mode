@@ -1,3 +1,7 @@
 #!/bin/sh
-# Switch from the desktop to Game Mode (Control Centre / logo menu / Steam).
+# Switch from the desktop to Game Mode (Control Centre / logo menu / Spotlight / shortcuts).
+# The shell plays the switch animation (glass card + chime, then fade to black) before the change.
+if qs -c gill-osaab ipc call transition toGame >/dev/null 2>&1; then
+  sleep 0.9
+fi
 exec steamos-session-select gamescope

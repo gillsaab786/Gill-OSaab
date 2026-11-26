@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Android (Waydroid) notifications -> Gill-OSaab notifications, with download progress.
+"""Android (Waydroid) notifications -> Gill(OS) notifications, with download progress.
 
 Waydroid doesn't pass Android notifications to Linux, so this reads them over Android's own
 debug bridge (adb, no root needed) every few seconds while Android is running, and shows new or

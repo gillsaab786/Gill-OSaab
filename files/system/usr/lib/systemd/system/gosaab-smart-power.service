@@ -1,5 +1,5 @@
 [Unit]
-Description=Gill-OSaab Smart TDP and graphics switching
+Description=Gill(OS) Smart TDP and graphics switching
 After=systemd-logind.service power-profiles-daemon.service tuned-ppd.service
 
 [Service]

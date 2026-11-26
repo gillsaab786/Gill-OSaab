@@ -1,4 +1,4 @@
-# Gill-OSaab boot screen: a Liquid Glass ring that fills up, with the percentage in the middle.
+# Gill(OS) boot screen: a Liquid Glass ring that fills up, with the percentage in the middle.
 Window.SetBackgroundTopColor(0, 0, 0);
 Window.SetBackgroundBottomColor(0, 0, 0);
 cx = Window.GetX() + Window.GetWidth() / 2;
@@ -12,7 +12,7 @@ ring.SetPosition(cx - frames[0].GetWidth() / 2, cy - frames[0].GetHeight() / 2, 
 
 number = Sprite();
 percent = Sprite();
-caption = Sprite(Image.Text("Starting Gill-OSaab", 0.62, 0.62, 0.65, 1, "Inter 18"));
+caption = Sprite(Image.Text("Starting Gill(OS)", 0.62, 0.62, 0.65, 1, "Inter 18"));
 caption.SetPosition(cx - caption.GetImage().GetWidth() / 2, cy + frames[0].GetHeight() / 2 + 40, 2);
 
 shown = -1;

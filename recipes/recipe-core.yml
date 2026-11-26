@@ -1,10 +1,10 @@
 # yaml-language-server: $schema=https://schema.blue-build.org/recipe-v1.json
-# Gill-OSaab Core: built directly on minimal Fedora bootc (no Bazzite, no extras).
-# Only what Gill-OSaab uses is installed, so only that runs.
-# Desktop: Gill-OSaab's own window manager (gosaab-wm) and shell; Game Mode: gamescope + Steam.
+# Gill(OS) Core: built directly on minimal Fedora bootc (no Bazzite, no extras).
+# Only what Gill(OS) uses is installed, so only that runs.
+# Desktop: Gill(OS)'s own window manager (gosaab-wm) and shell; Game Mode: gamescope + Steam.
 # Published to ghcr.io/<owner>/gill-osaab-core
 name: gill-osaab-core
-description: Gill-OSaab Core, a minimal gaming OS on Fedora bootc.
+description: Gill(OS) Core, a minimal gaming OS on Fedora bootc.
 
 base-image: quay.io/fedora/fedora-bootc
 image-version: "45"
@@ -44,7 +44,7 @@ modules:
         - mesa-vulkan-drivers
         - mesa-va-drivers-freeworld
         - vulkan-loader
-        # --- desktop: Gill-OSaab's own (gosaab-wm + shell, built below), nothing else
+        # --- desktop: Gill(OS)'s own (gosaab-wm + shell, built below), nothing else
         - sddm
         - sddm-wayland-generic
         - quickshell
@@ -121,7 +121,7 @@ modules:
         - distrobox
         - flatpak
         - bubblewrap
-        # --- Gill-OSaab tools
+        # --- Gill(OS) tools
         - python3-pyside6
         - python3-gobject
         - libnotify
@@ -151,7 +151,7 @@ modules:
       - source: core-system
         destination: /
 
-  # Build and install the Gill-OSaab window manager + shell + login screen from this repo
+  # Build and install the Gill(OS) window manager + shell + login screen from this repo
   - type: containerfile
     snippets:
       - COPY shell /tmp/gosaab-shell

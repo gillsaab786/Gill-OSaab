@@ -1,5 +1,5 @@
 #!/bin/sh
-# XREAL (and other USB-C display) glasses on Gill-OSaab.
+# XREAL (and other USB-C display) glasses on Gill(OS).
 #   gosaab-glasses status        show whether glasses are connected and how
 #   gosaab-glasses extend        glasses as a second screen (right of the built-in one)
 #   gosaab-glasses only          picture only in the glasses (built-in screen off, saves battery)

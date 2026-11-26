@@ -30,7 +30,7 @@ Canvas {
         const rrect = (x, y, w, h, r) => { c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r); c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath() }
         const up = -Math.PI / 2
         switch (name) {
-        case "logo": // Gill-OSaab mark: a "G" ring with a spark
+        case "logo": // Gill(OS) mark: a "G" ring with a spark
             c.lineWidth = 2.6
             arc(12, 12, 8.5, -0.25 * Math.PI, 1.6 * Math.PI)
             line([12.5, 12, 20, 12])

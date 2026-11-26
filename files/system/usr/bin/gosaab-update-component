@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Update one part of Gill-OSaab, or everything.
+"""Update one part of Gill(OS), or everything.
 
   gosaab-update-component <name>      update it now (shows progress in notifications)
   gosaab-update-component --versions  print installed versions as JSON
   gosaab-update-component --list      list the parts
 
-Parts: all, os, drivers, rollback, firmware, bios, android, proton, wine, apps, containers, decky, nvidia
+Parts: all, os, drivers, translation, rollback, firmware, bios, android, proton, wine, apps, containers, decky,
+nvidia
 """
 import hashlib
 import json
@@ -29,7 +30,7 @@ WINE_PREFIXES = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share
 NOT_AVAILABLE, UP_TO_DATE, FAILED = 3, 4, 1
 
 PARTS = {
-    "os": ("Gill-OSaab system", "Kernel, graphics and Wi-Fi drivers, Wine, Android support", "root"),
+    "os": ("Gill(OS) system", "Kernel, graphics and Wi-Fi drivers, Wine, Android support", "root"),
     "firmware": ("Device firmware", "Controllers, SSDs, docks and other parts (LVFS)", "root"),
     "bios": ("BIOS", "Only when your maker publishes it to LVFS; never automatic", "root"),
     "android": ("Android system", "The Android image used for .apk apps (Waydroid)", "root"),
@@ -37,12 +38,15 @@ PARTS = {
     "wine": ("Windows app setups", "Refreshes each Windows app's private setup", "user"),
     "apps": ("Apps and emulators", "Flatpak apps", "user"),
     "containers": ("Linux containers", "Apps installed from .deb and .rpm", "user"),
-    "decky": ("Game Mode plugins", "Gill-OSaab Notifications for Decky", "root"),
-    "nvidia": ("Nvidia edition", "Switches to the Gill-OSaab build with Nvidia drivers", "root"),
+    "decky": ("Game Mode plugins", "Gill(OS) Notifications for Decky", "root"),
+    "nvidia": ("Nvidia edition", "Switches to the Gill(OS) build with Nvidia drivers", "root"),
     "rollback": ("Previous version", "Goes back to the system version before the last update", "root"),
 }
 GROUPS = {
     "drivers": ["os", "firmware"],
+    # the layers that run other systems' apps: Android (Waydroid), Windows (Proton-GE, Wine setups),
+    # other Linux distros (containers)
+    "translation": ["android", "proton", "wine", "containers"],
     "all": ["os", "firmware", "android", "proton", "wine", "apps", "containers", "decky"],
 }
 
@@ -92,7 +96,7 @@ def version_key(name):
 # ------------------------------------------------------------ user parts
 def update_proton(progress):
     req = urllib.request.Request(PROTON_API, headers={"Accept": "application/vnd.github+json",
-                                                      "User-Agent": "Gill-OSaab"})
+                                                      "User-Agent": "Gill(OS)"})
     with urllib.request.urlopen(req, timeout=30) as r:
         release = json.load(r)
     tag = release["tag_name"]
@@ -122,7 +126,7 @@ def update_proton(progress):
 
 
 def download(url, path, progress, message):
-    req = urllib.request.Request(url, headers={"User-Agent": "Gill-OSaab"})
+    req = urllib.request.Request(url, headers={"User-Agent": "Gill(OS)"})
     with urllib.request.urlopen(req, timeout=60) as r, open(path, "wb") as out:
         total = int(r.headers.get("Content-Length") or 0)
         done = 0

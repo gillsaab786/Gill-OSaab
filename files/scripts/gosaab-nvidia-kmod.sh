@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Nvidia driver for Gill-OSaab Core: builds Nvidia's open kernel module for the image's kernel
+# Nvidia driver for Gill(OS) Core: builds Nvidia's open kernel module for the image's kernel
 # (RPM Fusion akmod) and adds the user-space driver, including 32-bit parts Steam games need.
 # Older cards (GTX 10 and earlier) keep using the open NVK/nouveau driver.
 set -euo pipefail

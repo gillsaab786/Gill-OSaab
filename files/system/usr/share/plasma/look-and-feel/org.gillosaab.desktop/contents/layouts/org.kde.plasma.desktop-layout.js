@@ -1,4 +1,4 @@
-// Gill-OSaab desktop layout (Plasma 6 scripting API).
+// Gill(OS) desktop layout (Plasma 6 scripting API).
 // macOS/iOS-inspired: a slim top bar with app menu, tray and clock,
 // and a floating, centred dock that moves out of the way of windows.
 

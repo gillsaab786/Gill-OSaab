@@ -3,7 +3,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 
-// Gill-OSaab look: dark glass, Apple-style system colours, Inter type.
+// Gill(OS) look: dark glass, Apple-style system colours, Inter type.
 // Appearance choices live in ~/.config/gill-osaab/appearance.json, shared with Settings:
 //   mode auto|light|dark, accent "#rrggbb", iconStyle default|dark|clear|tinted, glass clear|tinted,
 //   menuBar transparent|glass, wallpaper tide|tide-light|tide-dark|classic|/path, widgets {...}, city
@@ -91,7 +91,7 @@ Singleton {
     readonly property int radius: 22
     readonly property int barHeight: 38
     readonly property int dockIcon: 60
-    readonly property int dockMagnified: 86
+    readonly property int dockMagnified: Math.round(dockIcon * dockZoom)
 
     // An icon path that exists, trying each name in turn ("" if none do)
     function icon() {
@@ -110,11 +110,35 @@ Singleton {
     // Helper entries apps ship that people never launch themselves
     readonly property var hiddenApps: ["footclient", "foot-server", "gosaab-open", "org.freedesktop.IBus.Setup",
         "nm-connection-editor", "lxqt-policykit-agent", "xdg-desktop-portal-gtk"]
-    function listed(e) {
-        // Wine's own helper apps (Notepad, Regedit, WineMine...) stay out; Wine Configuration stays in
-        if (/^wine-(notepad|regedit|winemine|wordpad|winhelp|oleview|uninstaller|wineboot|taskmgr|control|cmd|iexplore|explorer|winefile|mime-msi|mime-.*)$/.test(e.id)) return false
-        return !e.noDisplay && hiddenApps.indexOf(e.id) < 0
+    // apps a system helper, never shown (Wine's Notepad, Regedit...; Wine Configuration stays in)
+    function helperApp(e) {
+        return e.noDisplay || hiddenApps.indexOf(e.id) >= 0
+            || /^wine-(notepad|regedit|winemine|wordpad|winhelp|oleview|uninstaller|wineboot|taskmgr|control|cmd|iexplore|explorer|winefile|mime-msi|mime-.*)$/.test(e.id)
     }
+    // apps you hid yourself (Launchpad: right-click or hold > Hide); kept in appearance.json "hiddenApps"
+    readonly property var userHidden: Array.isArray(cfg.hiddenApps) ? cfg.hiddenApps : []
+    function isHidden(id) { return userHidden.indexOf(id) >= 0 }
+    function setHidden(id, hide) {
+        const list = userHidden.filter(x => x !== id)
+        if (hide) list.push(id)
+        set("hiddenApps", list)
+    }
+    function listed(e) { return !helperApp(e) && !isHidden(e.id) }
+
+    // Apps kept in the Dock (right-click > Keep in Dock / Remove from Dock)
+    readonly property var defaultDock: ["org.gnome.Nautilus", "org.kde.dolphin", "brave-browser", "com.brave.Browser",
+        "io.github.kolunmi.Bazaar", "waydroid.com.android.vending", "steam", "gosaab-emudeck", "gosaab-settings",
+        "org.kde.konsole", "foot", "vlc", "org.videolan.VLC"]
+    readonly property var dockApps: Array.isArray(cfg.dockApps) ? cfg.dockApps : defaultDock
+    function inDock(id) { return dockApps.indexOf(id) >= 0 }
+    function setInDock(id, keep) {
+        const list = dockApps.filter(x => x !== id)
+        if (keep) list.push(id)
+        set("dockApps", list)
+    }
+
+    // Dock magnification (Settings > Appearance): how big icons grow under the pointer
+    readonly property real dockZoom: ({ off: 1.0, small: 1.35, medium: 1.7, large: 2.0 })[setting("dockMagnification", "medium")] || 1.7
 
     // Which system an app comes from: Android (Waydroid), Windows (Wine) or Linux
     function platformOf(e) {

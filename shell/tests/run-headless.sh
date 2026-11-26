@@ -64,11 +64,11 @@ export WAYLAND_DISPLAY=$(cat "$XDG_RUNTIME_DIR/gosaab-wm.socket" 2>/dev/null)
 sleep 1.5
 shot 01-wallpaper
 
-foot -W 100x30 -o font=monospace:size=13 -e sh -c 'echo "Gill-OSaab window 1"; sleep 120' &
+foot -W 100x30 -o font=monospace:size=13 -e sh -c 'echo "Gill(OS) window 1"; sleep 120' &
 sleep 0.10; shot 02-opening
 sleep 1.2;  shot 03-one-window
 
-foot -W 70x18 -o font=monospace:size=13 -e sh -c 'echo "Gill-OSaab window 2"; sleep 120' &
+foot -W 70x18 -o font=monospace:size=13 -e sh -c 'echo "Gill(OS) window 2"; sleep 120' &
 sleep 1.2;  shot 04-two-windows
 
 kill -USR1 $WM            # close the focused window (window 2)
@@ -190,7 +190,7 @@ if red and yel and grn and abs(red[1] - grn[1]) < 4 and 20 < yel[0] - red[0] < 4
 EOF3
 }
 click() { echo "$1 $2" >>"$CLICKS"; }
-foot -W 100x30 -T "Gill-OSaab Terminal" -e sh -c 'sleep 300' &
+foot -W 100x30 -T "Gill(OS) Terminal" -e sh -c 'sleep 300' &
 sleep 1.5; shot 12-titlebar
 L=($(lights 12-titlebar)); echo "traffic lights at: ${L[*]:-none}"
 check "title bar with traffic lights is drawn" "[ \${#L[@]} -eq 6 ]"
@@ -230,7 +230,7 @@ if [ ${#L[@]} -eq 6 ]; then
   click ${C[0]:-0} ${C[1]:-0}; sleep 1.2; shot 19-closed   # red: close
   check "close button closes the app" "[ -z \"\$(lights 19-closed)\" ] && [ \$(pgrep -c -f 'Close me') -eq 0 ]"
   # Mission Control: three windows side by side, click the desktop to go back
-  pkill -f "Close me|Second window|Gill-OSaab Terminal" 2>/dev/null; sleep 0.8
+  pkill -f "Close me|Second window|Gill(OS) Terminal" 2>/dev/null; sleep 0.8
   for n in 1 2 3; do foot -W $((60 + n * 15))x$((18 + n * 4)) -T "Window $n" -e sh -c 'sleep 300' & sleep 0.6; done
   sleep 1.2; shot 30-three-windows
   echo overview >>"$CLICKS"; sleep 1.2; shot 31-mission-control
@@ -300,14 +300,14 @@ kill -TERM $WM 2>/dev/null; wait $WM; rc=$?
 check "clean shutdown after window chrome tests" "[ $rc -eq 0 ]"
 pkill foot 2>/dev/null
 
-# ---- M3: the Gill-OSaab shell (menu bar, Dock, notifications, Control Centre, Spotlight)
+# ---- M3: the Gill(OS) shell (menu bar, Dock, notifications, Control Centre, Spotlight)
 if command -v qs >/dev/null; then
   SHELLDIR=$(pwd)/shell/quickshell
   export QT_QUICK_BACKEND=software QT_QPA_PLATFORM=wayland GOSAAB_TEST=1 GOSAAB_WALLPAPER=$(pwd)/$WALL
   export GOSAAB_LIBEXEC=$(pwd)/files/system/usr/libexec/gill-osaab
   # Downloads (for the Dock's stack) and something in the Trash
   mkdir -p "$HOME/Downloads" "$HOME/.local/share/Trash/files"
-  for f in Gill-OSaab.iso photo.jpg report.pdf game-setup.exe app.apk notes.txt; do echo x > "$HOME/Downloads/$f"; sleep 0.05; done
+  for f in GillOS.iso photo.jpg report.pdf game-setup.exe app.apk notes.txt; do echo x > "$HOME/Downloads/$f"; sleep 0.05; done
   export GOSAAB_SHELL_IPC="qs -p $SHELLDIR ipc call"
   # a session bus, for notifications
   DBUS_SESSION_BUS_ADDRESS=$(dbus-daemon --session --fork --print-address 2>/dev/null) && export DBUS_SESSION_BUS_ADDRESS
@@ -325,11 +325,11 @@ if command -v qs >/dev/null; then
   qs -p "$SHELLDIR" >"$OUT/quickshell.log" 2>&1 &
   QS=$!
   for _ in $(seq 1 40); do qs -p "$SHELLDIR" ipc call shell ping 2>/dev/null | grep -q ok && break; sleep 0.5; done
-  sleep 2; shot 20-shell-desktop
+  sleep 3; shot 20-shell-desktop
   check "shell starts and answers" "qs -p $SHELLDIR ipc call shell ping | grep -q ok"
   foot -W 90x26 -T "Terminal" -e sh -c 'sleep 300' &
   sleep 2; shot 21-shell-window
-  notify-send -a "Firefox" -i firefox -h int:value:42 "Downloading Gill-OSaab.iso" "1.2 GB of 2.9 GB — 3 min left"
+  notify-send -a "Firefox" -i firefox -h int:value:42 "Downloading Gill(OS).iso" "1.2 GB of 2.9 GB — 3 min left"
   sleep 0.15; shot 22a-banner-sliding
   sleep 1.5; shot 22-notification
   check "notification arrived" "[ \$(qs -p $SHELLDIR ipc call notifications count) -ge 1 ]"
@@ -396,6 +396,23 @@ if command -v qs >/dev/null; then
   qs -p "$SHELLDIR" ipc call spotlight toggle; sleep 0.8; shot 27-after-spotlight
   qs -p "$SHELLDIR" ipc call launchpad toggle; sleep 1.2; shot 28-launchpad
   qs -p "$SHELLDIR" ipc call launchpad toggle; sleep 0.8; shot 29-after-launchpad
+  # app menu (right-click / hold) and App Info (Android-style: kind, version, force close, clear, uninstall)
+  qs -p "$SHELLDIR" ipc call appinfo openMenu waydroid.com.netflix.mediaclient; sleep 0.8; shot 29a-app-menu
+  qs -p "$SHELLDIR" ipc call shell closeAll; sleep 0.5
+  qs -p "$SHELLDIR" ipc call appinfo open wine-youtube; sleep 2.5; shot 29b-app-info
+  check "App Info tells a Windows app (YouTube via Wine)" "[ \"\$(qs -p $SHELLDIR ipc call appinfo kind)\" = Windows ]"
+  qs -p "$SHELLDIR" ipc call appinfo close; sleep 0.6
+  # hide an app: it leaves Launchpad and Spotlight and shows under "Hidden apps"
+  qs -p "$SHELLDIR" ipc call shell hideApp waydroid.com.netflix.mediaclient true; sleep 0.5
+  check "hidden app is gone from Spotlight" "qs -p $SHELLDIR ipc call spotlight search netflix >/dev/null; sleep 0.5; [ -z \"\$(qs -p $SHELLDIR ipc call spotlight results)\" ]"
+  qs -p "$SHELLDIR" ipc call shell closeAll; sleep 0.4
+  qs -p "$SHELLDIR" ipc call launchpad toggle; qs -p "$SHELLDIR" ipc call launchpad showHiddenApps true; sleep 1; shot 29c-hidden-apps
+  check "Launchpad's Hidden apps view lists it" "[ \"\$(qs -p $SHELLDIR ipc call launchpad count)\" = 1 ]"
+  qs -p "$SHELLDIR" ipc call launchpad toggle; qs -p "$SHELLDIR" ipc call shell hideApp waydroid.com.netflix.mediaclient false; sleep 0.8
+  # Game Mode <-> Desktop transition
+  qs -p "$SHELLDIR" ipc call transition toGame; sleep 0.45; shot 29d-to-game-mode
+  sleep 1; qs -p "$SHELLDIR" ipc call transition arrive; sleep 0.35; shot 29e-arriving
+  sleep 2; shot 29f-arrived
   # Alt+Tab app switcher (the compositor sends next/done; driven over IPC here)
   qs -p "$SHELLDIR" ipc call switcher next; sleep 0.8; shot 29a-app-switcher
   check "Alt+Tab switcher lists open apps" "[ \$(qs -p $SHELLDIR ipc call switcher count) -ge 1 ]"
@@ -429,6 +446,10 @@ checks = [
   ("spotlight closes", changed("21-shell-window", "27-after-spotlight", (W // 2 - 320, int(H * 0.2), W // 2 + 320, int(H * 0.2) + 200)) < 0.02),
   ("launchpad opens", changed("27-after-spotlight", "28-launchpad", (0, 30, W, H - 120)) > 0.05),
   ("launchpad closes", changed("27-after-spotlight", "29-after-launchpad", (0, 30, W, H - 120)) < 0.01),
+  ("app menu opens", changed("29-after-launchpad", "29a-app-menu", (0, 30, W, H - 120)) > 0.01),
+  ("App Info card shows", changed("29-after-launchpad", "29b-app-info", (W // 3, H // 4, 2 * W // 3, 3 * H // 4)) > 0.2),
+  ("switching to Game Mode covers the desktop", changed("29-after-launchpad", "29d-to-game-mode", (0, 0, W, H)) > 0.5),
+  ("the desktop comes back after Game Mode", changed("29-after-launchpad", "29f-arrived", (0, 30, W, H - 140)) < 0.02),
   ("Downloads stack fans out above the Dock", changed("23c-volume-bezel", "23d-dock-downloads-stack", (W // 2, H // 2, W, H - 110)) > 0.01),
   ("light mode switches to the light wallpaper", changed("23e-trash-full-menu", "23f-light-mode", (0, H // 3, W, 2 * H // 3)) > 0.3),
 ]
@@ -470,7 +491,7 @@ EOF8
     pkill foot; sleep 1
     DISPLAY=$(cat "$XDG_RUNTIME_DIR/gosaab-wm.display") xclock -geometry 300x300 &
     sleep 3; shot 43-x11-app
-    check "X11 app opens with a Gill-OSaab title bar" "[ -n \"\$(lights 43-x11-app 400)\" ] && ! pgrep -x foot >/dev/null"
+    check "X11 app opens with a Gill(OS) title bar" "[ -n \"\$(lights 43-x11-app 400)\" ] && ! pgrep -x foot >/dev/null"
   else
     echo "FAIL: X11 support (xwayland-satellite) not available"; fail=1
   fi

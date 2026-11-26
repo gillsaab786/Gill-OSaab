@@ -1,5 +1,5 @@
 [Unit]
-Description=Gill-OSaab button and key-combo shortcuts (Desktop and Game Mode)
+Description=Gill(OS) button and key-combo shortcuts (Desktop and Game Mode)
 After=systemd-logind.service
 
 [Service]

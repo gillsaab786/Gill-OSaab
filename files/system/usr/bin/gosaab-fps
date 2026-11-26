@@ -35,7 +35,7 @@ def settings():
 
 
 def env_text(env):
-    lines = ["# Gill-OSaab: best FPS settings for this graphics chip (Settings > Game Mode). Rewritten at sign-in."]
+    lines = ["# Gill(OS): best FPS settings for this graphics chip (Settings > Game Mode). Rewritten at sign-in."]
     lines += [f"{k}={v}" for k, v in sorted(env.items())]
     return "\n".join(lines) + "\n"
 

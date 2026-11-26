@@ -1,6 +1,6 @@
 [Desktop Entry]
-Name=Gill-OSaab
-Comment=The Gill-OSaab desktop
+Name=Gill(OS)
+Comment=The Gill(OS) desktop
 Exec=/usr/bin/gosaab-session
 Type=Application
-DesktopNames=Gill-OSaab
+DesktopNames=Gill(OS)

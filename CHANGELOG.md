@@ -4,7 +4,7 @@
 
 - New `gill-osaab-core` edition on minimal Fedora bootc 45: Plasma desktop (minimal set), Steam,
   newest Mesa + video decoding, Wine, Waydroid, distrobox, Flatpak, firmware, scx gaming
-  schedulers, all Gill-OSaab tools. Boots to the desktop.
+  schedulers, all Gill(OS) tools. Boots to the desktop.
 - Bazzite-based editions kept as the fallback until Core is tested on hardware.
 
 ## 1.2.0 (2026-11-23)
@@ -24,7 +24,7 @@
 
 - Notifications with live progress in Game Mode: `gosaab-notify-hub` takes the standard
   notification, KDE job (V1 + V2) and launcher-progress services in the Steam session
-- Gill-OSaab Notifications Decky plugin: pop-ups and a Quick Access tab with progress bars,
+- Gill(OS) Notifications Decky plugin: pop-ups and a Quick Access tab with progress bars,
   Cancel, Dismiss, Clear all; auto-installed and updated at boot when Decky is present
 - `gosaab-open` reports live progress (works in desktop mode and Game Mode)
 - Settings: Game Mode notifications status line
@@ -36,9 +36,9 @@ First build (Phase 1 and part of Phase 2).
 
 - Handheld and desktop editions on Bazzite, built by GitHub Actions with keyless signing
 - `gosaab-open`: one-click .exe/.msi (sandboxed Wine), .apk, .AppImage, .deb, .rpm, Flatpak
-- Gill-OSaab Settings app with update switches (All / OS / Apps / Containers), sandbox, screen-off, appearance
+- Gill(OS) Settings app with update switches (All / OS / Apps / Containers), sandbox, screen-off, appearance
 - Own updater (`gosaab-update.timer`) replacing stock updaters, respecting the switches
 - Screen-off mode with auto wake and Overnight / Work option
-- Gill-OSaab look: colour schemes, top bar + floating dock layout, Inter + Papirus, Aurora wallpaper, logo
+- Gill(OS) look: colour schemes, top bar + floating dock layout, Inter + Papirus, Aurora wallpaper, logo
 - NTSYNC and scx_lavd gaming scheduler
 - 47 unit tests

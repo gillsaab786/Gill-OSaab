@@ -4,15 +4,15 @@
 # next sign-in if it was interrupted (e.g. no internet).
 # running from the USB stick: offer to install on the PC (every sign-in, until installed)
 if gosaab-install --live 2>/dev/null; then
-  notify-send -a "Gill-OSaab" -i system-software-install "Install Gill-OSaab on this PC?" \
-    "You're running from the USB stick. Open \"Install Gill-OSaab\" in Launchpad to put it on the PC's drive, encrypted." || true
+  notify-send -a "Gill(OS)" -i system-software-install "Install Gill(OS) on this PC?" \
+    "You're running from the USB stick. Open \"Install Gill(OS)\" in Launchpad to put it on the PC's drive, encrypted." || true
 fi
 DONE="$HOME/.config/gill-osaab/first-setup.done"
 [ -f "$DONE" ] && exit 0
 mkdir -p "$(dirname "$DONE")"
 id=0
 progress() { # percent, title, text
-  id=$(notify-send --print-id ${id:+--replace-id "$id"} -a "Gill-OSaab" -i system-software-install \
+  id=$(notify-send --print-id ${id:+--replace-id "$id"} -a "Gill(OS)" -i system-software-install \
        -h "int:value:$1" "$2" "$3" 2>/dev/null || echo "$id")
 }
 # wait for the internet (up to 10 min)

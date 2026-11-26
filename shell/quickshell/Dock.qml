@@ -19,12 +19,10 @@ PanelWindow {
     WlrLayershell.layer: WlrLayer.Top
     mask: Region { item: hitArea }
 
-    // Pinned apps (shown if installed); everything running is added after a divider.
-    readonly property var pinnedIds: ["org.gnome.Nautilus", "org.kde.dolphin", "brave-browser", "com.brave.Browser",
-        "io.github.kolunmi.Bazaar", "waydroid.com.android.vending", "steam", "gosaab-emudeck", "gosaab-settings", "org.kde.konsole", "foot", "vlc", "org.videolan.VLC"]
+    // Apps kept in the Dock (right-click an app > Keep in Dock); running apps follow them.
     readonly property var pinned: {
         const apps = DesktopEntries.applications.values // re-evaluates once app scanning finishes
-        return pinnedIds.map(id => apps.find(e => e.id === id)).filter(e => e)
+        return Theme.dockApps.map(id => apps.find(e => e.id === id)).filter(e => e)
     }
     readonly property var windows: ToplevelManager.toplevels.values
     readonly property var running: {
@@ -46,7 +44,8 @@ PanelWindow {
         })
     }
 
-    property real mouseX: -1000
+    property real mouseX: -1000 // pointer along the Dock *at rest* (see DockItem's magnification)
+    property real restWidth: 1
 
     Item { // where the Dock takes clicks: the shelf plus room for magnified icons
         id: hitArea
@@ -62,6 +61,7 @@ PanelWindow {
         radius: 28
         color: Theme.dock
         GlassRim { radius: 28 }
+        transform: Translate { y: (1 - ShellState.intro) * (Theme.dockIcon + 40) } // rises in on arrival
         Behavior on width { NumberAnimation { duration: Theme.normal; easing.type: Easing.OutCubic } }
 
         MouseArea {
@@ -70,7 +70,10 @@ PanelWindow {
             anchors.topMargin: -(Theme.dockMagnified - Theme.dockIcon)
             hoverEnabled: true
             acceptedButtons: Qt.NoButton
-            onPositionChanged: m => dock.mouseX = mapToItem(items, m.x, m.y).x
+            onPositionChanged: m => {
+                const x = mapToItem(items, m.x, m.y).x
+                dock.mouseX = x / Math.max(1, items.width) * dock.restWidth
+            }
             onExited: dock.mouseX = -1000
         }
 
@@ -78,6 +81,8 @@ PanelWindow {
             id: items
             anchors { horizontalCenter: parent.horizontalCenter; bottom: parent.bottom; bottomMargin: 7 }
             spacing: 6
+            onWidthChanged: if (dock.mouseX < -999) dock.restWidth = width
+            Component.onCompleted: dock.restWidth = width
             DockItem { // Launchpad: every app, iPad style
                 builtinIcon: "launchpad"
                 label: "Launchpad"
@@ -87,7 +92,9 @@ PanelWindow {
             Repeater {
                 model: dock.pinned
                 DockItem {
+                    id: pinnedItem
                     entry: modelData
+                    onMenuRequested: ShellState.openAppMenu(modelData, pinnedItem, "dock")
                     dockWindow: dock
                     windows: dock.windowsFor(modelData, "")
                     pointerX: dock.mouseX
@@ -96,7 +103,9 @@ PanelWindow {
             Repeater { // recently opened apps that aren't kept in the Dock
                 model: dock.running
                 DockItem {
+                    id: runningItem
                     entry: modelData.entry
+                    onMenuRequested: ShellState.openAppMenu(modelData.entry, runningItem, "dock")
                     appId: modelData.appId
                     dockWindow: dock
                     windows: dock.windowsFor(modelData.entry, modelData.appId)

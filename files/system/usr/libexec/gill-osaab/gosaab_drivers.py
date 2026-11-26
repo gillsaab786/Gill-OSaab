@@ -142,7 +142,7 @@ def problems(parts, fw_failures, bt_missing, nvidia_on_core=False):
         if p["category"] in NEEDS_DRIVER and not p["driver"]:
             out.append({"kind": "missing-driver", "category": p["category"], "name": p["name"],
                         "detail": f"{p['name']} ({p['category']}) has no driver, so it won't work.",
-                        "hint": "Send this report to get a driver added to Gill-OSaab."})
+                        "hint": "Send this report to get a driver added to Gill(OS)."})
     for name in bt_missing:
         out.append({"kind": "missing-driver", "category": "Bluetooth", "name": name,
                     "detail": f"{name} is plugged in but Bluetooth didn't start (driver or firmware missing).",
@@ -154,7 +154,7 @@ def problems(parts, fw_failures, bt_missing, nvidia_on_core=False):
     if nvidia_on_core:
         out.append({"kind": "limited-driver", "category": "Graphics", "name": "Nvidia",
                     "detail": "Nvidia graphics use the open NVK/nouveau driver here (no Nvidia proprietary driver "
-                              "in Gill-OSaab Core). Older Nvidia cards may be slow.",
+                              "in Gill(OS) Core). Older Nvidia cards may be slow.",
                     "hint": "Ask for a Core Nvidia edition if games run slowly."})
     return out
 

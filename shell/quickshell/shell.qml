@@ -5,7 +5,7 @@ import Quickshell
 import Quickshell.Wayland
 import Quickshell.Io
 
-// Gill-OSaab shell: menu bar, Dock, notifications, Control Centre, Spotlight.
+// Gill(OS) shell: menu bar, Dock, notifications, Control Centre, Spotlight.
 ShellRoot {
     Variants {
         model: Quickshell.screens
@@ -40,8 +40,11 @@ ShellRoot {
     Notifications {}
     Spotlight {}
     Launchpad {}
+    AppMenu {}
+    AppInfo {}
     Switcher {}
     OSD {}
+    ModeTransition {}
     LockScreen {}
     GlassesProfiles {}
     BluetoothBatteries {}
@@ -56,5 +59,7 @@ ShellRoot {
         function ping(): string { return "gill-osaab shell ok" }
         function keyboard(): void { ShellState.toggleKeyboard() }
         function dockPopup(name: string): void { ShellState.dockPopup = name }
+        function hideApp(id: string, hide: bool): void { Theme.setHidden(id, hide) }
+        function dockApps(): string { return Theme.dockApps.join(",") }
     }
 }

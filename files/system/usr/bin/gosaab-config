@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Change a Gill-OSaab system setting (used by Gill-OSaab Settings).
+"""Change a Gill(OS) system setting (used by Gill(OS) Settings).
 
   gosaab-config set <updates.conf|features.conf> <key> <value>
 

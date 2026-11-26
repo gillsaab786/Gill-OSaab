@@ -7,7 +7,7 @@ log() { echo "[gill-osaab] $*"; }
 # Executables
 chmod 0755 /usr/bin/gosaab-* /usr/libexec/gill-osaab/* 2>/dev/null || true
 
-# --- Updates: Gill-OSaab's own updater replaces the stock ones so the
+# --- Updates: Gill(OS)'s own updater replaces the stock ones so the
 # on/off switches in /etc/gill-osaab/updates.conf are the single source of truth.
 # bootc-fetch-apply-updates restarts the PC by itself (mid-game!) — ours asks first
 for unit in uupd.timer rpm-ostreed-automatic.timer flatpak-system-update.timer bootc-fetch-apply-updates.timer; do

@@ -1,5 +1,5 @@
 name: core-image-smoke-test
-# Boots the real Gill-OSaab Core desktop from the published image (headless, software GPU)
+# Boots the real Gill(OS) Core desktop from the published image (headless, software GPU)
 # and checks everything is installed and starts. Screenshots go to the core-shots branch.
 on:
   workflow_run:

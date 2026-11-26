@@ -85,7 +85,7 @@ def main(argv=()):
     steps = plan_updates({**conf, "frequency": "daily"} if "--force" in argv else conf)
     if not steps:
         log("updates", "all updates switched off; nothing to do")
-        print("Gill-OSaab: updates are switched off.")
+        print("Gill(OS): updates are switched off.")
         return 0
     failed = 0
     for cmd in steps:

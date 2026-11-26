@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <zone>
-  <short>Gill-OSaab</short>
+  <short>Gill(OS)</short>
   <description>Nothing on this PC can be reached from the network except finding printers/devices and Steam Remote Play / LAN game transfers.</description>
   <service name="dhcpv6-client"/>
   <service name="mdns"/>

@@ -1,5 +1,5 @@
 [Unit]
-Description=Gill-OSaab cloud drive %i (shows in Files as Cloud/%i)
+Description=Gill(OS) cloud drive %i (shows in Files as Cloud/%i)
 After=network-online.target
 
 [Service]

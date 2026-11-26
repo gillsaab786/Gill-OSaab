@@ -239,8 +239,8 @@ export default definePlugin(() => {
   getState().then(onState).catch(() => undefined);
 
   return {
-    name: "Gill-OSaab",
-    titleView: <div className={staticClasses.Title}>Gill-OSaab</div>,
+    name: "Gill(OS)",
+    titleView: <div className={staticClasses.Title}>Gill(OS)</div>,
     content: <Content />,
     icon: <FaBell />,
     onDismount() {

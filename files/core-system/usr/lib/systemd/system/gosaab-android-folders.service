@@ -1,5 +1,5 @@
 [Unit]
-Description=Gill-OSaab: Android files in ~/Android, Android downloads to your chosen folder
+Description=Gill(OS): Android files in ~/Android, Android downloads to your chosen folder
 After=waydroid-container.service
 Wants=waydroid-container.service
 

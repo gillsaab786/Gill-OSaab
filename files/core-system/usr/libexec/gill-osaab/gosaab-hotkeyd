@@ -1,5 +1,5 @@
 #!/usr/bin/python3 -I
-"""Gill-OSaab button shortcuts, in Desktop and in Game Mode.
+"""Gill(OS) button shortcuts, in Desktop and in Game Mode.
 
 Watches keyboards and controllers (built-in ROG Ally / Legion Go / GPD buttons too) and, when a
 combo from hotkeys.conf is pressed, runs its action as the person signed in at the screen.

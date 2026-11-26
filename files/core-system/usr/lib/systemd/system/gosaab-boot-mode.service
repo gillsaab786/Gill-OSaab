@@ -1,5 +1,5 @@
 [Unit]
-Description=Gill-OSaab: start in Game Mode or Desktop (Settings > Game Mode)
+Description=Gill(OS): start in Game Mode or Desktop (Settings > Game Mode)
 Before=display-manager.service
 After=systemd-user-sessions.service
 

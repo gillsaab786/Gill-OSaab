@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-# Installs/updates the Gill-OSaab Notifications Decky plugin for every user
+# Installs/updates the Gill(OS) Notifications Decky plugin for every user
 # who has Decky Loader, then restarts Decky if anything changed.
 set -euo pipefail
 SRC=/usr/share/gill-osaab/decky/gill-osaab-notify

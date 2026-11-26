@@ -12,7 +12,28 @@ Singleton {
     property bool systemMenu: false
     property bool launchpad: false
     property bool doNotDisturb: false
+    property real intro: 1 // 0 -> 1 as the desktop arrives (Dock rises, widgets fade in); see ModeTransition.qml
     property string dockPopup: "" // "downloads" (the stack fan) or "trash" (its menu)
+    // App menu (right-click / hold on an app in the Dock or Launchpad) and App Info
+    property var menuApp: null      // DesktopEntry
+    property point menuAt: Qt.point(0, 0)
+    property string menuFrom: ""    // "dock" | "launchpad"
+    property var menuScreen: null
+    property var infoApp: null      // DesktopEntry shown in App Info
+    function openAppMenu(entry, item, from) {
+        if (!entry) return
+        const win = item.QsWindow.window
+        const p = item.mapToItem(null, item.width / 2, 0)
+        const sc = win ? win.screen : null
+        // layer windows not anchored left (the Dock) are centred on the screen
+        const offX = win && sc && from === "dock" ? (sc.width - win.width) / 2 : 0
+        const offY = win && sc && from === "dock" ? sc.height - win.height : 0
+        menuScreen = sc
+        menuAt = Qt.point(offX + p.x, offY + p.y)
+        menuFrom = from
+        menuApp = entry
+        haptic("tick")
+    }
     readonly property bool anyPopup: controlCenter || notificationCenter || systemMenu || dockPopup !== ""
 
     // Haptic feedback from the built-in controller (gosaab-haptic): tick, toggle, success, error
@@ -32,6 +53,7 @@ Singleton {
         notificationCenter = false
         systemMenu = false
         dockPopup = ""
+        menuApp = null
         spotlight = false
         launchpad = false
     }

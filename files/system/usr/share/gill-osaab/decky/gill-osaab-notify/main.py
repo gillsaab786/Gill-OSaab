@@ -1,4 +1,4 @@
-"""Gill-OSaab Notifications: Decky backend.
+"""Gill(OS) Notifications: Decky backend.
 
 Watches the hub's live state file and pushes changes to the Quick Access tab;
 forwards Dismiss/Cancel/Clear to the hub over D-Bus.

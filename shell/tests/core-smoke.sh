@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Inside the Gill-OSaab Core image: is everything there, and does the real session start?
+# Inside the Gill(OS) Core image: is everything there, and does the real session start?
 set -u
 OUT=${1:-/tmp/core-shots}
 mkdir -p "$OUT"
@@ -36,6 +36,12 @@ check "Settings: start in Game Mode" "grep -q 'Session=gill-osaab-gamemode.deskt
 check "Settings: start in Desktop" "grep -q 'Session=gill-osaab.desktop' /etc/sddm.conf.d/zz-gill-osaab-autologin.conf"
 /usr/libexec/gill-osaab/gosaab-session-select-root --boot smokeuser ask
 check "Settings: ask at the login screen" "[ ! -e /etc/sddm.conf.d/zz-gill-osaab-autologin.conf ]"
+/usr/libexec/gill-osaab/gosaab-session-select-root smokeuser gill-osaab
+/usr/libexec/gill-osaab/gosaab-session-select-root --restore smokeuser
+check "Game Mode/Desktop switch signs in once only (no password-free sign-in after a restart)" "[ ! -e /etc/sddm.conf.d/zz-gill-osaab-autologin.conf ]"
+check "App Info tells apps apart" "/usr/libexec/gill-osaab/gosaab-appinfo info org.gnome.Nautilus 2>/dev/null | grep -q '\"source\": \"system\"' || /usr/libexec/gill-osaab/gosaab-appinfo info gosaab-settings | grep -q '\"kind\": \"Linux\"'"
+check "Game Mode startup movie and switch sound installed" "[ -s /usr/share/gill-osaab/media/deck_startup.webm ] && [ -s /usr/share/gill-osaab/media/mode-switch.wav ]"
+check "named Gill(OS)" "grep -q '^NAME=\"Gill(OS)\"' /usr/lib/os-release"
 check "shell config installed" "[ -f /etc/xdg/quickshell/gill-osaab/shell.qml ]"
 check "login theme installed" "[ -f /usr/share/sddm/themes/gill-osaab/Main.qml ]"
 check "desktop session listed" "[ -f /usr/share/wayland-sessions/gill-osaab.desktop ]"
@@ -90,7 +96,7 @@ gosaab-drivers auto >/dev/null 2>&1
 check "drivers recorded at start-up" "[ -s /var/lib/gill-osaab/drivers.json ]"
 check "problems are collected" "HOME=/tmp/diag gosaab-diagnose --collect"
 HOME=/tmp/diag gosaab-diagnose --report > /tmp/report.txt; head -8 /tmp/report.txt
-check "problem report can be copied (personal details removed)" "grep -q 'Gill-OSaab problem report' /tmp/report.txt && ! grep -q \"\$(hostname)\" /tmp/report.txt"
+check "problem report can be copied (personal details removed)" "grep -q 'Gill(OS) problem report' /tmp/report.txt && ! grep -q \"\$(hostname)\" /tmp/report.txt"
 check "button shortcuts: Windows+R switches Game Mode/Desktop" "grep -q '^META+R = mode' /etc/gill-osaab/hotkeys.conf"
 check "button shortcuts: add your own" "HOME=/tmp/hk gosaab-hotkeys set BTN_MODE+BTN_SOUTH app:steam && HOME=/tmp/hk gosaab-hotkeys list | grep -q 'Home button + A'"
 check "button shortcuts: typing keys refused" "! HOME=/tmp/hk gosaab-hotkeys set R mode 2>/dev/null"
@@ -152,7 +158,7 @@ gosaab-session >"$OUT/session.log" 2>&1 &
 for _ in $(seq 1 60); do [ -s $XDG_RUNTIME_DIR/gosaab-wm.socket ] && break; sleep 0.5; done
 export WAYLAND_DISPLAY=$(cat $XDG_RUNTIME_DIR/gosaab-wm.socket 2>/dev/null)
 for _ in $(seq 1 40); do qs -c gill-osaab ipc call shell ping 2>/dev/null | grep -q ok && break; sleep 0.5; done
-check "Gill-OSaab session starts and the shell answers" "qs -c gill-osaab ipc call shell ping | grep -q ok"
+check "Gill(OS) session starts and the shell answers" "qs -c gill-osaab ipc call shell ping | grep -q ok"
 sleep 3; grim "$OUT/01-core-desktop.png"
 foot -T Terminal -e sh -c 'sleep 60' & sleep 2; grim "$OUT/02-core-window.png"
 notify-send -a Steam -h int:value:64 "Downloading Cyberpunk 2077" "41.2 GB of 64 GB"; sleep 1.5; grim "$OUT/03a-core-notification.png"

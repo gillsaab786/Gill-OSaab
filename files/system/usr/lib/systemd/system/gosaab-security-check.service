@@ -1,5 +1,5 @@
 [Unit]
-Description=Gill-OSaab security checkup (default password, firewall, remote login)
+Description=Gill(OS) security checkup (default password, firewall, remote login)
 After=local-fs.target firewalld.service
 
 [Service]

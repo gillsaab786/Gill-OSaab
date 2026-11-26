@@ -1,4 +1,4 @@
-const manifest = {"name":"Gill-OSaab"};
+const manifest = {"name":"Gill(OS)"};
 const API_VERSION = 2;
 const internalAPIConnection = window.__DECKY_SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED_deckyLoaderAPIInit;
 if (!internalAPIConnection) {
@@ -196,8 +196,8 @@ var index = definePlugin(() => {
     const listener = addEventListener("gosaab_state", onState);
     getState().then(onState).catch(() => undefined);
     return {
-        name: "Gill-OSaab",
-        titleView: SP_JSX.jsx("div", { className: DFL.staticClasses.Title, children: "Gill-OSaab" }),
+        name: "Gill(OS)",
+        titleView: SP_JSX.jsx("div", { className: DFL.staticClasses.Title, children: "Gill(OS)" }),
         content: SP_JSX.jsx(Content, {}),
         icon: SP_JSX.jsx(FaBell, {}),
         onDismount() {

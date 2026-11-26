@@ -1,5 +1,5 @@
 #!/usr/bin/python3 -I
-"""Gill-OSaab Smart TDP and graphics switching (runs as admin, all the time).
+"""Gill(OS) Smart TDP and graphics switching (runs as admin, all the time).
 
 Every few seconds: what is the device doing (idle, video, everyday, gaming)? Give it the power that
 needs: package power limit (TDP) where the device allows it (ROG Ally/Legion Go firmware, AMD via

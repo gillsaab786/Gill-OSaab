@@ -1,5 +1,5 @@
 [Unit]
-Description=Gill-OSaab: create your account on the first start after installing
+Description=Gill(OS): create your account on the first start after installing
 ConditionPathExists=/boot/gill-osaab-user.json
 After=local-fs.target systemd-sysusers.service
 Before=display-manager.service sddm.service

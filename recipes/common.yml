@@ -1,7 +1,7 @@
 # yaml-language-server: $schema=https://schema.blue-build.org/module-list-v1.json
-# Modules shared by every Gill-OSaab edition.
+# Modules shared by every Gill(OS) edition.
 modules:
-  # Gill-OSaab tools, configs and defaults -> image root
+  # Gill(OS) tools, configs and defaults -> image root
   - type: files
     files:
       - source: system
@@ -23,7 +23,7 @@ modules:
         - fwupd
         - pciutils
 
-  # Enables Gill-OSaab services, disables stock updaters, refreshes app/MIME databases
+  # Enables Gill(OS) services, disables stock updaters, refreshes app/MIME databases
   - type: script
     scripts:
       - gosaab-setup.sh

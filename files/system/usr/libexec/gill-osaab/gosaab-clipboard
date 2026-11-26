@@ -63,7 +63,7 @@ def add(items, text):
 def main(argv):
     cmd = argv[0] if argv else "list"
     if cmd == "store":
-        text = sys.stdin.read()
+        text = sys.stdin.read(MAX_CHARS * 4)  # a huge copy is cut, never loaded whole
         if not enabled():
             if os.path.exists(HISTORY):
                 os.remove(HISTORY)

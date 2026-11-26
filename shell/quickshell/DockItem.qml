@@ -12,7 +12,7 @@ Item {
     readonly property bool isRunning: windows.length > 0
     readonly property bool isActive: windows.some(w => w.activated)
     property string label: entry ? Theme.displayName(entry) : appId
-    property string builtinIcon: "" // Gill-OSaab's own items (Launchpad, Trash) draw their own icon
+    property string builtinIcon: "" // Gill(OS)'s own items (Launchpad, Trash) draw their own icon
     signal activated()
     property var dockWindow: null
 
@@ -26,13 +26,19 @@ Item {
     onWindowsChanged: rectTimer.restart()
     onXChanged: rectTimer.restart()
 
-    // macOS magnification: icons swell smoothly as the pointer passes over them
-    readonly property real centre: x + width / 2
-    readonly property real distance: Math.abs(pointerX - centre)
-    readonly property real zoom: distance > 140 ? 0 : (Math.cos(distance / 140 * Math.PI) + 1) / 2
+    // macOS magnification: icons swell smoothly as the pointer passes over them, neighbours a bit
+    // less. Distances are measured on the Dock at rest (pointerX comes in rest coordinates), so
+    // growing icons don't push the zoom around and it stays steady under the pointer.
+    property real restCentre: 0
+    readonly property real centreNow: x + width / 2
+    onCentreNowChanged: if (pointerX < -999) restCentre = centreNow
+    Component.onCompleted: restCentre = centreNow
+    readonly property real reach: Theme.dockIcon * 2.4
+    readonly property real distance: Math.abs(pointerX - restCentre)
+    readonly property real zoom: distance > reach ? 0 : Math.pow((Math.cos(distance / reach * Math.PI) + 1) / 2, 1.3)
     width: Theme.dockIcon + (Theme.dockMagnified - Theme.dockIcon) * zoom
     height: width
-    Behavior on width { NumberAnimation { duration: 90; easing.type: Easing.OutQuad } }
+    Behavior on width { NumberAnimation { duration: 80; easing.type: Easing.OutCubic } }
 
     property real bounce: 0
     SequentialAnimation {

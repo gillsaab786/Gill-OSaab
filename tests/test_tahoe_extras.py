@@ -126,3 +126,21 @@ class Weather(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GroupShortcut(unittest.TestCase):
+    def test_one_shortcut_opens_several_things(self):
+        import gosaab_hotkeys as hk
+        a = "group:app:itunes|app:sideloadly|open:/home/gill/Desktop/iPhone apps|open:https://appleid.apple.com"
+        self.assertTrue(hk.valid_action(a))
+        self.assertEqual(hk.group_items(a)[2], ("open", "/home/gill/Desktop/iPhone apps"))
+        self.assertEqual(hk.describe_action(a), "Open itunes, sideloadly, iPhone apps, https://appleid.apple.com")
+        for bad in ("group:", "group:app:x;rm", "group:open:relative/path", "group:run:sh",
+                    "group:open:javascript:alert(1)", "group:" + "|".join(["app:a"] * 13)):
+            self.assertFalse(hk.valid_action(bad), bad)
+        conf = hk.parse_config(f"META+I = {a}\n")
+        self.assertEqual(conf, {"META+I": a})
+
+    def test_translation_layers_update_together(self):
+        uc = load("usr/bin/gosaab-update-component")
+        self.assertEqual(uc.GROUPS["translation"], ["android", "proton", "wine", "containers"])

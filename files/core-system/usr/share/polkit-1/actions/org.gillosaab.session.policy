@@ -2,7 +2,7 @@
 <!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
  "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
 <policyconfig>
-  <vendor>Gill-OSaab</vendor>
+  <vendor>Gill(OS)</vendor>
   <action id="org.gillosaab.session-select">
     <description>Switch between the desktop and Game Mode</description>
     <message>Switching session</message>

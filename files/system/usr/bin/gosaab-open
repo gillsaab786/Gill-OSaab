@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Gill-OSaab universal app opener.
+"""Gill(OS) universal app opener.
 
 Double-click (or run `gosaab-open FILE`) on any of these and it installs/runs:
   .exe .msi            Windows  -> Wine, one sandboxed prefix per app
@@ -266,7 +266,7 @@ def install_appimage(src, target):
     desktop.write_text(
         "[Desktop Entry]\nType=Application\n"
         f"Name={target.stem}\nExec=\"{target}\" %U\nIcon=application-x-executable\n"
-        "Categories=Utility;\nComment=Installed by Gill-OSaab\n"
+        "Categories=Utility;\nComment=Installed by Gill(OS)\n"
     )
 
 
@@ -382,7 +382,7 @@ def main(argv):
             continue
         kind = detect(f)
         if kind == "unknown":
-            notify("Unknown app type", f"Gill-OSaab doesn't know how to open {Path(f).name}.", "critical")
+            notify("Unknown app type", f"Gill(OS) doesn't know how to open {Path(f).name}.", "critical")
             status = 1
             continue
         steps = plan(f, kind, conf)

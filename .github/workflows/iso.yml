@@ -1,5 +1,5 @@
 name: build-core-usb
-# Makes a bootable USB image of Gill-OSaab Core (bootc-image-builder raw disk): write it to a
+# Makes a bootable USB image of Gill(OS) Core (bootc-image-builder raw disk): write it to a
 # USB stick (32 GB+) and boot from it to try everything without touching the internal drive.
 # (The Anaconda ISO needs Fedora 45 installer definitions that bootc-image-builder lacks.)
 # Published on the "core-usb" release, split in parts because GitHub limits files to 2 GB.
@@ -68,5 +68,5 @@ jobs:
         run: |
           gh release delete core-usb --yes --cleanup-tag -R "${{ github.repository }}" || true
           gh release create core-usb release/* -R "${{ github.repository }}" --prerelease \
-            --title "Gill-OSaab Core bootable USB (test build)" \
-            --notes "Bootable USB image of Gill-OSaab Core (AMD/Intel; the installer picks the Nvidia edition by itself on RTX/GTX 16 PCs). Windows: download Get-GillOSaab-USB.ps1, right-click > Run with PowerShell: it downloads or joins the parts, checks the SHA-256 and opens balenaEtcher. Linux/macOS: cat gill-osaab-core-usb.img.xz.part-* > gill-osaab-core-usb.img.xz, check SHA256SUMS, flash with balenaEtcher. Use a 32 GB+ USB stick. Boot from it (ROG Ally/GPD: hold Volume Down + Power), sign in as gill / gill, then open Install Gill-OSaab in Launchpad to install on the PC, encrypted."
+            --title "Gill(OS) Core bootable USB (test build)" \
+            --notes "Bootable USB image of Gill(OS) Core (AMD/Intel; the installer picks the Nvidia edition by itself on RTX/GTX 16 PCs). Windows: download Get-GillOSaab-USB.ps1, right-click > Run with PowerShell: it downloads or joins the parts, checks the SHA-256 and opens balenaEtcher. Linux/macOS: cat gill-osaab-core-usb.img.xz.part-* > gill-osaab-core-usb.img.xz, check SHA256SUMS, flash with balenaEtcher. Use a 32 GB+ USB stick. Boot from it (ROG Ally/GPD: hold Volume Down + Power), sign in as gill / gill, then open Install Gill(OS) in Launchpad to install on the PC, encrypted."

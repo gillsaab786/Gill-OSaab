@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Install Gill-OSaab on this PC — the graphical installer (runs gosaab-install underneath)."""
+"""Install Gill(OS) on this PC — the graphical installer (runs gosaab-install underneath)."""
 import json
 import os
 import subprocess
@@ -60,7 +60,7 @@ class Page(QWidget):
 class Installer(QStackedWidget):
     def __init__(self, disks=None):
         super().__init__()
-        self.setWindowTitle("Install Gill-OSaab")
+        self.setWindowTitle("Install Gill(OS)")
         self.setStyleSheet(STYLE)
         self.disks = [d for d in (disks if disks is not None else run_json(["gosaab-install", "--list"], []))
                       if d.get("big_enough")]
@@ -80,8 +80,8 @@ class Installer(QStackedWidget):
 
     # ---------------------------------------------------------------- pages
     def welcome(self):
-        p = Page("Install Gill-OSaab on this PC",
-                 "Copies Gill-OSaab from this USB stick to the PC's own drive, so it starts faster and keeps your "
+        p = Page("Install Gill(OS) on this PC",
+                 "Copies Gill(OS) from this USB stick to the PC's own drive, so it starts faster and keeps your "
                  "files. Your account comes along. Takes about 10–20 minutes with internet.")
         kb = self.nav("Keyboard", self.toggle_keyboard, primary=False)
         p.buttons(kb, self.nav("Continue", 1))
@@ -172,7 +172,7 @@ class Installer(QStackedWidget):
         return p
 
     def progress_page(self):
-        p = Page("Installing…", "Downloading Gill-OSaab and writing it to the drive. Keep the PC plugged in.")
+        p = Page("Installing…", "Downloading Gill(OS) and writing it to the drive. Keep the PC plugged in.")
         self.bar = QProgressBar()
         self.bar.setRange(0, 0)  # busy until done
         p.lay.addWidget(self.bar)

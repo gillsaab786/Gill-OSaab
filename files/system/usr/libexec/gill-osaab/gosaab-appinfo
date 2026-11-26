@@ -1,0 +1,454 @@
+#!/usr/bin/python3
+"""App Info, like Android's: what an app is, and force close / clear cache / clear data / uninstall.
+
+  gosaab-appinfo info ID           JSON: name, kind (Android/Windows/Linux), source, version, running, sizes
+  gosaab-appinfo force-close ID
+  gosaab-appinfo clear-cache ID
+  gosaab-appinfo clear-data ID
+  gosaab-appinfo uninstall ID
+
+ID is the app's desktop-entry id (e.g. org.videolan.VLC, waydroid.com.whatsapp). Nothing from the
+app's .desktop file is ever run; only fixed commands with the app's id/package as an argument.
+Deleting only happens inside the app's own folders (checked after resolving symlinks).
+"""
+import configparser
+import json
+import os
+import re
+import shutil
+import signal
+import subprocess
+import sys
+from pathlib import Path
+
+HOME = Path.home()
+DATA = Path(os.environ.get("XDG_DATA_HOME", HOME / ".local/share"))
+CACHE = Path(os.environ.get("XDG_CACHE_HOME", HOME / ".cache"))
+CONFIG = Path(os.environ.get("XDG_CONFIG_HOME", HOME / ".config"))
+WINE_PREFIXES = DATA / "gill-osaab" / "wine"
+APPIMAGES = HOME / "Applications"
+ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,200}")
+PKG_RE = re.compile(r"[A-Za-z0-9_]+(\.[A-Za-z0-9_]+)+")
+# never treated as one app's own cache/data, even if an app happens to share the name
+PROTECTED = {"applications", "icons", "flatpak", "containers", "gill-osaab", "trash", "keyrings", "steam",
+             "waydroid", "wine", "systemd", "pulse", "pipewire", "dconf", "fontconfig", "mesa_shader_cache",
+             "nvidia", "gnome-shell", "kde", "plasma", "mime", "recently-used.xbel", "user-dirs.dirs", "autostart",
+             "gtk-3.0", "gtk-4.0", "qt5ct", "qt6ct", "xdg-desktop-portal", "distrobox", "bottles", "lutris", ""}
+
+
+def out(obj):
+    print(json.dumps(obj))
+    return 0 if obj.get("ok", True) else 1
+
+
+def run(cmd, timeout=30):
+    if not shutil.which(cmd[0]):
+        return 127, ""
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
+        return p.returncode, (p.stdout or "") + (p.stderr or "")
+    except (OSError, subprocess.SubprocessError) as e:
+        return 1, str(e)
+
+
+# ------------------------------------------------------------------ finding the app
+def app_dirs():
+    dirs = [DATA / "applications", DATA / "flatpak/exports/share/applications"]
+    for d in os.environ.get("XDG_DATA_DIRS", "/usr/local/share:/usr/share").split(":"):
+        if d:
+            dirs.append(Path(d) / "applications")
+    dirs += [Path("/var/lib/flatpak/exports/share/applications"), Path("/usr/share/applications")]
+    seen, outl = set(), []
+    for d in dirs:
+        if d not in seen:
+            seen.add(d)
+            outl.append(d)
+    return outl
+
+
+def find_desktop(app_id):
+    """The .desktop file for a desktop-entry id (ids map sub-folders to '-', as in the spec)."""
+    for d in app_dirs():
+        f = d / f"{app_id}.desktop"
+        if f.is_file():
+            return f
+        if d.is_dir() and "-" in app_id:  # e.g. wine-Programs-iTunes -> wine/Programs/iTunes.desktop
+            for f in d.rglob("*.desktop"):
+                rel = f.relative_to(d).with_suffix("")
+                if "-".join(rel.parts) == app_id:
+                    return f
+    return None
+
+
+def read_entry(path):
+    cp = configparser.RawConfigParser(strict=False, interpolation=None)
+    cp.optionxform = str
+    try:
+        cp.read_string(path.read_text(errors="replace"))
+        return dict(cp.items("Desktop Entry"))
+    except (configparser.Error, OSError):
+        return {}
+
+
+def classify(app_id, path, entry):
+    """(kind, source, details) without running anything from the entry."""
+    ex = entry.get("Exec", "")
+    if entry.get("X-Flatpak"):
+        return "Linux", "flatpak", {"ref": entry["X-Flatpak"]}
+    m = re.search(r"waydroid app launch ([\w.]+)", ex)
+    if app_id.startswith("waydroid.") or m:
+        pkg = m.group(1) if m else app_id[len("waydroid."):]
+        if PKG_RE.fullmatch(pkg):
+            return "Android", "waydroid", {"package": pkg}
+    m = re.search(r'(?:WINEPREFIX="([^"]+)"|--wine-run "([^"]+)")', ex)
+    if m or re.search(r"\bwine(64)?\b|\.exe\b", ex, re.I) or "Wine" in entry.get("Categories", ""):
+        prefix = m and (m.group(1) or m.group(2))
+        return "Windows", "wine", {"prefix": prefix or str(HOME / ".wine"), "exec": ex}
+    if "distrobox-enter" in ex or "distrobox" in entry.get("X-Distrobox", "").lower():
+        box = re.search(r"-n\s+([\w.-]+)", ex)
+        return "Linux", "container", {"box": box.group(1) if box else ""}
+    m = re.search(r"(/\S+\.AppImage)", ex, re.I)
+    if m:
+        return "Linux", "appimage", {"file": m.group(1).strip('"')}
+    if str(path).startswith(str(DATA)):
+        return "Linux", "user", {}
+    return "Linux", "system", {}
+
+
+def exec_binary(entry):
+    ex = entry.get("Exec", "").strip()
+    try:
+        import shlex
+        parts = [p for p in shlex.split(ex) if not p.startswith("%")]
+    except ValueError:
+        parts = ex.split()
+    while parts and (parts[0] == "env" or "=" in parts[0]):
+        parts.pop(0)
+    return Path(parts[0]).name if parts else ""
+
+
+# ------------------------------------------------------------------ versions
+def pe_version(exe):
+    """ProductVersion from a Windows .exe's version resource (read only)."""
+    try:
+        data = Path(exe).read_bytes()[:64 * 1024 * 1024]
+    except OSError:
+        return ""
+    key = "ProductVersion".encode("utf-16-le")
+    i = data.find(key)
+    if i < 0:
+        key = "FileVersion".encode("utf-16-le")
+        i = data.find(key)
+    if i < 0:
+        return ""
+    j = i + len(key)
+    while j < len(data) - 1 and data[j:j + 2] == b"\0\0":
+        j += 2
+    end = data.find(b"\0\0", j)
+    while end > 0 and (end - j) % 2:
+        end = data.find(b"\0\0", end + 1)
+    try:
+        v = data[j:end].decode("utf-16-le").strip()
+    except UnicodeDecodeError:
+        return ""
+    return v if re.fullmatch(r"[\w .,()-]{1,40}", v) else ""
+
+
+def windows_exe(details):
+    """The .exe a Windows app's menu entry starts, mapped into its prefix."""
+    ex, prefix = details.get("exec", ""), details.get("prefix", "")
+    m = re.search(r'([A-Za-z]):\\\\?(.+?\.exe)', ex, re.I)
+    if not m or not prefix:
+        return ""
+    rel = m.group(2).replace("\\\\", "/").replace("\\", "/")
+    p = Path(prefix) / f"drive_{m.group(1).lower()}" / rel
+    return str(p) if p.is_file() else ""
+
+
+def android_adb():
+    """adb serial for the running Android (Waydroid) system, connecting if needed."""
+    rc, status = run(["waydroid", "status"], 10)
+    ip = re.search(r"IP address:\s*([\d.]+)", status)
+    if rc or not ip or "RUNNING" not in status.upper():
+        return ""
+    serial = f"{ip.group(1)}:5555"
+    run(["adb", "connect", serial], 10)
+    return serial
+
+
+def adb(serial, *args):
+    return run(["adb", "-s", serial, "shell", *args], 30)
+
+
+def version_of(source, details, path):
+    if source == "flatpak":
+        _, txt = run(["flatpak", "info", details["ref"]])
+        m = re.search(r"^\s*Version:\s*(\S.*)$", txt, re.M)
+        return m.group(1).strip() if m else ""
+    if source == "system":
+        rc, txt = run(["rpm", "-qf", "--qf", "%{VERSION}", str(path)])
+        return txt.strip() if rc == 0 and "\n" not in txt.strip() else ""
+    if source == "waydroid":
+        serial = android_adb()
+        if serial:
+            _, txt = adb(serial, "dumpsys", "package", details["package"])
+            m = re.search(r"versionName=(\S+)", txt)
+            return m.group(1) if m else ""
+        return ""
+    if source == "wine":
+        exe = windows_exe(details)
+        return pe_version(exe) if exe else ""
+    if source == "appimage":
+        m = re.search(r"[-_]v?(\d+(?:\.\d+)+)", Path(details["file"]).name)
+        return m.group(1) if m else ""
+    return ""
+
+
+# ------------------------------------------------------------------ running processes
+def my_pids():
+    uid = os.getuid()
+    for d in Path("/proc").iterdir():
+        if d.name.isdigit():
+            try:
+                if d.stat().st_uid == uid and int(d.name) != os.getpid():
+                    yield int(d.name), d
+            except OSError:
+                continue
+
+
+def pids_for(source, details, entry):
+    found = []
+    if source == "wine":
+        want = f"WINEPREFIX={details.get('prefix')}".encode()
+        for pid, d in my_pids():
+            try:
+                if want in (d / "environ").read_bytes().split(b"\0"):
+                    found.append(pid)
+            except OSError:
+                continue
+        return found
+    binary = exec_binary(entry)
+    if not binary or binary in ("sh", "bash", "env", "flatpak", "waydroid", "gio", "xdg-open", "python3"):
+        return found
+    for pid, d in my_pids():
+        try:
+            argv0 = (d / "cmdline").read_bytes().split(b"\0")[0].decode(errors="replace")
+            exe = os.readlink(d / "exe")
+        except OSError:
+            continue
+        if Path(argv0).name == binary or Path(exe).name == binary:
+            found.append(pid)
+    return found
+
+
+def is_running(source, details, entry):
+    if source == "flatpak":
+        _, txt = run(["flatpak", "ps", "--columns=application"])
+        return details["ref"] in txt.split()
+    if source == "waydroid":
+        serial = android_adb()
+        return bool(serial) and adb(serial, "pidof", details["package"])[1].strip().isdigit()
+    return bool(pids_for(source, details, entry))
+
+
+# ------------------------------------------------------------------ the app's own folders
+def inside(path, root):
+    try:
+        return Path(os.path.realpath(path)).is_relative_to(os.path.realpath(root))
+    except (OSError, ValueError):
+        return False
+
+
+def name_candidates(app_id, entry):
+    names = {app_id, app_id.split(".")[-1], exec_binary(entry), entry.get("StartupWMClass", "")}
+    names |= {n.lower() for n in names}
+    return {n for n in names if n and n.lower() not in PROTECTED and "/" not in n and not n.startswith(".")}
+
+
+def folders(source, details, app_id, entry):
+    """(cache folders, data folders) that belong to this app only."""
+    if source == "flatpak":
+        base = HOME / ".var/app" / details["ref"]
+        return [base / "cache"], [base]
+    if source == "wine":
+        prefix = Path(details["prefix"])
+        if not inside(prefix, WINE_PREFIXES):  # a shared ~/.wine: leave the whole thing alone
+            return [], []
+        users = list((prefix / "drive_c/users").glob("*"))
+        cache = [u / "AppData/Local/Temp" for u in users] + \
+                [u / "AppData/Local/Microsoft/Windows/INetCache" for u in users]
+        data = [u / "AppData/Roaming" for u in users] + [u / "AppData/Local" for u in users]
+        return cache, data
+    if source in ("system", "user", "appimage", "container"):
+        names = name_candidates(app_id, entry)
+        cache = [CACHE / n for n in names]
+        data = [CONFIG / n for n in names] + [DATA / n for n in names]
+        return cache, data
+    return [], []
+
+
+def size_of(paths):
+    total = 0
+    for p in paths:
+        if not p.exists() or p.is_symlink():
+            continue
+        if p.is_file():
+            total += p.stat().st_size
+            continue
+        for root, _dirs, files in os.walk(p):
+            for f in files:
+                try:
+                    total += os.lstat(os.path.join(root, f)).st_size
+                except OSError:
+                    pass
+    return total
+
+
+def empty(paths, roots):
+    """Delete what is inside each folder (the folder itself stays), only within the allowed roots."""
+    done = 0
+    for p in paths:
+        if not p.exists() or p.is_symlink() or not any(inside(p, r) for r in roots):
+            continue
+        if any(Path(os.path.realpath(p)) == Path(os.path.realpath(r)) for r in roots):
+            continue  # never a root itself (e.g. all of ~/.config)
+        for child in p.iterdir():
+            if child.is_dir() and not child.is_symlink():
+                shutil.rmtree(child, ignore_errors=True)
+            else:
+                try:
+                    child.unlink()
+                except OSError:
+                    pass
+        done += 1
+    return done
+
+
+def roots_for(source, details):
+    if source == "flatpak":
+        return [HOME / ".var/app"]
+    if source == "wine":
+        return [Path(details["prefix"])] if inside(details["prefix"], WINE_PREFIXES) else []
+    return [CACHE, CONFIG, DATA]
+
+
+# ------------------------------------------------------------------ commands
+def load(app_id):
+    if not ID_RE.fullmatch(app_id or ""):
+        return None
+    path = find_desktop(app_id)
+    if not path:
+        return None
+    entry = read_entry(path)
+    kind, source, details = classify(app_id, path, entry)
+    return {"id": app_id, "path": path, "entry": entry, "kind": kind, "source": source, "details": details}
+
+
+SOURCE_LABEL = {"flatpak": "Flatpak app", "waydroid": "Android app (runs in Android)",
+                "wine": "Windows app (runs through Wine)", "container": "Linux app in a container",
+                "appimage": "AppImage", "user": "Added by you", "system": "Part of Gill(OS)"}
+
+
+def info(app):
+    s, d, e = app["source"], app["details"], app["entry"]
+    cache, data = folders(s, d, app["id"], e)
+    can_clear = s != "waydroid" or bool(shutil.which("adb"))
+    return {"ok": True, "id": app["id"], "name": e.get("Name", app["id"]), "kind": app["kind"], "source": s,
+            "sourceLabel": SOURCE_LABEL.get(s, s), "version": version_of(s, d, app["path"]) or "",
+            "package": d.get("ref") or d.get("package") or "", "running": is_running(s, d, e),
+            "cacheBytes": size_of(cache), "dataBytes": size_of(data),
+            "canClear": can_clear, "canUninstall": s != "system",
+            "uninstallNote": "" if s != "system" else "Built into Gill(OS); hide it instead."}
+
+
+def force_close(app):
+    s, d, e = app["source"], app["details"], app["entry"]
+    if s == "flatpak":
+        rc, _ = run(["flatpak", "kill", d["ref"]])
+        return rc == 0
+    if s == "waydroid":
+        serial = android_adb()
+        return bool(serial) and adb(serial, "am", "force-stop", d["package"])[0] == 0
+    pids = pids_for(s, d, e)
+    for pid in pids:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            pass
+    return bool(pids)
+
+
+def clear(app, what):
+    s, d = app["source"], app["details"]
+    if s == "waydroid":
+        serial = android_adb()
+        if not serial:
+            return False, "Start Android first (open any Android app), then try again."
+        if what == "cache":
+            rc, txt = adb(serial, "pm", "clear", "--cache-only", d["package"])
+            if rc or "Success" not in txt:  # older Android: frees cached files of all Android apps
+                rc, txt = adb(serial, "pm", "trim-caches", "999G")
+            return rc == 0, ""
+        rc, txt = adb(serial, "pm", "clear", d["package"])
+        return rc == 0 and "Success" in txt, ""
+    force_close(app)
+    cache, data = folders(s, d, app["id"], app["entry"])
+    n = empty(cache if what == "cache" else cache + data, roots_for(s, d))
+    return True, "" if n else "Nothing to clear."
+
+
+def uninstall(app):
+    s, d, path = app["source"], app["details"], app["path"]
+    force_close(app)
+    if s == "system":
+        return False, "Built into Gill(OS); hide it instead."
+    if s == "flatpak":
+        rc, txt = run(["flatpak", "uninstall", "-y", "--noninteractive", d["ref"]], 300)
+        return rc == 0, txt.strip()[-200:]
+    if s == "waydroid":
+        rc, txt = run(["waydroid", "app", "remove", d["package"]], 120)
+        return rc == 0, txt.strip()[-200:]
+    if s == "wine":
+        prefix = Path(d["prefix"])
+        if not inside(prefix, WINE_PREFIXES) or Path(os.path.realpath(prefix)) == Path(os.path.realpath(WINE_PREFIXES)):
+            return False, "This Windows app shares a setup with others; remove it with its own uninstaller."
+        for f in (DATA / "applications").rglob("*.desktop"):
+            try:
+                if f'"{prefix}"' in f.read_text(errors="replace"):
+                    f.unlink()
+            except OSError:
+                pass
+        shutil.rmtree(prefix, ignore_errors=True)
+        return True, ""
+    if s == "appimage":
+        f = Path(d["file"])
+        if inside(f, APPIMAGES) and f.is_file():
+            f.unlink()
+    if inside(path, DATA / "applications"):
+        path.unlink()
+        return True, ""
+    return False, "Couldn't remove this app's shortcut."
+
+
+def main(argv):
+    if len(argv) != 2 or argv[0] not in ("info", "force-close", "clear-cache", "clear-data", "uninstall"):
+        print(__doc__.strip(), file=sys.stderr)
+        return 2
+    app = load(argv[1])
+    if not app:
+        return out({"ok": False, "message": "App not found."})
+    cmd = argv[0]
+    if cmd == "info":
+        return out(info(app))
+    if cmd == "force-close":
+        ok = force_close(app)
+        return out({"ok": ok, "message": "" if ok else "It wasn't running."})
+    if cmd in ("clear-cache", "clear-data"):
+        ok, msg = clear(app, "cache" if cmd == "clear-cache" else "data")
+        return out({"ok": ok, "message": msg})
+    ok, msg = uninstall(app)
+    return out({"ok": ok, "message": msg})
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

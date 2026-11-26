@@ -1,6 +1,6 @@
 import QtQuick
 
-// Gill-OSaab login screen: wallpaper, big clock, pick your account, type your password.
+// Gill(OS) login screen: wallpaper, big clock, pick your account, type your password.
 // Uses SDDM's objects: sddm (login/power), userModel, sessionModel, config.
 Rectangle {
     id: root

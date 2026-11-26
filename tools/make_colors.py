@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Writes the Gill-OSaab KDE colour schemes (dark + light) into a folder."""
+"""Writes the Gill(OS) KDE colour schemes (dark + light) into a folder."""
 import sys
 from pathlib import Path
 
-ACCENT = (31, 182, 201)  # Gill-OSaab teal
+ACCENT = (31, 182, 201)  # Gill(OS) teal
 
 
 def rgb(c):
@@ -12,13 +12,13 @@ def rgb(c):
 
 SCHEMES = {
     "GillOSaabDark": dict(
-        name="Gill-OSaab Dark", window=(30, 30, 33), view=(22, 22, 25), alt=(28, 28, 32), button=(48, 48, 53),
+        name="Gill(OS) Dark", window=(30, 30, 33), view=(22, 22, 25), alt=(28, 28, 32), button=(48, 48, 53),
         header=(38, 38, 42), tooltip=(44, 44, 49), fg=(236, 236, 241), inactive=(146, 146, 156),
         complementary=(18, 18, 21), link=(90, 200, 250), visited=(176, 140, 255),
         negative=(255, 99, 92), neutral=(255, 196, 64), positive=(52, 211, 120),
     ),
     "GillOSaabLight": dict(
-        name="Gill-OSaab Light", window=(242, 242, 246), view=(255, 255, 255), alt=(246, 246, 250),
+        name="Gill(OS) Light", window=(242, 242, 246), view=(255, 255, 255), alt=(246, 246, 250),
         button=(255, 255, 255), header=(234, 234, 239), tooltip=(250, 250, 252), fg=(28, 28, 32),
         inactive=(110, 110, 120), complementary=(30, 30, 33), link=(0, 122, 204), visited=(120, 80, 210),
         negative=(215, 45, 40), neutral=(196, 130, 0), positive=(30, 150, 80),

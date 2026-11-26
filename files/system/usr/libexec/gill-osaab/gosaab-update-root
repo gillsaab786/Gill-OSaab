@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Admin half of Gill-OSaab updates (run through pkexec by gosaab-update-component).
+"""Admin half of Gill(OS) updates (run through pkexec by gosaab-update-component).
 
   gosaab-update-root <os|firmware|bios|android|decky|nvidia|rollback>
   gosaab-update-root firmware-device <fwupd device id>   one part's firmware only

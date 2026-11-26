@@ -1,12 +1,12 @@
 /*
- * gosaab-wm: the Gill-OSaab window manager (Wayland compositor).
+ * gosaab-wm: the Gill(OS) window manager (Wayland compositor).
  *
  * Built on wlroots 0.20 + scenefx 0.5 (blur, rounded corners, shadows).
- * Started from scenefx's tinywl example (MIT) and grown into Gill-OSaab's own:
+ * Started from scenefx's tinywl example (MIT) and grown into Gill(OS)'s own:
  *   - macOS-style window chrome: title bars with traffic-light buttons, centred title,
  *     rounded corners, soft drop shadows, background blur, inactive windows dimmed
  *   - macOS/iOS-style motion: windows spring open and fade/shrink closed
- *   - layer-shell for the Gill-OSaab bar, dock and wallpaper
+ *   - layer-shell for the Gill(OS) bar, dock and wallpaper
  *   - new windows centred, zoom (maximise), minimise, fullscreen, Alt/Super+Tab
  *   - screencopy + xdg-output so screenshots (and tests) work
  *
@@ -310,7 +310,7 @@ struct gs_layer {
 	struct gs_server *server;
 	struct wlr_layer_surface_v1 *layer_surface;
 	struct wlr_scene_layer_surface_v1 *scene;
-	struct wlr_scene_blur *blur; /* frosted glass behind Gill-OSaab's own bar/dock/panels */
+	struct wlr_scene_blur *blur; /* frosted glass behind Gill(OS)'s own bar/dock/panels */
 	struct wl_listener map, unmap, commit, destroy;
 	bool mapped;
 };
@@ -1153,7 +1153,7 @@ static void find_surface_buffer(struct wlr_scene_buffer *buffer, int sx, int sy,
 	}
 }
 
-/* Gill-OSaab's own panels (namespace "gosaab-*") get frosted glass behind them. The blur
+/* Gill(OS)'s own panels (namespace "gosaab-*") get frosted glass behind them. The blur
  * follows the panel's own shape (its transparent pixels mask it), so rounded docks work.
  * An optional ":r<radius>" suffix in the namespace rounds the blur's corners too. */
 static void layer_update_blur(struct gs_layer *l) {
@@ -1812,7 +1812,7 @@ static struct gs_toplevel *toplevel_from_xdg(struct wlr_xdg_toplevel *xdg_toplev
 	return xdg_tree->node.parent->node.data;
 }
 
-/* Gill-OSaab draws the title bar (server-side) unless GOSAAB_CSD is set. The mode may only
+/* Gill(OS) draws the title bar (server-side) unless GOSAAB_CSD is set. The mode may only
  * be sent once the toplevel has made its initial commit. */
 static void decoration_apply(struct gs_decoration *d) {
 	if (!d->decoration->toplevel->base->initialized) {
@@ -2080,7 +2080,7 @@ static void close_toplevel(struct gs_toplevel *t) {
 	}
 }
 
-/* Ask the Gill-OSaab shell (Quickshell) to do something, e.g. "spotlight toggle" */
+/* Ask the Gill(OS) shell (Quickshell) to do something, e.g. "spotlight toggle" */
 static void shell_ipc(const char *call) {
 	const char *ipc = getenv("GOSAAB_SHELL_IPC");
 	char cmd[512];
@@ -2304,7 +2304,7 @@ static void server_new_virtual_keyboard(struct wl_listener *listener, void *data
 		(server->has_touch ? WL_SEAT_CAPABILITY_TOUCH : 0));
 }
 
-/* Security: apps in a sandbox (Gill-OSaab's app sandbox, Flatpak) run in their own process
+/* Security: apps in a sandbox (Gill(OS)'s app sandbox, Flatpak) run in their own process
  * namespace. They must not see the protocols that read the screen or clipboard, type keys into
  * other apps, draw over everything (fake lock screens) or change displays. The shell, portals
  * and the on-screen keyboard run outside any sandbox and keep them. */
@@ -3037,7 +3037,7 @@ static int test_click_tick(void *data) {
 }
 
 /* X11 apps (Steam, Wine, older games) run through xwayland-satellite, which turns each X11
- * window into a normal Wayland window, so they get Gill-OSaab title bars and animations too. */
+ * window into a normal Wayland window, so they get Gill(OS) title bars and animations too. */
 static bool in_path(const char *program) {
 	const char *path = getenv("PATH");
 	if (path == NULL) {

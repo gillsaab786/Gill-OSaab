@@ -1,5 +1,5 @@
 [Unit]
-Description=Gill-OSaab problem check (after sign-in and hourly)
+Description=Gill(OS) problem check (after sign-in and hourly)
 
 [Timer]
 OnStartupSec=3min

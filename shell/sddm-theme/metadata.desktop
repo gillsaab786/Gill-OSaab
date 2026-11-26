@@ -1,6 +1,6 @@
 [SddmGreeterTheme]
-Name=Gill-OSaab
-Description=Gill-OSaab login screen (macOS-style)
+Name=Gill(OS)
+Description=Gill(OS) login screen (macOS-style)
 Type=sddm-theme
 Version=1.0
 Website=https://github.com/gillsaab786/Gill-OSaab

@@ -1,5 +1,5 @@
 [Unit]
-Description=Gill-OSaab: record errors, crashes and missing drivers for Settings > Problems
+Description=Gill(OS): record errors, crashes and missing drivers for Settings > Problems
 
 [Service]
 Type=oneshot

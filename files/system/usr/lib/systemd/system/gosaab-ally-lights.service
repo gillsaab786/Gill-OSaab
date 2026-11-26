@@ -1,5 +1,5 @@
 [Unit]
-Description=Gill-OSaab ROG Ally stick lights
+Description=Gill(OS) ROG Ally stick lights
 ConditionKernelCommandLine=!gosaab.nolights
 After=systemd-udevd.service
 

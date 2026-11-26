@@ -1,5 +1,5 @@
 [Unit]
-Description=Gill-OSaab battery charge limit (protects the battery on handhelds and laptops)
+Description=Gill(OS) battery charge limit (protects the battery on handhelds and laptops)
 
 [Service]
 Type=oneshot

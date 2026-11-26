@@ -1,4 +1,4 @@
-"""Hardware detection for Gill-OSaab: model, BIOS, CPU, GPUs, network chips and their drivers."""
+"""Hardware detection for Gill(OS): model, BIOS, CPU, GPUs, network chips and their drivers."""
 import shutil
 import subprocess
 from pathlib import Path

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds and installs the Gill-OSaab desktop (gosaab-wm + shell) into the image.
+# Builds and installs the Gill(OS) desktop (gosaab-wm + shell) into the image.
 # Usage: install.sh <path to the shell/ folder>   (run as root during the image build)
 set -euo pipefail
 SRC=${1:-$(dirname "$(readlink -f "$0")")}
@@ -39,4 +39,4 @@ if [ -d "$SRC/sddm-theme" ]; then
   cp -rL "$SRC/sddm-theme/." /usr/share/sddm/themes/gill-osaab/  # -L: the touch keyboard is shared with the lock screen
 fi
 gosaab-wm -v
-echo "Gill-OSaab desktop installed"
+echo "Gill(OS) desktop installed"

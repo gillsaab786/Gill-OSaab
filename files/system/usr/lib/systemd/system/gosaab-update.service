@@ -1,5 +1,5 @@
 [Unit]
-Description=Gill-OSaab updates (respects /etc/gill-osaab/updates.conf)
+Description=Gill(OS) updates (respects /etc/gill-osaab/updates.conf)
 Wants=network-online.target
 After=network-online.target
 

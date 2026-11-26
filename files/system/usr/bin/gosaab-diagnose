@@ -171,7 +171,7 @@ def app_log_problems(state_dir):
                     ts = int(time.mktime(time.strptime(line[:19], "%Y-%m-%d %H:%M:%S")))
                 except ValueError:
                     continue
-                out.append({"kind": "app-error", "title": f"Gill-OSaab {log.stem}", "detail": line[20:][:400],
+                out.append({"kind": "app-error", "title": f"Gill(OS) {log.stem}", "detail": line[20:][:400],
                             "source": log.stem, "time": ts})
     return out
 
@@ -276,7 +276,7 @@ def system_info():
         hw = gosaab_hw.summary()
     except Exception:
         hw = {"model": {}, "cpu": "", "gpus": []}
-    lines = [f"Gill-OSaab {info.get('gill_osaab', '?')} · image {info.get('image', '?')} · OS {info.get('os', '?')}",
+    lines = [f"Gill(OS) {info.get('gill_osaab', '?')} · image {info.get('image', '?')} · OS {info.get('os', '?')}",
              f"Kernel {platform.release()} · Mesa {info.get('mesa', '?')} · Wine {info.get('wine', '?')}",
              f"Device {hw.get('model', {}).get('name', '?')} · BIOS {hw.get('model', {}).get('bios_version', '?')}",
              f"CPU {hw.get('cpu', '?')}"]
@@ -288,7 +288,7 @@ def system_info():
 
 def report(recorded):
     problems = sorted_problems(recorded)
-    out = ["Gill-OSaab problem report", "=" * 25, *system_info(), ""]
+    out = ["Gill(OS) problem report", "=" * 25, *system_info(), ""]
     if not problems:
         out.append("No problems recorded.")
     for i, p in enumerate(problems, 1):

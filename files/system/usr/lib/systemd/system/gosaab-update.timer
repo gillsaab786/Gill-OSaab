@@ -1,5 +1,5 @@
 [Unit]
-Description=Daily Gill-OSaab update check
+Description=Daily Gill(OS) update check
 
 [Timer]
 OnBootSec=15min

@@ -5,6 +5,8 @@ case "${1:-desktop}" in
   *) target=gill-osaab ;;
 esac
 pkexec /usr/libexec/gill-osaab/gosaab-session-select-root "$USER" "$target" || exit 1
+# tell the desktop it is arriving from Game Mode (it plays its welcome-back animation)
+mkdir -p "$HOME/.cache/gill-osaab" && echo "$target" > "$HOME/.cache/gill-osaab/arrive"
 if [ "$target" = gill-osaab ]; then
   steam -shutdown >/dev/null 2>&1 &    # leaving Game Mode: Steam closes, login screen relogs into the desktop
 else

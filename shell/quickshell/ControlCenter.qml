@@ -85,7 +85,7 @@ Popup {
     Rectangle {
         width: parent.width; height: 44; radius: 22
         color: settingsMouse.containsMouse ? Theme.tileHover : Theme.tile
-        Text { anchors.centerIn: parent; text: "Gill-OSaab Settings…"; color: Theme.text; font { family: Theme.font; pixelSize: 13 } }
+        Text { anchors.centerIn: parent; text: "Gill(OS) Settings…"; color: Theme.text; font { family: Theme.font; pixelSize: 13 } }
         MouseArea { id: settingsMouse; anchors.fill: parent; hoverEnabled: true
             onClicked: { ShellState.closeAll(); ShellState.run("gosaab-settings") } }
     }

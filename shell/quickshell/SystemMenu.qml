@@ -1,7 +1,7 @@
 import QtQuick
 import Quickshell
 
-// The menu under the Gill-OSaab logo (like the Apple menu).
+// The menu under the Gill(OS) logo (like the Apple menu).
 Popup {
     id: menu
     open: ShellState.systemMenu
@@ -22,7 +22,7 @@ Popup {
     }
     component Separator: Rectangle { width: parent ? parent.width : 0; height: 1; color: Theme.panelBorder }
 
-    Item_ { label: "About Gill-OSaab"; command: "gosaab-settings about" }
+    Item_ { label: "About Gill(OS)"; command: "gosaab-settings about" }
     Separator {}
     Item_ { label: "System Settings…"; command: "gosaab-settings" }
     Item_ { label: "Software Update…"; command: "gosaab-updates" }

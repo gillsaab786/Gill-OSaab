@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Gill-OSaab Settings: every Gill-OSaab switch and update in one place."""
+"""Gill(OS) Settings: every Gill(OS) switch and update in one place."""
 import json
 import os
 import shutil
@@ -116,7 +116,7 @@ class Backend:
         if on:
             self.LSFG_CONF.parent.mkdir(parents=True, exist_ok=True)
             self.LSFG_CONF.write_text(
-                "# Gill-OSaab frame generation. Games opt in with the Steam launch option:\n"
+                "# Gill(OS) frame generation. Games opt in with the Steam launch option:\n"
                 "#   LSFG_PROCESS=gosaab %command%\n"
                 "version = 1\n\n[[game]]\nexe = \"gosaab\"\n"
                 f"multiplier = {multiplier}\nflow_scale = 0.8\nperformance_mode = true\n")
@@ -526,6 +526,13 @@ def draw_glyph(p, name, size):
             import math
             c, sn = math.cos(math.radians(a)), math.sin(math.radians(a))
             poly(12 + c * 9.5, 12 + sn * 9.5, 12 + c * 11, 12 + sn * 11)
+    elif name == "layers":  # translation layers: three stacked sheets
+        for i, y in enumerate((14.5, 11, 7.5)):
+            poly(12, y - 4, 20, y, 12, y + 4, 4, y, close=True, fill=(i == 2))
+    elif name == "wrench":
+        poly(14.5, 9.5, 5, 19)
+        arc(16.5, 7.5, 4, -40, 260)
+        circle(5.3, 18.7, 1.2, fill=True)
     elif name == "screen":
         rect(3, 4.5, 18, 12, 2)
         poly(9, 20, 15, 20)
@@ -1066,10 +1073,9 @@ class Page(QScrollArea):
 
 # ------------------------------------------------------------------ window
 PAGES = [
-    # title, tile colour, glyph (drawn by draw_glyph), letter
-    ("Updates", "#0A84FF", "update", "U"),
+    # title, tile colour, glyph (drawn by draw_glyph), letter. Updates sit at the bottom, above About.
     ("Problems", "#FF453A", "warning", "!"),
-    ("Device & Drivers", "#30D158", "chip", "D"),
+    ("Device", "#30D158", "chip", "D"),
     ("Apps & Security", "#5E5CE6", "shield", "S"),
     ("App Folders", "#64D2FF", "folder", "F"),
     ("VPN & Cloud", "#0A84FF", "globe", "V"),
@@ -1081,6 +1087,9 @@ PAGES = [
     ("Controller Lights", "#FF375F", "lights", "L"),
     ("Buttons & Shortcuts", "#FF9F0A", "keyboard", "B"),
     ("Optional Features", "#BF5AF2", "plus", "+"),
+    ("System Update", "#0A84FF", "update", "U"),
+    ("Translation Update", "#5E5CE6", "layers", "T"),
+    ("Drivers Update", "#FF9F0A", "wrench", "W"),
     ("About", "#8E8E93", "info", "i"),
 ]
 
@@ -1091,7 +1100,7 @@ class Settings(QMainWindow):
     def __init__(self, backend=None):
         super().__init__()
         self.backend = backend or Backend()
-        self.setWindowTitle("Gill-OSaab Settings")
+        self.setWindowTitle("Gill(OS) Settings")
         self.setWindowIcon(QIcon.fromTheme("gill-osaab"))
         self.resize(1000, 680)
         self.switches = {}
@@ -1128,10 +1137,10 @@ class Settings(QMainWindow):
         layout.addWidget(self.stack, 1)
         self.setCentralWidget(root)
 
-        builders = [self.page_updates, self.page_problems, self.page_device, self.page_security, self.page_folders,
+        builders = [self.page_problems, self.page_device, self.page_security, self.page_folders,
                     self.page_vpn_cloud, self.page_glasses, self.page_notifications, self.page_screen,
                     self.page_appearance, self.page_gamemode, self.page_lights, self.page_shortcuts, self.page_optional,
-                    self.page_about]
+                    self.page_updates, self.page_translation, self.page_drivers, self.page_about]
         self.pages = []
         for (name, color, glyph, letter), builder in zip(PAGES, builders):
             item = QListWidgetItem(tile_icon(color, glyph, letter), name)
@@ -1219,7 +1228,7 @@ class Settings(QMainWindow):
         self.update_master_state()
 
     def choice(self, filename, key, current, options):
-        """A drop-down that saves straight to a Gill-OSaab setting (reverts if saving isn't allowed)."""
+        """A drop-down that saves straight to a Gill(OS) setting (reverts if saving isn't allowed)."""
         box = QComboBox()
         for value, label in options:
             box.addItem(label, value)
@@ -1251,32 +1260,31 @@ class Settings(QMainWindow):
 
     # -------------------------------------------------------- pages
     def page_updates(self):
-        p = Page("Updates")
+        p = Page("System Update")
+        p.keywords += ["updates", "update", "upgrade", "rollback", "schedule"]
         everything = self.update_button("all", "Update everything")
         everything.setObjectName("primary")
-        p.section("", [Row("Everything", "System, Android, Proton-GE, Windows app setups, apps, containers "
-                                                "and Game Mode plugins. The BIOS is never updated automatically.",
-                           everything)])
+        p.section("", [Row("Everything", "System, translation layers (Android, Proton-GE, Windows app setups, "
+                                         "containers), apps and Game Mode plugins. The BIOS is never updated "
+                                         "automatically.", everything)])
         base = "Fedora" if "gill-osaab-core" in self.versions.get("image", "") or not self.versions.get("image") \
             and Path("/usr/share/wayland-sessions/gill-osaab.desktop").exists() else "Bazzite"
         p.section("Update now", [
-            Row("Gill-OSaab system", f"{self.v('gill_osaab', 'Gill-OSaab ')} · {base} {self.v('os')} · "
-                                     f"kernel {self.v('kernel')}. Includes graphics and Wi-Fi drivers and Wine.",
-                self.update_button("os")),
-            Row("Android system", f"Waydroid {self.v('waydroid')} · Android image {self.v('android_image')}",
-                self.update_button("android")),
-            Row("Proton-GE", f"{self.v('proton')} · for Steam games", self.update_button("proton")),
-            Row("Windows app setups", f"{self.v('wine')} · refreshes each Windows app's private setup",
-                self.update_button("wine")),
+            Row("Gill(OS) system", f"{self.v('gill_osaab', 'Gill(OS) ')} · {base} {self.v('os')} · "
+                                   f"kernel {self.v('kernel')}. Includes the desktop, graphics and Wi-Fi drivers "
+                                   "and Wine.", self.update_button("os")),
             Row("Apps and emulators", "Flatpak apps", self.update_button("apps")),
-            Row("Linux containers", "Apps installed from .deb and .rpm", self.update_button("containers")),
-            Row("Game Mode plugins", "Gill-OSaab Notifications", self.update_button("decky")),
-        ], note="Drivers, device firmware and the BIOS are in Device & Drivers.")
-        only = QPushButton("Choose drivers…")
-        only.setObjectName("pill")
-        only.clicked.connect(lambda: self.go_to("Device & Drivers"))
-        p.section("Drivers only", [Row("Update only drivers", "Pick which ones, e.g. just graphics or just Wi-Fi.",
-                                       only)])
+            Row("Game Mode plugins", "Gill(OS) Notifications", self.update_button("decky")),
+        ])
+        more = QWidget()
+        ml = QHBoxLayout(more)
+        ml.setContentsMargins(0, 0, 0, 0)
+        for title in ("Translation Update", "Drivers Update"):
+            b = QPushButton(title + " ›")
+            b.setObjectName("pill")
+            b.clicked.connect(lambda _=False, t=title: self.go_to(t))
+            ml.addWidget(b)
+        p.section("", [Row("More updates", "Android, Windows and Linux layers; drivers, firmware and BIOS.", more)])
         p.section("Something broke after an update?", [
             Row("Go back to the previous version", "The system before the last update comes back after a "
                 "restart. Your files and apps aren't touched.", self.update_button("rollback", "Go back"))])
@@ -1353,7 +1361,7 @@ class Settings(QMainWindow):
             lab.setObjectName("bad" if it["kind"] in ("security", "crash", "missing-driver") else "note")
             rows.append(Row(it["title"], it["detail"][:300], lab))
         self.problems_lay.addWidget(Card(rows))
-        nav = self.nav.item(1) if hasattr(self, "nav") and self.nav.count() > 1 else None
+        nav = self.nav.item([t for t, *_ in PAGES].index("Problems")) if hasattr(self, "nav") and self.nav.count() > 0 else None
         if nav:
             nav.setText(f"Problems ({len(items)})")
 
@@ -1364,7 +1372,7 @@ class Settings(QMainWindow):
     def save_report(self):
         from PySide6.QtWidgets import QFileDialog
         path, _ = QFileDialog.getSaveFileName(self, "Save problem report",
-                                              str(Path.home() / "Gill-OSaab problem report.txt"))
+                                              str(Path.home() / "Gill(OS) problem report.txt"))
         if path:
             Path(path).write_text(self.backend.problem_report())
 
@@ -1407,10 +1415,43 @@ class Settings(QMainWindow):
         add = QPushButton("Add shortcut")
         add.setObjectName("primary")
         add.clicked.connect(self.add_shortcut)
+        # one shortcut, several things: e.g. Windows + I opens iTunes, Sideloadly and the iPhone apps folder
+        self.group = []
+        self.group_label = QLabel("Nothing added yet")
+        self.group_label.setObjectName("note")
+        self.group_label.setWordWrap(True)
+        self.group_app = QComboBox()
+        for app_id, name in self.backend.desktop_apps():
+            self.group_app.addItem(name, app_id)
+        add_app = QPushButton("Add app")
+        add_app.setObjectName("pill")
+        add_app.clicked.connect(lambda: self.add_group_item("app", self.group_app.currentData(),
+                                                            self.group_app.currentText()))
+        add_folder = QPushButton("Add folder…")
+        add_folder.setObjectName("pill")
+        add_folder.clicked.connect(self.add_group_folder)
+        self.group_url = QLineEdit()
+        self.group_url.setPlaceholderText("https://… then Enter")
+        self.group_url.returnPressed.connect(lambda: self.add_group_item("open", self.group_url.text().strip(),
+                                                                         self.group_url.text().strip()))
+        clear = QPushButton("Clear")
+        clear.setObjectName("pill")
+        clear.clicked.connect(lambda: (self.group.clear(), self.show_group()))
+        apps_row = QWidget()
+        al = QHBoxLayout(apps_row)
+        al.setContentsMargins(0, 0, 0, 0)
+        al.addWidget(self.group_app, 1)
+        al.addWidget(add_app)
+        al.addWidget(add_folder)
         p.section("New shortcut", [Row("1. Buttons", "Click, then hold the button(s) together and let go.",
                                        self.record_btn),
                                    Row("2. What it does", "", self.action_pick),
-                                   Row("Custom command", "Optional – used instead of the choice above.",
+                                   Row("…or open several at once", "Apps, folders and websites that all open "
+                                       "with this one shortcut.", apps_row),
+                                   Row("Website", "", self.group_url),
+                                   Row("Will open", "", self.group_label),
+                                   Row("", "", clear),
+                                   Row("Custom command", "Optional – used instead of the choices above.",
                                        self.command_edit),
                                    Row("3. Save", "", add)])
         self.fill_shortcuts()
@@ -1439,6 +1480,28 @@ class Settings(QMainWindow):
         bl.addWidget(Card(rows))
         self.shortcut_lay.addWidget(box)
 
+    def add_group_item(self, kind, value, label):
+        if not value or "|" in value or "\n" in value or len(self.group) >= 12:
+            return
+        if kind == "open" and not (value.startswith("/") or value.startswith(("http://", "https://"))):
+            QMessageBox.warning(self, "Shortcut", "Websites start with https://")
+            return
+        if any(v == value for _, v, _ in self.group):
+            return
+        self.group.append((kind, value, label))
+        if kind == "open" and not value.startswith("/"):
+            self.group_url.clear()
+        self.show_group()
+
+    def add_group_folder(self):
+        from PySide6.QtWidgets import QFileDialog
+        path = QFileDialog.getExistingDirectory(self, "Folder to open", str(Path.home() / "Desktop"))
+        if path:
+            self.add_group_item("open", path, Path(path).name)
+
+    def show_group(self):
+        self.group_label.setText(", ".join(label for _, _, label in self.group) or "Nothing added yet")
+
     def record_shortcut(self):
         self.record_btn.setEnabled(False)
         self.record_btn.setText("Hold the buttons now…")
@@ -1458,37 +1521,52 @@ class Settings(QMainWindow):
             QMessageBox.warning(self, "Shortcut", "Press the buttons first (step 1).")
             return
         cmd = self.command_edit.text().strip()
-        action = f"run:{cmd}" if cmd else self.action_pick.currentData()
+        if cmd:
+            action = f"run:{cmd}"
+        elif self.group:
+            action = "group:" + "|".join(f"{k}:{v}" for k, v, _ in self.group)
+        else:
+            action = self.action_pick.currentData()
         if not self.backend.set_hotkey(self.recorded_combo, action):
             QMessageBox.warning(self, "Shortcut", "That combo would fire while typing. Add Windows, Ctrl or Alt, "
                                                   "or use a controller/handheld button.")
             return
         self.recorded_combo = ""
         self.command_edit.clear()
+        self.group.clear()
+        self.show_group()
         self.record_btn.setText("Press buttons…")
         self.fill_shortcuts()
 
-    def page_device(self):
-        p = Page("Device & Drivers")
-        hw = self.hw
-        model = hw.get("model", {})
-        info = [Row("Model", model.get("name") or "Unknown"),
-                Row("BIOS", " · ".join(x for x in (model.get("bios_version"), model.get("bios_date")) if x)
-                    or "Unknown"),
-                Row("Processor", hw.get("cpu") or "Unknown")]
-        for g in hw.get("gpus", []):
-            info.append(Row("Graphics", f"{g['vendor']} {g['device']}", self.driver_label(g)))
-        for n in hw.get("network", []):
-            info.append(Row(n.get("kind", "Network"), f"{n['vendor']} {n['device']}", self.driver_label(n)))
-        self.driver_search_section(p)
-        p.section("This device", info)
-        parts = [Row(d["kind"], f"{d['vendor']} {d['device']}", self.driver_label(d)) for d in hw.get("parts", [])]
-        parts += [Row("USB", name, QLabel("●  Connected")) for name in hw.get("usb", [])]
-        if parts:
-            p.section("Every part and its driver", parts, "Drivers for these come built in and update with the "
-                      "system. Printers, scanners, controllers, webcams and USB/Thunderbolt docks work as soon "
-                      "as they are plugged in; firmware for them is checked automatically.")
+    def page_translation(self):
+        p = Page("Translation Update")
+        p.keywords += ["translation", "proton", "wine", "dxvk", "vkd3d", "waydroid", "android", "windows apps",
+                       "containers", "distrobox", "compatibility"]
+        allb = self.update_button("translation", "Update all layers")
+        allb.setObjectName("primary")
+        p.section("", [Row("All translation layers", "The parts that let Windows, Android and other Linux apps run "
+                           "on Gill(OS).", allb)])
+        p.section("Windows apps and games", [
+            Row("Proton-GE", f"{self.v('proton')} · for Steam games: newest DXVK, VKD3D-Proton, FSR and game fixes",
+                self.update_button("proton")),
+            Row("Windows app setups", f"Wine {self.v('wine')} · refreshes each Windows app's private setup "
+                "(Wine itself updates with the system)", self.update_button("wine")),
+        ], "Steam's own Proton versions are updated by Steam.")
+        p.section("Android apps", [
+            Row("Android system", f"Waydroid {self.v('waydroid')} · Android image {self.v('android_image')}",
+                self.update_button("android")),
+        ])
+        p.section("Other Linux apps", [
+            Row("Linux containers", "Ubuntu and Fedora containers that run .deb and .rpm apps",
+                self.update_button("containers")),
+        ])
+        p.finish()
+        return p
 
+    def page_drivers(self):
+        p = Page("Drivers Update")
+        hw = self.hw
+        self.driver_search_section(p)
         self.driver_section(p)
         self.driver_history_section(p)
         actions = [
@@ -1501,10 +1579,37 @@ class Settings(QMainWindow):
                 self.switch("features.conf", "auto_drivers", default=True)),
         ]
         if hw.get("nvidia") and "nvidia" not in self.versions.get("image", ""):
-            actions.insert(0, Row("Nvidia graphics found", "Switch to the Gill-OSaab Nvidia edition for full "
+            actions.insert(0, Row("Nvidia graphics found", "Switch to the Gill(OS) Nvidia edition for full "
                                                            "Nvidia driver support. Restart after.",
                                   self.update_button("nvidia", "Switch")))
         p.section("Firmware and BIOS", actions)
+        p.finish()
+        return p
+
+    def page_device(self):
+        p = Page("Device")
+        hw = self.hw
+        model = hw.get("model", {})
+        info = [Row("Model", model.get("name") or "Unknown"),
+                Row("BIOS", " · ".join(x for x in (model.get("bios_version"), model.get("bios_date")) if x)
+                    or "Unknown"),
+                Row("Processor", hw.get("cpu") or "Unknown")]
+        for g in hw.get("gpus", []):
+            info.append(Row("Graphics", f"{g['vendor']} {g['device']}", self.driver_label(g)))
+        for n in hw.get("network", []):
+            info.append(Row(n.get("kind", "Network"), f"{n['vendor']} {n['device']}", self.driver_label(n)))
+        p.section("This device", info)
+        parts = [Row(d["kind"], f"{d['vendor']} {d['device']}", self.driver_label(d)) for d in hw.get("parts", [])]
+        parts += [Row("USB", name, QLabel("●  Connected")) for name in hw.get("usb", [])]
+        if parts:
+            p.section("Every part and its driver", parts, "Drivers for these come built in and update with the "
+                      "system. Printers, scanners, controllers, webcams and USB/Thunderbolt docks work as soon "
+                      "as they are plugged in; firmware for them is checked automatically.")
+
+        drivers = QPushButton("Drivers Update ›")
+        drivers.setObjectName("pill")
+        drivers.clicked.connect(lambda: self.go_to("Drivers Update"))
+        p.section("", [Row("Drivers and firmware", "Update, choose, search or roll back drivers.", drivers)])
         limit = QComboBox()
         choices = [("Off (charge to 100%)", "100"), ("90%", "90"), ("80% – best for battery life", "80"),
                    ("60% – always on the charger", "60")]
@@ -1733,7 +1838,7 @@ class Settings(QMainWindow):
             rows.append(Row("Microsoft 2023 certificate", "Needed for future Linux start-up updates; installs "
                             "with device firmware updates.", cert if ok else self.update_button("firmware", "Install")))
         if enc.get("encrypted") and not on:
-            rows.append(Row("Handheld without a keyboard?", "The start-up PIN is typed before Gill-OSaab starts, "
+            rows.append(Row("Handheld without a keyboard?", "The start-up PIN is typed before Gill(OS) starts, "
                             "so it needs a USB keyboard. Turn Secure Boot on instead: the drive then opens by "
                             "itself safely, no PIN needed."))
         p.section("Secure Boot", rows)
@@ -1746,10 +1851,10 @@ class Settings(QMainWindow):
             return b
         if not enc.get("encrypted"):
             p.section("Encrypt your files", [
-                Row("Install Gill-OSaab on this PC, encrypted",
-                    "Copies Gill-OSaab from this USB to the device's own drive and encrypts the whole drive "
+                Row("Install Gill(OS) on this PC, encrypted",
+                    "Copies Gill(OS) from this USB to the device's own drive and encrypts the whole drive "
                     "(LUKS2 + the security chip). Everything on that drive is erased; your account comes along.",
-                    button("Install…", "Install Gill-OSaab", "gosaab-install", primary=True))],
+                    button("Install…", "Install Gill(OS)", "gosaab-install", primary=True))],
                 "Running from the USB stick? Its files aren't encrypted – install to the drive for that.")
             return
         rows = [Row("Start-up PIN", "Asked when the device starts, so a stolen device stays locked. "
@@ -1771,7 +1876,7 @@ class Settings(QMainWindow):
         status.setObjectName("ok" if installed else "bad")
         p.section("Game Mode", [
             Row("Pop-ups and live progress", "Downloads, copies and installs show percentages in Game Mode "
-                                             "(Quick Access › Gill-OSaab Notifications).", status),
+                                             "(Quick Access › Gill(OS) Notifications).", status),
         ], note="Desktop mode uses the notification panel in the top bar.")
         if not installed:
             b = p.button("Set up Game Mode notifications", primary=True)
@@ -1833,6 +1938,13 @@ class Settings(QMainWindow):
             Row("Show menu bar background", "Off: the menu bar floats clear over the wallpaper.", self.menubar_switch),
         ])
 
+        self.dock_zoom = segmented([("off", "Off"), ("small", "Small"), ("medium", "Medium"), ("large", "Large")],
+                                   ap.get("dockMagnification", "medium"),
+                                   lambda v: self.backend.set_appearance("dockMagnification", v))
+        p.section("Dock", [Row("Magnification", "How much icons grow as the pointer moves over them.",
+                               self.dock_zoom)], "Right-click (or hold) an app in the Dock or Launchpad for Keep in "
+                  "Dock, Hide and App Info.")
+
         walls = [("tide", "Tide", [light, dark]), ("tide-light", "Tide Light", [light]), ("tide-dark", "Tide Dark", [dark]),
                  ("classic", "Aurora", [th("GillOSaab-Classic", True)])]
         self.wall_picker = picker([(v, PreviewTile(n, paint_picture(paths), 104, 60)) for v, n, paths in walls],
@@ -1885,7 +1997,7 @@ class Settings(QMainWindow):
             rows.append(Row(title, sub, sw))
         p.section("Touchpad", rows, "Pinch to zoom works in apps. Three fingers: swipe sideways to change "
                   "space, up for Mission Control.")
-        reset = p.button("Apply Gill-OSaab look (top bar + dock)")
+        reset = p.button("Apply Gill(OS) look (top bar + dock)")
         reset.clicked.connect(self.apply_look)
         p.finish()
         return p
@@ -2257,7 +2369,7 @@ class Settings(QMainWindow):
     def page_about(self):
         p = Page("About")
         version = VERSION_FILE.read_text().strip() if VERSION_FILE.exists() else "dev"
-        p.section("", [Row("Gill-OSaab", f"Version {version}  ·  Developer: GILL-Saab")])
+        p.section("", [Row("Gill(OS)", f"Version {version}  ·  Developer: GILL-Saab")])
         b = self.backend
         checks = [
             ("Windows apps (Wine)", b.have("wine")), ("App sandbox (bubblewrap)", b.have("bwrap")),
@@ -2265,7 +2377,7 @@ class Settings(QMainWindow):
             ("Firmware updates (fwupd)", b.have("fwupdmgr")),
             ("Gaming CPU scheduler", b.service_active("scx_loader.service")),
             ("NTSYNC", b.module_loaded("ntsync")),
-            ("Gill-OSaab updater", b.service_active("gosaab-update.timer")),
+            ("Gill(OS) updater", b.service_active("gosaab-update.timer")),
             ("Game Mode notifications (Decky)", b.decky_plugin_installed()),
         ]
         rows = []
@@ -2305,8 +2417,8 @@ class Settings(QMainWindow):
         self.backend.run(["dbus-send", "--session", "--dest=org.kde.KWin", "/KWin", "org.kde.KWin.reconfigure"])
 
     def apply_look(self):
-        answer = QMessageBox.question(self, "Apply Gill-OSaab look",
-                                      "This resets your panels to the Gill-OSaab top bar and dock. Continue?")
+        answer = QMessageBox.question(self, "Apply Gill(OS) look",
+                                      "This resets your panels to the Gill(OS) top bar and dock. Continue?")
         if answer == QMessageBox.Yes:
             self.backend.run(["plasma-apply-lookandfeel", "--apply", "org.gillosaab.desktop", "--resetLayout"])
 
@@ -2355,7 +2467,7 @@ QScrollBar:horizontal { height: 0; background: transparent; }
 
 def main():
     app = QApplication(sys.argv)
-    app.setApplicationName("Gill-OSaab Settings")
+    app.setApplicationName("Gill(OS) Settings")
     app.setDesktopFileName("gosaab-settings")
     # the accent colour picked in Appearance tints Settings too
     accent = Backend().appearance().get("accent", "")
@@ -2370,7 +2482,7 @@ def main():
     want = (sys.argv[1] if len(sys.argv) > 1 else "").lower()
     if want:
         for i, page in enumerate(PAGES):
-            if want in page[0].lower() or (want == "game" and page[0] == "Game Mode"):
+            if want.rstrip("s") in page[0].lower() or (want == "game" and page[0] == "Game Mode"):
                 w.nav.setCurrentRow(i)
                 break
     w.show()

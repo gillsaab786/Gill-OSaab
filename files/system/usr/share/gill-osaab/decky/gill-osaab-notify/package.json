@@ -1,7 +1,7 @@
 {
   "name": "gill-osaab-notify",
   "version": "1.0.0",
-  "description": "Gill-OSaab notifications and live progress in Game Mode",
+  "description": "Gill(OS) notifications and live progress in Game Mode",
   "type": "module",
   "scripts": { "build": "rollup -c" },
   "author": "GILL-Saab",

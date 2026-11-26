@@ -1,5 +1,5 @@
 [Unit]
-Description=Gill-OSaab notifications and progress in Game Mode
+Description=Gill(OS) notifications and progress in Game Mode
 PartOf=gamescope-session-plus@steam.service
 After=gamescope-session-plus@steam.service
 

@@ -1,4 +1,4 @@
-# Gill-OSaab: rules for Claude sessions (keep short; loaded every turn)
+# Gill(OS): rules for Claude sessions (keep short; loaded every turn)
 - Terse replies. No preamble, no recap, no unasked suggestions. Answer first.
 - Read a file once; targeted Edit over full rewrites. No over-engineering.
 - Filter CI logs (grep PASS/FAIL/error); never dump full logs.

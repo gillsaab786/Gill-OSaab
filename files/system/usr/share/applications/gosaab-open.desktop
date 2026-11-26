@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Application
-Name=Gill-OSaab App Installer
+Name=Gill(OS) App Installer
 GenericName=Install or run any app
 Comment=Opens Windows, Android and Linux apps with one click
 Exec=gosaab-open %F

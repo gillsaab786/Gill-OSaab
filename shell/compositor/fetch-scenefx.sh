@@ -1,5 +1,5 @@
 #!/bin/sh
-# Get scenefx 0.5 and add Gill-OSaab's Liquid Glass lens, with retries (network hiccups happen
+# Get scenefx 0.5 and add Gill(OS)'s Liquid Glass lens, with retries (network hiccups happen
 # during image builds). Meson then uses subprojects/scenefx as is.
 set -e
 cd "$(dirname "$0")/subprojects"

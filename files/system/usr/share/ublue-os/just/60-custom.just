@@ -1,9 +1,9 @@
-# Gill-OSaab commands. Run with:  ujust <name>
+# Gill(OS) commands. Run with:  ujust <name>
 
-# Show Gill-OSaab status: update switches and components
+# Show Gill(OS) status: update switches and components
 gosaab-status:
     #!/usr/bin/bash
-    echo "== Gill-OSaab $(cat /usr/share/gill-osaab/version 2>/dev/null) =="
+    echo "== Gill(OS) $(cat /usr/share/gill-osaab/version 2>/dev/null) =="
     gosaab-updates
     echo
     for tool in wine bwrap waydroid distrobox; do
@@ -12,7 +12,7 @@ gosaab-status:
     systemctl is-active --quiet scx_loader.service && echo "ready      gaming CPU scheduler" || echo "off        gaming CPU scheduler"
     grep -q '^ntsync ' /proc/modules && echo "ready      ntsync" || echo "off        ntsync"
 
-# Apply the Gill-OSaab desktop look (top bar + floating dock). Resets panels.
+# Apply the Gill(OS) desktop look (top bar + floating dock). Resets panels.
 gosaab-apply-look:
     plasma-apply-lookandfeel --apply org.gillosaab.desktop --resetLayout
 
@@ -58,7 +58,7 @@ gosaab-setup-notifications:
         ujust setup-decky
     fi
     sudo /usr/libexec/gill-osaab/gosaab-decky-sync
-    echo "Done. Open Quick Access (Armoury Crate / ... button) > Decky > Gill-OSaab Notifications."
+    echo "Done. Open Quick Access (Armoury Crate / ... button) > Decky > Gill(OS) Notifications."
 
 # Update everything (system, Android, Proton-GE, Windows app setups, apps, containers, plugins)
 gosaab-update-all:

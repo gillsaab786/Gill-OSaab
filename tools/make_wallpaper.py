@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generates the original Gill-OSaab wallpapers (dark + light) and the logo.
+"""Generates the original Gill(OS) wallpapers (dark + light) and the logo.
 
 Soft aurora glows over a deep gradient with flowing ribbons; no third-party art.
 Usage: python3 tools/make_wallpaper.py <output wallpaper package dir>

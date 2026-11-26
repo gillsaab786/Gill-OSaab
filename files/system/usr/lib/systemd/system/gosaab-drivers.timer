@@ -1,5 +1,5 @@
 [Unit]
-Description=Gill-OSaab driver check after start-up and daily
+Description=Gill(OS) driver check after start-up and daily
 
 [Timer]
 OnBootSec=2min

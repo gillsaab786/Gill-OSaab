@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Application
-Name=Gill-OSaab Settings
+Name=Gill(OS) Settings
 Comment=Updates, sandbox, screen-off and appearance switches
 Exec=gosaab-settings
 Icon=gill-osaab

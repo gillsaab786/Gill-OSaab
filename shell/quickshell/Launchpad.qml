@@ -19,8 +19,12 @@ PanelWindow {
     readonly property int rows: height > 900 ? 5 : 4
     readonly property int perPage: columns * rows
     readonly property string query: search.text.trim().toLowerCase()
+    property bool showHidden: false // "Hidden apps" view: only the apps you hid, to unhide them
+    readonly property int hiddenCount: DesktopEntries.applications.values.filter(e => !Theme.helperApp(e) && Theme.isHidden(e.id)).length
+    onHiddenCountChanged: if (hiddenCount === 0) showHidden = false
     readonly property var apps: DesktopEntries.applications.values
-        .filter(e => Theme.listed(e) && (query === "" || e.name.toLowerCase().includes(query)
+        .filter(e => !Theme.helperApp(e) && Theme.isHidden(e.id) === showHidden
+                 && (query === "" || e.name.toLowerCase().includes(query)
                  || e.keywords.some(k => k.toLowerCase().includes(query))))
         .sort((a, b) => a.name.localeCompare(b.name))
     readonly property int pages: Math.max(1, Math.ceil(apps.length / perPage))
@@ -43,7 +47,7 @@ PanelWindow {
 
     Connections {
         target: ShellState
-        function onLaunchpadChanged() { if (ShellState.launchpad) { search.text = ""; pad.page = 0; search.forceActiveFocus() } }
+        function onLaunchpadChanged() { if (ShellState.launchpad) { search.text = ""; pad.page = 0; pad.showHidden = false; search.forceActiveFocus() } }
     }
 
     Rectangle {
@@ -84,6 +88,25 @@ PanelWindow {
             }
         }
 
+        Rectangle { // "Hidden apps (n)": see and unhide the apps you hid
+            visible: pad.hiddenCount > 0
+            anchors { left: searchBox.right; leftMargin: 12; verticalCenter: searchBox.verticalCenter }
+            width: hiddenLabel.implicitWidth + 24; height: 32; radius: 16
+            color: pad.showHidden ? Theme.accent : hiddenMouse.containsMouse ? Qt.rgba(1, 1, 1, 0.22) : Qt.rgba(1, 1, 1, 0.12)
+            border { color: Qt.rgba(1, 1, 1, 0.12); width: 1 }
+            Behavior on color { ColorAnimation { duration: Theme.fast } }
+            Text { id: hiddenLabel; anchors.centerIn: parent; color: "white"; font { family: Theme.font; pixelSize: 13; weight: Font.Medium }
+                text: pad.showHidden ? "Done" : "Hidden apps (" + pad.hiddenCount + ")" }
+            MouseArea { id: hiddenMouse; anchors.fill: parent; hoverEnabled: true
+                onClicked: { pad.showHidden = !pad.showHidden; pad.page = 0; ShellState.haptic("tick") } }
+        }
+        Text {
+            visible: pad.showHidden
+            anchors { horizontalCenter: parent.horizontalCenter; top: searchBox.bottom; topMargin: 12 }
+            text: "Hidden apps don't show in Launchpad or Spotlight. Right-click or hold one to unhide it."
+            color: Qt.rgba(1, 1, 1, 0.75); font { family: Theme.font; pixelSize: 13 }
+        }
+
         Item {
             id: viewport
             anchors { left: parent.left; right: parent.right; top: searchBox.bottom; topMargin: 40; bottom: dots.top; bottomMargin: 24 }
@@ -110,9 +133,11 @@ PanelWindow {
                             Repeater {
                                 model: pad.apps.slice(pageItem.index * pad.perPage, (pageItem.index + 1) * pad.perPage)
                                 Item {
+                                    id: cell
                                     required property var modelData
                                     required property int index
                                     width: parent.cellW; height: parent.cellH
+                                    opacity: pad.showHidden ? 0.75 : 1
                                     Rectangle { // controller / keyboard highlight: glass pill around the app
                                         anchors.fill: parent; anchors.margins: 6; radius: 26
                                         color: Qt.rgba(1, 1, 1, 0.16)
@@ -138,7 +163,18 @@ PanelWindow {
                                             style: Text.Raised; styleColor: Qt.rgba(0, 0, 0, 0.35)
                                         }
                                     }
-                                    MouseArea { id: appMouse; anchors.fill: parent; hoverEnabled: true; onClicked: pad.open(modelData, parent) }
+                                    MouseArea {
+                                        id: appMouse
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                        // right-click or hold (touch): Hide / App Info / Keep in Dock
+                                        onPressAndHold: ShellState.openAppMenu(cell.modelData, cell, "launchpad")
+                                        onClicked: m => {
+                                            if (m.button === Qt.RightButton) ShellState.openAppMenu(cell.modelData, cell, "launchpad")
+                                            else pad.open(cell.modelData, cell)
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -167,5 +203,7 @@ PanelWindow {
     IpcHandler {
         target: "launchpad"
         function toggle(): void { ShellState.toggle("launchpad") }
+        function showHiddenApps(on: bool): void { pad.showHidden = on }
+        function count(): int { return pad.apps.length }
     }
 }

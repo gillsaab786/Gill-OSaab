@@ -162,7 +162,7 @@ class FakeBackend:
                                         "source": "foot", "count": 2, "first": 1, "last": 2}])
 
     def problem_report(self):
-        return "Gill-OSaab problem report\n1. [crash] foot crashed"
+        return "Gill(OS) problem report\n1. [crash] foot crashed"
 
     def hotkeys(self):
         return {k: {"action": a, "label": a, "keys": k, "mine": True} for k, a in getattr(self, "hk", {}).items()}
@@ -262,7 +262,9 @@ class SettingsApp(unittest.TestCase):
 
     def test_every_page_builds(self):
         w = self.gs.Settings(FakeBackend())
-        self.assertEqual(w.stack.count(), 15)
+        self.assertEqual(w.stack.count(), 17)
+        titles = [w.nav.item(i).text() for i in range(w.nav.count())]
+        self.assertEqual(titles[-4:], ["System Update", "Translation Update", "Drivers Update", "About"])
         for i in range(14):
             w.nav.setCurrentRow(i)
             self.assertEqual(w.stack.currentIndex(), i)
@@ -346,7 +348,7 @@ class SettingsUpdates(unittest.TestCase):
         w = self.gs.Settings(FakeBackend())
         w.search.setText("bios")
         visible = [w.nav.item(i).text() for i in range(w.nav.count()) if not w.nav.item(i).isHidden()]
-        self.assertIn("Device & Drivers", visible)
+        self.assertIn("Drivers Update", visible)
         self.assertNotIn("Appearance", visible)
         w.search.setText("")
         self.assertTrue(all(not w.nav.item(i).isHidden() for i in range(w.nav.count())
@@ -397,7 +399,7 @@ class NewPages(unittest.TestCase):
 
     def test_problems_page_lists_and_copies(self):
         w = self.gs.Settings(FakeBackend())
-        self.assertTrue(w.nav.item(1).text().startswith("Problems (1)"))
+        self.assertTrue(w.nav.item(0).text().startswith("Problems (1)"))
         w.copy_report(self.gs.QPushButton())
         self.assertIn("foot crashed", self.app.clipboard().text() or "foot crashed")
 
@@ -642,3 +644,40 @@ class TahoeAppearance(unittest.TestCase):
         w.vivid_slider.sliderReleased.emit()
         self.assertIn(("set", "features.conf", "lights_vividness", "55"), b.calls)
         self.assertFalse(w.lights_preview.grab().isNull())
+
+
+@unittest.skipUnless(HAVE_QT, "PySide6 not installed")
+class GillOSRound(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        from PySide6.QtWidgets import QApplication
+        cls.gs = load("usr/bin/gosaab-settings")
+        cls.app = QApplication.instance() or QApplication([])
+
+    def test_group_shortcut_from_settings(self):
+        b = FakeBackend()
+        w = self.gs.Settings(b)
+        w.recorded_combo = "META+I"
+        w.add_group_item("app", "itunes", "iTunes")
+        w.add_group_item("app", "itunes", "iTunes")  # no duplicates
+        w.add_group_item("open", "/home/gill/Desktop/iPhone apps", "iPhone apps")
+        w.add_group_item("open", "a|b", "bad")  # can't hold the separator
+        self.assertEqual(w.group_label.text(), "iTunes, iPhone apps")
+        w.add_shortcut()
+        self.assertEqual(b.hk["META+I"], "group:app:itunes|open:/home/gill/Desktop/iPhone apps")
+        self.assertEqual(w.group, [])
+
+    def test_dock_magnification_saved(self):
+        b = FakeBackend()
+        w = self.gs.Settings(b)
+        w.dock_zoom.group.buttons()[3].click()
+        self.assertEqual(b.ap["dockMagnification"], "large")
+
+    def test_update_pages(self):
+        w = self.gs.Settings(FakeBackend())
+        w.go_to("Translation Update")
+        self.assertIn("translation", w.update_buttons)
+        self.assertIn("proton", w.update_buttons)
+        w.go_to("Drivers Update")
+        self.assertIn("drivers", w.update_buttons)
+        self.assertIn("firmware", w.update_buttons)

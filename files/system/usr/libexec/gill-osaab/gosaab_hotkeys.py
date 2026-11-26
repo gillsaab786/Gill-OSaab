@@ -77,9 +77,33 @@ def is_allowed(combo):
     return not all(TYPING.match(t) or t == "SHIFT" for t in toks)
 
 
+GROUP_MAX = 12
+
+
+def group_items(action):
+    """'group:app:itunes|open:/home/me/Desktop/iPhone apps' -> [('app', 'itunes'), ('open', '/home/...')]
+    or None if any part isn't valid. Opens several apps, folders, files or websites with one shortcut."""
+    if not action.startswith("group:"):
+        return None
+    items = []
+    for part in action[6:].split("|"):
+        kind, _, value = part.partition(":")
+        if "\n" in value or "\0" in value or not value.strip():
+            return None
+        if kind == "app" and re.fullmatch(r"[\w.\-]+", value):
+            items.append(("app", value))
+        elif kind == "open" and (value.startswith("/") or re.match(r"https?://[^\s]+$", value)):
+            items.append(("open", value))
+        else:
+            return None
+    return items if 0 < len(items) <= GROUP_MAX else None
+
+
 def valid_action(action):
     if action in ACTIONS:
         return True
+    if action.startswith("group:"):
+        return group_items(action) is not None
     if action.startswith("app:"):
         return bool(re.fullmatch(r"[\w.\-]+", action[4:]))
     if action.startswith("run:"):
@@ -93,6 +117,10 @@ def describe(combo):
 
 
 def describe_action(action):
+    items = group_items(action)
+    if items:
+        names = [v if k == "app" else (v if v.startswith("http") else Path(v).name or v) for k, v in items]
+        return "Open " + ", ".join(names)
     if action.startswith("app:"):
         return f"Open {action[4:]}"
     if action.startswith("run:"):
@@ -114,7 +142,7 @@ def parse_config(text):
 
 
 def format_config(bindings):
-    lines = ["# Gill-OSaab button shortcuts (edited by Settings > Buttons & Shortcuts)",
+    lines = ["# Gill(OS) button shortcuts (edited by Settings > Buttons & Shortcuts)",
              "# combo = action      e.g.  META+R = mode   BTN_MODE+BTN_SOUTH = app:steam"]
     lines += [f"{c} = {a}" for c, a in sorted(bindings.items())]
     return "\n".join(lines) + "\n"

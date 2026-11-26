@@ -1,8 +1,8 @@
-# Gill-OSaab Shell: roadmap and status
+# Gill(OS) Shell: roadmap and status
 
-Gill-OSaab's own desktop: our own window manager (`gosaab-wm`, C on wlroots 0.20 + scenefx 0.5)
+Gill(OS)'s own desktop: our own window manager (`gosaab-wm`, C on wlroots 0.20 + scenefx 0.5)
 and our own shell UI (bar, dock, Launchpad, Control Center, notifications, lock screen) in
-Qt Quick via Quickshell. Runs on the Gill-OSaab Core image (minimal Fedora bootc).
+Qt Quick via Quickshell. Runs on the Gill(OS) Core image (minimal Fedora bootc).
 
 ## How work is tested
 - `.github/workflows/shell.yml` builds in Fedora 45, runs unit tests, then runs the real
@@ -16,6 +16,14 @@ Qt Quick via Quickshell. Runs on the Gill-OSaab Core image (minimal Fedora bootc
   workspace, so use the ci-shots branch.
 
 ## Next up (asked by Jas, do these first)
+Done 2026-11-26: renamed Gill(OS) (display only; ids/paths/XDG_CURRENT_DESKTOP keep gill-osaab; os-release
+NAME/PRETTY_NAME); app menu (right-click/hold in Dock + Launchpad: Open/Quit/Keep in Dock/Hide/App Info);
+App Info (gosaab-appinfo: Android/Windows/Linux, version, force close, clear cache/data, uninstall; deletes only
+inside the app's own folders); hidden apps (appearance.json hiddenApps, Launchpad "Hidden apps" view); Dock
+magnification measured at rest + Off/Small/Medium/Large; Game Mode<->Desktop transition (ModeTransition.qml,
+chime, Steam startup movie deck_startup.webm from tools/make-transition-media.py); Settings order ends System
+Update / Translation Update / Drivers Update / About; one shortcut opens several apps/folders/sites
+(group: action); security: switch autologin is now one-time (--restore), clipboard read capped.
 Done 2026-11-25 (macOS Tahoe look, from Jas's two videos): original "Tide" wallpaper (light + dark,
 tools/make-wallpaper.py; Aurora kept as Classic) drawn by the shell and cross-faded with Dark Mode;
 appearance.json shared by shell + Settings (Auto/Light/Dark, accent, icon style Default/Dark/Clear/

@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Use the handheld's controller on the Gill-OSaab desktop (not needed in Game Mode).
+"""Use the handheld's controller on the Gill(OS) desktop (not needed in Game Mode).
 
   left stick   pointer            right stick  scroll
   A            click              B            right-click / back (Esc)

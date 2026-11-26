@@ -1,5 +1,5 @@
 [Unit]
-Description=Install or update the Gill-OSaab Notifications Decky plugin
+Description=Install or update the Gill(OS) Notifications Decky plugin
 After=local-fs.target plugin_loader.service
 
 [Service]

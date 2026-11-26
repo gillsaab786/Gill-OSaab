@@ -1,4 +1,4 @@
-"""Shared helpers for Gill-OSaab tools."""
+"""Shared helpers for Gill(OS) tools."""
 import os
 import shutil
 import subprocess
@@ -65,7 +65,7 @@ class Progress:
     """A progress item in the notification area (percentage, message, done/failed).
 
     Uses the KDE job protocol, which KDE Plasma shows in desktop mode and the
-    Gill-OSaab hub shows in Game Mode. Falls back to plain notifications.
+    Gill(OS) hub shows in Game Mode. Falls back to plain notifications.
     """
 
     def __init__(self, title, app="gosaab-settings"):
@@ -124,7 +124,7 @@ class Progress:
     def _fallback(self, body, percent):
         if not shutil.which("notify-send"):
             return
-        cmd = ["notify-send", "-a", "Gill-OSaab", "-p", self.title, body]
+        cmd = ["notify-send", "-a", "Gill(OS)", "-p", self.title, body]
         if percent is not None:
             cmd[1:1] = ["-h", f"int:value:{int(percent)}"]
         if self.notify_id:
@@ -136,6 +136,6 @@ class Progress:
 def notify(title, body="", urgency="normal"):
     """Desktop notification; silently skipped when notify-send is missing."""
     if shutil.which("notify-send"):
-        subprocess.run(["notify-send", "-a", "Gill-OSaab", "-u", urgency, title, body], check=False)
+        subprocess.run(["notify-send", "-a", "Gill(OS)", "-u", urgency, title, body], check=False)
     else:
         print(f"{title}: {body}")

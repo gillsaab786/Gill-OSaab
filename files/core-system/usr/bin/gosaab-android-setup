@@ -1,5 +1,5 @@
 #!/bin/sh
-# One-time Android (Waydroid) setup for Gill-OSaab Core: Android with Google Play, each app in
+# One-time Android (Waydroid) setup for Gill(OS) Core: Android with Google Play, each app in
 # its own resizable window, and ARM translation so phone-only (ARM) apps run on AMD/Intel.
 if [ "$(id -u)" != 0 ]; then
   exec foot -T "Set up Android apps" -e sh -c 'pkexec /usr/bin/gosaab-android-setup; echo; read -p "Press Enter to close." x'

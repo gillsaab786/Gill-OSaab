@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Install Gill-OSaab on this PC's own drive, encrypted.
+"""Install Gill(OS) on this PC's own drive, encrypted.
 
   gosaab-install                       guided install (asks which drive, then for a password)
   gosaab-install --list                drives you can install to (JSON)
@@ -41,7 +41,7 @@ def out(cmd):
 
 # ------------------------------------------------------------------ drives
 def boot_disk():
-    """The drive Gill-OSaab is running from right now (never offered)."""
+    """The drive Gill(OS) is running from right now (never offered)."""
     src = out(["findmnt", "-no", "SOURCE", "/sysroot"]) or out(["findmnt", "-no", "SOURCE", "/"])
     src = src.split("[")[0]
     if not src:
@@ -161,9 +161,9 @@ def write_account(disk, record, dry=False):
 def ask_disk():
     disks = [d for d in list_disks() if d["big_enough"]]
     if not disks:
-        print("No drive big enough (30 GB or more) was found besides the one Gill-OSaab is running from.")
+        print("No drive big enough (30 GB or more) was found besides the one Gill(OS) is running from.")
         return ""
-    print("Drives you can install Gill-OSaab on (EVERYTHING ON IT WILL BE ERASED):\n")
+    print("Drives you can install Gill(OS) on (EVERYTHING ON IT WILL BE ERASED):\n")
     for i, d in enumerate(disks, 1):
         kind = "removable" if d["removable"] else (d["transport"] or "internal")
         print(f"  {i}. {d['path']}  {d['size'] / 1e9:.0f} GB  {d['model']}  ({kind})")
@@ -209,12 +209,12 @@ def main(argv):
         if not disk:
             return 1
     if disk not in [d["path"] for d in list_disks()] and not dry:
-        print(f"{disk} can't be used (it's the drive Gill-OSaab is running from, or not a drive).")
+        print(f"{disk} can't be used (it's the drive Gill(OS) is running from, or not a drive).")
         return 2
     user = os.environ.get("PKEXEC_UID") and pwd.getpwuid(int(os.environ["PKEXEC_UID"])).pw_name or \
         os.environ.get("SUDO_USER") or "gill"
     if not yes:
-        if input(f"\nErase {disk} and install Gill-OSaab{' (encrypted)' if encrypt else ''}? Type YES: ") != "YES":
+        if input(f"\nErase {disk} and install Gill(OS){' (encrypted)' if encrypt else ''}? Type YES: ") != "YES":
             return 1
     if "--password-stdin" in argv:  # the graphical installer passes it this way (never on the command line)
         password = sys.stdin.readline().rstrip("\n")

@@ -93,6 +93,17 @@ def run_action(action):
     if action.startswith("run:"):
         subprocess.Popen(["sh", "-c", action[4:]])
         return 0
+    items = hk.group_items(action)
+    if items:  # several apps / folders / files / websites at once
+        for kind, value in items:
+            if kind == "app":
+                f = find_desktop_file(value)
+                if f:
+                    subprocess.Popen(["gio", "launch", str(f)])
+            else:
+                subprocess.Popen(["gio", "open", value])
+            time.sleep(0.15)
+        return 0
     return 2
 
 

@@ -1,6 +1,6 @@
 import QtQuick
 
-// Gill-OSaab's Trash: a frosted glass bin with a ribbed side and a bright rim; crumpled paper
+// Gill(OS)'s Trash: a frosted glass bin with a ribbed side and a bright rim; crumpled paper
 // shows over the top when there is something in it. Drawn in code, so it is sharp at any size.
 Canvas {
     id: bin

@@ -1,4 +1,4 @@
-# Gill-OSaab: get the USB image ready on Windows.
+# Gill(OS): get the USB image ready on Windows.
 #   1. Put this script in the folder with the downloaded parts (gill-osaab-core-usb.img.xz.part-00, -01, ...)
 #      and SHA256SUMS, or let it download them (it asks).
 #   2. Right-click > Run with PowerShell.
@@ -50,5 +50,5 @@ if ($etcher) {
     Start-Process "https://etcher.balena.io"
 }
 Write-Host "Then boot from the stick (ROG Ally/GPD: hold Volume Down + Power), sign in as gill / gill and open"
-Write-Host "'Install Gill-OSaab' to put it on the PC, encrypted."
+Write-Host "'Install Gill(OS)' to put it on the PC, encrypted."
 Read-Host "Press Enter to close"

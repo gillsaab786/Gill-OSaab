@@ -52,7 +52,7 @@ turn)
 The PC now restarts into its BIOS settings.
   1. Open the Security (or Boot) page and set Secure Boot to $( [ "$want" = on ] && echo Enabled || echo Disabled ).
 $( [ "$want" = on ] && echo "  2. If there is an option \"Allow Microsoft 3rd-party UEFI CA\", turn it on (Linux needs it)." )
-  3. Save and exit (usually F10). Gill-OSaab starts again; then press "Finish" in
+  3. Save and exit (usually F10). Gill(OS) starts again; then press "Finish" in
      Settings > Apps & Security.
 EOF
   read -r -p "Press Enter to restart now (Ctrl+C to cancel)." _ || exit 1

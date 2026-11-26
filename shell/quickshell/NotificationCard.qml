@@ -92,7 +92,7 @@ Rectangle {
                 width: parent.width
                 Text {
                     width: parent.width - when.width
-                    text: card.notification.appName || "Gill-OSaab"
+                    text: card.notification.appName || "Gill(OS)"
                     color: Theme.subtext; elide: Text.ElideRight
                     font { family: Theme.font; pixelSize: 11; weight: Font.Medium; capitalization: Font.AllUppercase }
                 }

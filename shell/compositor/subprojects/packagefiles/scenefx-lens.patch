@@ -33,7 +33,7 @@ index ac1bc49..754cdb5 100644
  
  	struct linked_node transparency_mask_source;
 +
-+	float lens; // Gill-OSaab: Liquid Glass edge bending band in px (0 = off)
++	float lens; // Gill(OS): Liquid Glass edge bending band in px (0 = off)
  };
  
  /** A scene-graph node telling SceneFX to render the optimized blur */
@@ -42,7 +42,7 @@ index ac1bc49..754cdb5 100644
  void wlr_scene_blur_set_alpha(struct wlr_scene_blur *blur, float alpha);
  
 +/**
-+ * Gill-OSaab: bend the blurred background near the node's edges like thick glass
++ * Gill(OS): bend the blurred background near the node's edges like thick glass
 + * (Liquid Glass). `lens` is the width of the bending band in pixels; 0 turns it off.
 + */
 +void wlr_scene_blur_set_lens(struct wlr_scene_blur *blur, float lens);
@@ -104,7 +104,7 @@ index 11e3102..51c62cb 100644
  uniform float clip_radius_bottom_left;
  uniform float clip_radius_bottom_right;
 +
-+// Liquid Glass lens (Gill-OSaab): near the edges, the glass bends what is behind it
++// Liquid Glass lens (Gill(OS)): near the edges, the glass bends what is behind it
 +uniform float lens;   // width of the bending band in pixels (0 = off)
 +uniform vec2 tex_px;  // one pixel in texture coordinates
  #endif

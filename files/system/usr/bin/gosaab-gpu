@@ -60,7 +60,7 @@ def apply():
             pass
     env = st["env"] if st["hybrid"] and st["mode"] == "dedicated" else {}
     ENV_FILE.parent.mkdir(parents=True, exist_ok=True)
-    ENV_FILE.write_text("# Gill-OSaab graphics (Settings > Game Mode > Graphics)\n" +
+    ENV_FILE.write_text("# Gill(OS) graphics (Settings > Game Mode > Graphics)\n" +
                         "".join(f"{k}={v}\n" for k, v in sorted(env.items())))
     if not st["hybrid"] or st["mode"] != "auto":
         return 0

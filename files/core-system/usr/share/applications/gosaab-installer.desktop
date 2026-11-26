@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Application
-Name=Install Gill-OSaab
-Comment=Install Gill-OSaab on this PC's own drive, encrypted
+Name=Install Gill(OS)
+Comment=Install Gill(OS) on this PC's own drive, encrypted
 Exec=gosaab-installer
 Icon=system-software-install
 Categories=System;

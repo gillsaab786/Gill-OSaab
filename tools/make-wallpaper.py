@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render Gill-OSaab's "Tide" wallpaper: layered glass folds, light and dark.
+"""Render Gill(OS)'s "Tide" wallpaper: layered glass folds, light and dark.
 
 Original artwork, drawn procedurally: python3 tools/make-wallpaper.py OUTDIR [WIDTH HEIGHT]
 """

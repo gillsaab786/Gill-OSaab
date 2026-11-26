@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Gill-OSaab Core only: turn the minimal Fedora base into a booting desktop.
+# Gill(OS) Core only: turn the minimal Fedora base into a booting desktop.
 set -euo pipefail
 
 log() { echo "[gill-osaab-core] $*"; }
@@ -21,7 +21,7 @@ mkdir -p /etc/flatpak/remotes.d
 curl -fsSL --retry 3 -o /etc/flatpak/remotes.d/flathub.flatpakrepo \
     https://dl.flathub.org/repo/flathub.flatpakrepo || log "warning: could not fetch Flathub repo file"
 
-# Login screen: Gill-OSaab theme, Wayland greeter; sessions: Gill-OSaab desktop + Game Mode
+# Login screen: Gill(OS) theme, Wayland greeter; sessions: Gill(OS) desktop + Game Mode
 mkdir -p /etc/sddm.conf.d
 cat > /etc/sddm.conf.d/10-gill-osaab.conf <<'EOF'
 [General]
@@ -110,6 +110,14 @@ if [ ! -e /usr/bin/wine ]; then
         if [ -x "$c" ]; then ln -sf "$c" /usr/bin/wine; log "wine -> $c"; break; fi
     done
     [ -e /usr/bin/wine ] || log "warning: no wine binary found: $(ls /usr/bin | grep -i wine | tr '\n' ' ')"
+fi
+
+# Name shown at boot, in the boot menu and in "About": Gill(OS). ID stays fedora so updates keep working.
+if [ -f /usr/lib/os-release ]; then
+    sed -i -e 's/^NAME=.*/NAME="Gill(OS)"/' -e 's/^PRETTY_NAME=.*/PRETTY_NAME="Gill(OS) Core"/' \
+        -e 's/^DEFAULT_HOSTNAME=.*/DEFAULT_HOSTNAME="gill-os"/' /usr/lib/os-release
+    grep -q '^VARIANT=' /usr/lib/os-release || echo 'VARIANT="Core"' >> /usr/lib/os-release
+    log "os-release: $(grep ^PRETTY_NAME /usr/lib/os-release)"
 fi
 
 log "core setup complete"
