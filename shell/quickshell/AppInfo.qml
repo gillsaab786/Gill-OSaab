@@ -17,7 +17,7 @@ PanelWindow {
     WlrLayershell.keyboardFocus: ShellState.infoApp ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
 
     property var app: null
-    property var data: ({})
+    property var appData: ({})
     property bool busy: false
     property string message: ""
     property string confirm: "" // action waiting for a second tap
@@ -28,7 +28,7 @@ PanelWindow {
         function onInfoAppChanged() {
             if (!ShellState.infoApp) return
             info.app = ShellState.infoApp
-            info.data = ({})
+            info.appData = ({})
             info.message = ""
             info.confirm = ""
             info.refresh()
@@ -54,7 +54,7 @@ PanelWindow {
     Timer { id: confirmTimer; interval: 3500; onTriggered: info.confirm = "" }
     Process {
         id: query
-        stdout: StdioCollector { onStreamFinished: { try { info.data = JSON.parse(text) } catch (e) { info.data = { ok: false } } } }
+        stdout: StdioCollector { onStreamFinished: { try { info.appData = JSON.parse(text) } catch (e) { info.appData = { ok: false } } } }
     }
     Process {
         id: doer
@@ -78,7 +78,7 @@ PanelWindow {
         do { b /= 1024; i++ } while (b >= 1024 && i < u.length - 1)
         return (b < 10 ? b.toFixed(1) : Math.round(b)) + " " + u[i]
     }
-    readonly property color kindColour: data.kind === "Android" ? Theme.green : data.kind === "Windows" ? Theme.accent : "#ff9f0a"
+    readonly property color kindColour: appData.kind === "Android" ? Theme.green : appData.kind === "Windows" ? Theme.accent : "#ff9f0a"
 
     MouseArea { anchors.fill: parent; onClicked: ShellState.infoApp = null }
     Rectangle { anchors.fill: parent; color: Qt.rgba(0, 0, 0, 0.35); opacity: card.opacity }
@@ -114,12 +114,12 @@ PanelWindow {
                     Row {
                         spacing: 8
                         Rectangle { // Android / Windows / Linux badge
-                            visible: !!info.data.kind
+                            visible: !!info.appData.kind
                             width: kindText.implicitWidth + 16; height: 22; radius: 11; color: info.kindColour
-                            Text { id: kindText; anchors.centerIn: parent; text: (info.data.kind || "") + " app"; color: "white"
+                            Text { id: kindText; anchors.centerIn: parent; text: (info.appData.kind || "") + " app"; color: "white"
                                 font { family: Theme.font; pixelSize: 12; weight: Font.DemiBold } }
                         }
-                        Text { anchors.verticalCenter: parent.verticalCenter; text: info.data.sourceLabel || "Checking…"
+                        Text { anchors.verticalCenter: parent.verticalCenter; text: info.appData.sourceLabel || "Checking…"
                             color: Theme.subtext; font { family: Theme.font; pixelSize: 12 } }
                     }
                 }
@@ -132,11 +132,11 @@ PanelWindow {
                     id: details
                     anchors { left: parent.left; right: parent.right; top: parent.top; margins: 8 }
                     Repeater {
-                        model: [["Version", info.data.version || (info.data.ok === undefined ? "…" : "Not shown by this app")],
-                                ["App ID", info.data.package || (info.app ? info.app.id : "")],
-                                ["Status", info.data.running ? "Running" : "Not running"],
-                                ["Cache", info.size(info.data.cacheBytes)],
-                                ["App data", info.size(info.data.dataBytes)]]
+                        model: [["Version", info.appData.version || (info.appData.ok === undefined ? "…" : "Not shown by this app")],
+                                ["App ID", info.appData.package || (info.app ? info.app.id : "")],
+                                ["Status", info.appData.running ? "Running" : "Not running"],
+                                ["Cache", info.size(info.appData.cacheBytes)],
+                                ["App data", info.size(info.appData.dataBytes)]]
                         Item {
                             required property var modelData
                             width: details.width; height: 32
@@ -157,11 +157,11 @@ PanelWindow {
                 Repeater {
                     model: [
                         { a: "open", t: "Open", on: true },
-                        { a: "force-close", t: "Force Close", on: !!info.data.running },
-                        { a: "clear-cache", t: "Clear Cache", on: info.data.canClear !== false },
-                        { a: "clear-data", t: info.confirm === "clear-data" ? "Tap again: erase data" : "Clear Data", on: info.data.canClear !== false, danger: true },
+                        { a: "force-close", t: "Force Close", on: !!info.appData.running },
+                        { a: "clear-cache", t: "Clear Cache", on: info.appData.canClear !== false },
+                        { a: "clear-data", t: info.confirm === "clear-data" ? "Tap again: erase data" : "Clear Data", on: info.appData.canClear !== false, danger: true },
                         { a: "hide", t: info.app && Theme.isHidden(info.app.id) ? "Unhide" : "Hide", on: true },
-                        { a: "uninstall", t: info.confirm === "uninstall" ? "Tap again to uninstall" : "Uninstall", on: !!info.data.canUninstall, danger: true }
+                        { a: "uninstall", t: info.confirm === "uninstall" ? "Tap again to uninstall" : "Uninstall", on: !!info.appData.canUninstall, danger: true }
                     ]
                     Rectangle {
                         required property var modelData
@@ -192,7 +192,7 @@ PanelWindow {
             Text {
                 width: parent.width; wrapMode: Text.Wrap; horizontalAlignment: Text.AlignHCenter
                 visible: text !== ""
-                text: info.message || info.data.uninstallNote || ""
+                text: info.message || info.appData.uninstallNote || ""
                 color: Theme.subtext; font { family: Theme.font; pixelSize: 12 }
             }
         }
@@ -205,7 +205,7 @@ PanelWindow {
             if (e) ShellState.infoApp = e
         }
         function close(): void { ShellState.infoApp = null }
-        function kind(): string { return info.data.kind || "" }
+        function kind(): string { return info.appData.kind || "" }
         function openMenu(id: string): string {
             const e = DesktopEntries.applications.values.find(x => x.id === id)
             if (!e) return ""
