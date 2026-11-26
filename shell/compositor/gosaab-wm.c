@@ -1299,29 +1299,6 @@ static void layer_commit(struct wl_listener *listener, void *data) {
 			!wl_list_empty(&ls->surface->current.frame_callback_list)) {
 		schedule_frames(l->server);
 	}
-	if (getenv("GOSAAB_DEBUG_LAYERS") && ls->current.layer == ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND) {
-		static double last;
-		double now = now_ms();
-		if (now - last > 500) {
-			last = now;
-			struct wlr_scene_buffer *sb = NULL;
-			struct wlr_scene_node *child;
-			wl_list_for_each(child, &l->scene->tree->children, link) {
-				if (child->type == WLR_SCENE_NODE_TREE) {
-					struct wlr_scene_node *c2;
-					wl_list_for_each(c2, &wlr_scene_tree_from_node(child)->children, link) {
-						if (c2->type == WLR_SCENE_NODE_BUFFER) sb = wlr_scene_buffer_from_node(c2);
-					}
-				} else if (child->type == WLR_SCENE_NODE_BUFFER) {
-					sb = wlr_scene_buffer_from_node(child);
-				}
-			}
-			wlr_log(WLR_INFO, "bg commit %s mapped=%d callbacks=%d primary_output=%p bgtree=%p",
-				ls->namespace ? ls->namespace : "?", l->mapped,
-				!wl_list_empty(&ls->surface->current.frame_callback_list), sb ? (void *)sb->primary_output : (void *)-1,
-				(void *)background_tree);
-		}
-	}
 }
 
 static void layer_map(struct wl_listener *listener, void *data) {
