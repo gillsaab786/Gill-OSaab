@@ -26,6 +26,13 @@ when that reader is present; lock screen runs a separate gill-osaab-fprint PAM n
 Face unlock: up to 5 named faces. Google Play registration window (gosaab-android-register). Live
 wallpapers (shaders/*.frag -> .qsb at build): Earth (real day/night), Moon (real phase), Dunes (sky
 follows the day), Flow (accent + light/dark); stills in GillOSaab-Live. Not tested on real hardware.
+Note: shell CI runs Qt's software renderer (QT_QUICK_BACKEND=software): ShaderEffect draws nothing
+there, so live wallpapers show their stills in CI; the shaders are checked by qsb at build time.
+Torrent Search Engine (apps/torrent-search, copy of gillsaab786/torrent-search-engine-ipa at fe86afa):
+Flutter Linux build with lib/desktop/gill_desktop.dart (glass sidebar, Gill(OS) buttons, accent from
+appearance.json, see-through window). Runner patched by gill/patch_runner.py; apps.yml builds, tests
+and screenshots it (app-shots branch); recipe stage torrent-app ships it. Cloudflare sources off on
+Linux (no web view in Flutter Linux yet).
 Done 2026-11-27: Optional Features made real, all off by default: phone link (kde-connect, firewall via
 gosaab-features-apply), shared game library (gosaab-library: Steam shortcuts.vdf, tagged Gill(OS)), VRR
 (gamescope --adaptive-sync / GOSAAB_VRR in gosaab-wm), suspend-then-hibernate (swap file + sleep.conf,
