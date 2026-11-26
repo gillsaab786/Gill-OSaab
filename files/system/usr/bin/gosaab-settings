@@ -1450,7 +1450,7 @@ class Settings(QMainWindow):
                                        "with this one shortcut.", apps_row),
                                    Row("Website", "", self.group_url),
                                    Row("Will open", "", self.group_label),
-                                   Row("", "", clear),
+                                   Row("Start over", "Empties the list above.", clear),
                                    Row("Custom command", "Optional – used instead of the choices above.",
                                        self.command_edit),
                                    Row("3. Save", "", add)])
@@ -2454,7 +2454,13 @@ QPushButton#segRight { border-top-right-radius: 9px; border-bottom-right-radius:
 QPushButton#segLeft:checked, QPushButton#segMid:checked, QPushButton#segRight:checked { background: #1fb6c9; color: #ffffff; }
 QSpinBox { background: #34343a; border: none; border-radius: 9px; padding: 4px 8px; min-width: 70px; }
 QScrollArea { background: transparent; }
-QLineEdit#field { background: #34343a; border: none; border-radius: 9px; padding: 6px 10px; }
+QLineEdit#field, QLineEdit { background: #34343a; color: #f2f2f7; border: none; border-radius: 9px; padding: 6px 10px;
+    min-width: 200px; selection-background-color: #1fb6c9; }
+QComboBox { background: #34343a; color: #f2f2f7; border: none; border-radius: 9px; padding: 6px 28px 6px 10px;
+    min-width: 180px; }
+QComboBox::drop-down { border: none; width: 24px; }
+QComboBox QAbstractItemView { background: #2c2c30; color: #f2f2f7; border: 1px solid #3a3a40; border-radius: 8px;
+    selection-background-color: #1fb6c9; padding: 4px; }
 QSlider::groove:horizontal { height: 6px; background: #3a3a40; border-radius: 3px; }
 QSlider::sub-page:horizontal { background: #1fb6c9; border-radius: 3px; }
 QSlider::handle:horizontal { background: #ffffff; width: 22px; height: 22px; margin: -8px 0; border-radius: 11px; }
