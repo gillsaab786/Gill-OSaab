@@ -1,0 +1,5 @@
+
+(org.gillosaab.TorrentSearch:1295): Atk-CRITICAL **: 21:07:32.738: atk_socket_embed: assertion 'plug_id != NULL' failed
+[IMPORTANT:flutter/shell/platform/embedder/embedder_surface_gl_impeller.cc(127)] Using the Impeller rendering backend (OpenGLESSDF).
+
+** (org.gillosaab.TorrentSearch:1295): WARNING **: 21:07:42.661: Timed out waiting for OpenGL frame of size 1920x1080 (have 1180x760)
