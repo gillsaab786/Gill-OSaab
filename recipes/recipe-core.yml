@@ -21,6 +21,7 @@ stages:
         snippets:
           - dnf -y -q install git meson ninja-build gcc gcc-c++ glib2-devel libgusb-devel pixman-devel opencv-devel doctest-devel libgudev-devel systemd-devel cairo-devel >/dev/null
           - git clone -q https://github.com/archeYR/libfprint-CS9711 /src && git -C /src checkout -q 3c93fc2da6347624fc9c2d2f36a38fec64f99835
+          - sed -i "/^subdir('tests')/d;/^subdir('examples')/d" /src/meson.build # its tests need GObject introspection
           - meson setup /src/build /src --prefix=/usr --libdir=lib64 -Ddrivers=cs9711 -Dintrospection=false -Ddoc=false -Dgtk-examples=false -Dinstalled-tests=false -Dudev_rules=disabled -Dudev_hwdb=disabled || { grep -iE 'error|not found' /src/build/meson-logs/meson-log.txt | tail -25; exit 1; }
           - ninja -C /src/build >/dev/null
           - mkdir -p /out && cp -a /src/build/libfprint/libfprint-2.so* /out/ && ls -l /out
