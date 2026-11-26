@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'appearance.dart';
+import 'cloudflare.dart';
 import 'models.dart';
 import 'net.dart';
 import 'providers.dart';
@@ -14,8 +15,11 @@ class AppStore extends ChangeNotifier {
 
   List<String> history = [];
   List<TorrentResult> favourites = [];
-  Set<String> enabledProviders =
-      allProviders.where((p) => p.enabledByDefault).map((p) => p.id).toSet();
+  // Gill(OS): Cloudflare sources start off (their Verify needs a web view Flutter lacks on Linux)
+  Set<String> enabledProviders = allProviders
+      .where((p) => p.enabledByDefault && !(p.usesCloudflare && !CloudflareSession.canVerify))
+      .map((p) => p.id)
+      .toSet();
   Map<String, String> baseUrls = {};
   List<String> trackers = List.of(defaultTrackers);
   bool saveHistory = true;

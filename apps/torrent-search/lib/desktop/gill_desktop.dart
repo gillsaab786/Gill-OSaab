@@ -173,6 +173,10 @@ class _DesktopShellState extends State<DesktopShell> {
   }
 
   void _focusSearch() {
+    if (_tab == 0) {
+      SearchScreen.focusSearch?.call();
+      return;
+    }
     _select(0);
     WidgetsBinding.instance.addPostFrameCallback((_) => SearchScreen.focusSearch?.call());
   }

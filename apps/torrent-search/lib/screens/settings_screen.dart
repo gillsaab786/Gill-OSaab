@@ -17,6 +17,7 @@ class SettingsScreen extends StatelessWidget {
     final custom = (store.baseUrls[p.id] ?? '').isNotEmpty ? store.baseUrls[p.id]! : null;
     if (p.usesCloudflare) {
       final host = Uri.parse(custom ?? p.defaultBaseUrl).host;
+      if (!CloudflareSession.canVerify) return 'Behind Cloudflare: works in the iPhone app for now';
       return CloudflareSession.instance.isVerified(host) ? 'Verified ✓' : 'Needs a one-time Verify';
     }
     if (p.needsSetup && custom == null) return 'Not set up — tap to add your server';
