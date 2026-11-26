@@ -1,0 +1,6 @@
+linux/
+build/
+.dart_tool/
+.flutter-plugins*
+.metadata
+pubspec.lock

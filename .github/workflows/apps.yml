@@ -1,0 +1,56 @@
+name: gill-osaab-apps
+# Gill(OS) apps built from their own code: Torrent Search Engine (Flutter, Linux desktop target).
+# Builds on Fedora 45 (same as the OS), runs the app's tests, then opens it on a virtual screen at
+# desktop and handheld sizes, runs a search, and publishes screenshots to the app-shots branch.
+on:
+  push:
+    paths:
+      - "apps/**"
+      - ".github/workflows/apps.yml"
+  workflow_dispatch:
+
+jobs:
+  torrent-search:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build, test, screenshots
+        run: |
+          mkdir -p shots
+          docker run --rm -v "$PWD":/src -w /src registry.fedoraproject.org/fedora:45 bash -c '
+            set -e
+            dnf -y -q install git clang cmake ninja-build gtk3-devel pkgconf-pkg-config xz-devel libstdc++-devel \
+              unzip which xz curl python3 xorg-x11-server-Xvfb ImageMagick xdotool mesa-dri-drivers \
+              google-noto-sans-fonts dbus-x11 >/dev/null
+            sh apps/torrent-search/gill/build.sh apps/torrent-search /tmp/bundle 2>&1 | tail -60
+            ls /tmp/bundle
+            cp -r /tmp/bundle shots/bundle
+            shoot() { # size name search
+              Xvfb :9 -screen 0 ${1}x24 >/dev/null 2>&1 & X=$!; sleep 2
+              export DISPLAY=:9 GDK_BACKEND=x11 LIBGL_ALWAYS_SOFTWARE=1 NO_AT_BRIDGE=1
+              mkdir -p $HOME/.config/gill-osaab
+              echo "{\"accent\": \"$3\"}" > $HOME/.config/gill-osaab/appearance.json
+              dbus-launch /tmp/bundle/torrent-search-engine >shots/app-$2.log 2>&1 & A=$!
+              sleep 10
+              W=$(xdotool search --onlyvisible --name "Torrent Search Engine" | head -1)
+              [ -n "$W" ] && xdotool windowmove $W 0 0 windowsize $W ${1%x*} ${1#*x}
+              sleep 3; import -window root shots/$2-1-start.png
+              xdotool key ctrl+f; sleep 0.6; xdotool type --delay 50 "ubuntu 24.04"; xdotool key Return
+              sleep 25; import -window root shots/$2-2-results.png
+              xdotool key ctrl+2; sleep 1.5; import -window root shots/$2-3-saved.png
+              xdotool key ctrl+3; sleep 1.5; import -window root shots/$2-4-settings.png
+              kill $A $X 2>/dev/null || true; sleep 1
+            }
+            shoot 1920x1080 desktop "#0a84ff"
+            shoot 1280x800 handheld "#bf5af2"
+            ls shots'
+      - name: Publish screenshots to the app-shots branch
+        if: always()
+        run: |
+          sudo chown -R "$(id -u)" shots 2>/dev/null || exit 0
+          cd shots && rm -rf bundle
+          git init -q && git checkout -q -b app-shots
+          git add -A && git -c user.name=gill-osaab-ci -c user.email=ci@gill-osaab.local commit -qm "app screens for ${GITHUB_SHA}"
+          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" app-shots

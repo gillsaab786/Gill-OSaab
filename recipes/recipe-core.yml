@@ -26,6 +26,15 @@ stages:
           - ninja -C /src/build >/dev/null
           - mkdir -p /out && cp -a /src/build/libfprint/libfprint-2.so* /out/ && ls -l /out
 
+  # Torrent Search Engine (Jas's app, apps/torrent-search): Flutter's Linux build of the same code
+  - name: torrent-app
+    from: quay.io/fedora/fedora:45
+    modules:
+      - type: containerfile
+        snippets:
+          - COPY apps/torrent-search /src/app
+          - RUN dnf -y -q install git clang cmake ninja-build gtk3-devel pkgconf-pkg-config xz-devel libstdc++-devel unzip which xz curl python3 >/dev/null && SKIP_TESTS=1 sh /src/app/gill/build.sh /src/app /out
+
 modules:
   - type: dnf
     repos:
@@ -88,6 +97,7 @@ modules:
         - fprintd
         - fprintd-pam
         - opencv-core # for the GPD Win Max 2's CS9711 reader (driver built in the stage below)
+        - gtk3 # Torrent Search Engine (Flutter app) draws with GTK 3
         - python3-evdev
         - pciutils
         - wdisplays
@@ -171,6 +181,11 @@ modules:
         - wvkbd
 
   - from-file: common.yml
+
+  - type: copy
+    from: torrent-app
+    src: /out/
+    dest: /usr/lib/gill-osaab/apps/torrent-search/
 
   - type: copy
     from: fprint-cs9711

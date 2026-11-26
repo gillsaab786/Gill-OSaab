@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=Torrent Search Engine
+GenericName=Torrent search
+Comment=Ad-free torrent search across 22 public indexes; opens magnet links in your torrent app
+Exec=/usr/lib/gill-osaab/apps/torrent-search/torrent-search-engine
+Icon=org.gillosaab.TorrentSearch
+Terminal=false
+Type=Application
+Categories=Network;FileTransfer;P2P;
+Keywords=torrent;magnet;search;download;
+StartupWMClass=org.gillosaab.TorrentSearch
