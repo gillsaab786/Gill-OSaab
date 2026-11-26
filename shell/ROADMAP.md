@@ -31,6 +31,7 @@ there, so live wallpapers show their stills in CI; the shaders are checked by qs
 Live wallpapers 2 (original designs inspired by the Pixel 2018 set, no Google assets): Pluto, City,
 Lake, Shore, Bubbles, Shapes. Sun position from location: gosaab-location (nmcli Wi-Fi -> BeaconDB,
 else weather city via Open-Meteo geocoding) -> ~/.cache/gill-osaab/location.json, every 3 h.
+Bug sweep (Nov 27): apps with no icon showed a blank tile; IconTile now draws a lettered accent squircle.
 SoundViz (audio-reactive) not done. Torrent Search Cloudflare on Linux: lib/desktop/linux_browser.dart
 (Brave --app window for Verify, headless --dump-dom with a cookie copy for searches).
 Torrent Search Engine (apps/torrent-search, copy of gillsaab786/torrent-search-engine-ipa at fe86afa):
