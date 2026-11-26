@@ -19,7 +19,8 @@ from PySide6.QtWidgets import (QAbstractButton, QApplication, QButtonGroup, QCom
                                QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QScrollArea, QSpinBox,
                                QStackedWidget, QVBoxLayout, QWidget)
 
-ACCENT = QColor(31, 182, 201)
+DEFAULT_ACCENT = "#0a84ff"  # same as the desktop's (Theme.qml)
+ACCENT = QColor(DEFAULT_ACCENT)
 VERSION_FILE = Path("/usr/share/gill-osaab/version")
 UPDATER = "gosaab-update-component"
 FREQUENCIES = [("daily", "Every day"), ("weekly", "Every week"), ("2weeks", "Every 2 weeks"),
@@ -827,7 +828,7 @@ def segmented(options, current, on_pick):
     return box
 
 
-ACCENTS = [("#0a84ff", "Blue"), ("#bf5af2", "Purple"), ("#ff375f", "Pink"), ("#ff453a", "Red"),
+ACCENTS = [("#0a84ff", "Blue"), ("#1fb6c9", "Teal"), ("#bf5af2", "Purple"), ("#ff375f", "Pink"), ("#ff453a", "Red"),
            ("#ff9f0a", "Orange"), ("#ffd60a", "Yellow"), ("#30d158", "Green"), ("#8e8e93", "Graphite")]
 LIGHT_COLORS = [("0a84ff", "Blue"), ("64d2ff", "Cyan"), ("30d158", "Green"), ("ffd60a", "Yellow"),
                 ("ff9f0a", "Orange"), ("ff2d55", "Red"), ("ff64d2", "Pink"), ("bf5af2", "Purple"), ("ffffff", "White")]
@@ -1073,8 +1074,7 @@ class Page(QScrollArea):
 
 # ------------------------------------------------------------------ window
 PAGES = [
-    # title, tile colour, glyph (drawn by draw_glyph), letter. Updates sit at the bottom, above About.
-    ("Problems", "#FF453A", "warning", "!"),
+    # title, tile colour, glyph (drawn by draw_glyph), letter. Updates and Problems sit at the bottom.
     ("Device", "#30D158", "chip", "D"),
     ("Apps & Security", "#5E5CE6", "shield", "S"),
     ("App Folders", "#64D2FF", "folder", "F"),
@@ -1090,6 +1090,7 @@ PAGES = [
     ("System Update", "#0A84FF", "update", "U"),
     ("Translation Update", "#5E5CE6", "layers", "T"),
     ("Drivers Update", "#FF9F0A", "wrench", "W"),
+    ("Problems", "#FF453A", "warning", "!"),
     ("About", "#8E8E93", "info", "i"),
 ]
 
@@ -1137,10 +1138,10 @@ class Settings(QMainWindow):
         layout.addWidget(self.stack, 1)
         self.setCentralWidget(root)
 
-        builders = [self.page_problems, self.page_device, self.page_security, self.page_folders,
+        builders = [self.page_device, self.page_security, self.page_folders,
                     self.page_vpn_cloud, self.page_glasses, self.page_notifications, self.page_screen,
                     self.page_appearance, self.page_gamemode, self.page_lights, self.page_shortcuts, self.page_optional,
-                    self.page_updates, self.page_translation, self.page_drivers, self.page_about]
+                    self.page_updates, self.page_translation, self.page_drivers, self.page_problems, self.page_about]
         self.pages = []
         for (name, color, glyph, letter), builder in zip(PAGES, builders):
             item = QListWidgetItem(tile_icon(color, glyph, letter), name)
@@ -1915,8 +1916,8 @@ class Settings(QMainWindow):
                 self.apply_scheme("GillOSaabDark" if mode == "dark" else "GillOSaabLight")
         self.mode_picker = picker([(m, PreviewTile(m.capitalize(), paint_mode(light, dark, m)))
                                    for m in ("auto", "light", "dark")], ap.get("mode", "dark"), set_mode, 14)
-        self.accent_picker = picker([(c, ColorDot(c, n)) for c, n in ACCENTS], ap.get("accent", "#0a84ff"),
-                                    lambda c: self.backend.set_appearance("accent", c), 4)
+        self.accent_picker = picker([(c, ColorDot(c, n)) for c, n in ACCENTS], ap.get("accent", DEFAULT_ACCENT),
+                                    lambda c: (self.backend.set_appearance("accent", c), apply_accent(c)), 4)
         p.section("Appearance", [
             Row("", "", self.mode_picker),
             Row("Accent colour", "Buttons, switches and selections.", self.accent_picker),
@@ -2471,18 +2472,31 @@ QScrollBar:horizontal { height: 0; background: transparent; }
 """
 
 
+def accent_style(color):
+    """The Settings style sheet in an accent colour (buttons, switches, links, sliders, selections)."""
+    c = QColor(color) if isinstance(color, str) and QColor.isValidColorName(color) else QColor(DEFAULT_ACCENT)
+    return (STYLE.replace("#1fb6c9", c.name()).replace("#27c7db", c.lighter(115).name())
+            .replace("#5ad2e2", c.lighter(140).name() if c.lightness() < 150 else c.name()))
+
+
+def apply_accent(color):
+    """Use an accent colour now: Settings and everything it draws follow at once (the desktop
+    follows through appearance.json)."""
+    global ACCENT
+    ACCENT = QColor(color) if isinstance(color, str) and QColor.isValidColorName(color) else QColor(DEFAULT_ACCENT)
+    app = QApplication.instance()
+    if app:
+        app.setStyleSheet(accent_style(ACCENT.name()))
+        for w in app.allWidgets():
+            w.update()
+
+
 def main():
     app = QApplication(sys.argv)
     app.setApplicationName("Gill(OS) Settings")
     app.setDesktopFileName("gosaab-settings")
     # the accent colour picked in Appearance tints Settings too
-    accent = Backend().appearance().get("accent", "")
-    style = STYLE
-    if isinstance(accent, str) and len(accent) == 7 and accent.startswith("#"):
-        global ACCENT
-        ACCENT = QColor(accent)
-        style = style.replace("#1fb6c9", accent).replace("#27c7db", QColor(accent).lighter(115).name())
-    app.setStyleSheet(style)
+    apply_accent(Backend().appearance().get("accent", DEFAULT_ACCENT))
     w = Settings()
     # open a page directly: gosaab-settings vpn | about | game | folders | glasses ...
     want = (sys.argv[1] if len(sys.argv) > 1 else "").lower()

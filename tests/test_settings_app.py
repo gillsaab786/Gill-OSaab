@@ -264,7 +264,7 @@ class SettingsApp(unittest.TestCase):
         w = self.gs.Settings(FakeBackend())
         self.assertEqual(w.stack.count(), 17)
         titles = [w.nav.item(i).text() for i in range(w.nav.count())]
-        self.assertEqual(titles[-4:], ["System Update", "Translation Update", "Drivers Update", "About"])
+        self.assertEqual([t.split(" (")[0] for t in titles[-5:]], ["System Update", "Translation Update", "Drivers Update", "Problems", "About"])
         for i in range(14):
             w.nav.setCurrentRow(i)
             self.assertEqual(w.stack.currentIndex(), i)
@@ -399,7 +399,8 @@ class NewPages(unittest.TestCase):
 
     def test_problems_page_lists_and_copies(self):
         w = self.gs.Settings(FakeBackend())
-        self.assertTrue(w.nav.item(0).text().startswith("Problems (1)"))
+        titles = [w.nav.item(i).text() for i in range(w.nav.count())]
+        self.assertTrue(titles[-2].startswith("Problems (1)"))  # second last, above About
         w.copy_report(self.gs.QPushButton())
         self.assertIn("foot crashed", self.app.clipboard().text() or "foot crashed")
 
@@ -595,8 +596,11 @@ class TahoeAppearance(unittest.TestCase):
         self.assertTrue(tiles["Dark"].isChecked())  # dark is the default
         tiles["Auto"].click()
         self.assertEqual(b.ap["mode"], "auto")
-        w.accent_picker.group.buttons()[1].click()
+        w.accent_picker.group.buttons()[2].click()
         self.assertEqual(b.ap["accent"], "#bf5af2")
+        self.assertEqual(self.gs.ACCENT.name(), "#bf5af2")  # Settings re-colours straight away
+        self.assertIn("#bf5af2", self.app.styleSheet())
+        self.assertNotIn("#1fb6c9", self.gs.accent_style("#ff9f0a"))
         {t.label: t for t in w.icon_picker.group.buttons()}["Tinted"].click()
         self.assertEqual(b.ap["iconStyle"], "tinted")
         w.glass_seg.group.buttons()[1].click()
