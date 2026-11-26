@@ -23,7 +23,7 @@ jobs:
             set -e
             dnf -y -q install git clang cmake ninja-build gtk3-devel pkgconf-pkg-config xz-devel libstdc++-devel \
               unzip which xz curl python3 xorg-x11-server-Xvfb ImageMagick xdotool mesa-dri-drivers \
-              google-noto-sans-fonts dbus-x11 >/dev/null
+              google-noto-sans-fonts dbus-x11 chromium >/dev/null
             sh apps/torrent-search/gill/build.sh apps/torrent-search /tmp/bundle 2>&1 | tail -60
             ls /tmp/bundle
             cp -r /tmp/bundle shots/bundle

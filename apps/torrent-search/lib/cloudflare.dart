@@ -9,6 +9,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'appearance.dart';
+import 'desktop/linux_browser.dart';
 
 /// The site shows Cloudflare's "checking your browser" page; the user needs to
 /// pass it once in the in-app browser.
@@ -60,8 +61,8 @@ class CloudflareSession {
   CloudflareSession._();
   static final instance = CloudflareSession._();
 
-  /// The Verify screen needs a web view; on Gill(OS) (Linux) Flutter has none yet.
-  static bool get canVerify => !Platform.isLinux;
+  /// The Verify screen needs a web view; on Gill(OS) (Linux) the system browser stands in.
+  static bool get canVerify => !Platform.isLinux || LinuxBrowser.instance.available;
 
   String? userAgent;
   final Map<String, DateTime> verifiedAt = {};
@@ -147,7 +148,7 @@ class CloudflareSession {
   }
 
   Future<String> _browserFetch(Uri uri) async {
-    if (!canVerify) throw CloudflareChallenge(uri.host, uri.replace(path: '/', query: ''));
+    if (Platform.isLinux) return _linuxFetch(uri);
     final done = Completer<String>();
     final view = HeadlessInAppWebView(
       initialUrlRequest: URLRequest(url: WebUri.uri(uri)),
@@ -184,6 +185,26 @@ class CloudflareSession {
   }
 }
 
+extension on CloudflareSession {
+  /// Gill(OS): load a verified site's page with the system browser (same identity, same pass).
+  Future<String> _linuxFetch(Uri uri) async {
+    final home = uri.replace(path: '/', query: '');
+    if (!LinuxBrowser.instance.available || !isVerified(uri.host)) throw CloudflareChallenge(uri.host, home);
+    final String html;
+    try {
+      html = await LinuxBrowser.instance.fetch(uri);
+    } catch (e) {
+      throw SourceUnreachable(_shortReason(e));
+    }
+    if (looksLikeChallenge(html)) {
+      verifiedAt.remove(uri.host); // the pass expired: ask again
+      throw CloudflareChallenge(uri.host, home);
+    }
+    if (html.trim().length < 64) throw SourceUnreachable('empty page');
+    return html;
+  }
+}
+
 /// Full-screen browser where the user passes the Cloudflare check once.
 /// Tries each address in [candidates] (the site, then its mirrors) and pops
 /// with the address that worked, or null.
@@ -194,7 +215,7 @@ class VerifyScreen extends StatefulWidget {
       : candidates = candidates ?? [homepage!];
 
   @override
-  State<VerifyScreen> createState() => _VerifyScreenState();
+  State<VerifyScreen> createState() => Platform.isLinux ? _LinuxVerifyState() : _VerifyScreenState();
 }
 
 class _VerifyScreenState extends State<VerifyScreen> {
@@ -339,6 +360,85 @@ class _VerifyScreenState extends State<VerifyScreen> {
           child: Text('Retry ${_current.host}', style: TextStyle(color: accent)),
         ),
       ]),
+    );
+  }
+}
+
+
+/// Gill(OS): the check happens in a small browser window; this screen waits for it.
+class _LinuxVerifyState extends State<VerifyScreen> {
+  int _index = 0;
+  bool _passed = false;
+
+  Uri get _current => widget.candidates[_index];
+
+  @override
+  void initState() {
+    super.initState();
+    _run();
+  }
+
+  Future<void> _run() async {
+    if (!LinuxBrowser.instance.available) {
+      if (mounted) Navigator.pop(context);
+      return;
+    }
+    for (_index = 0; _index < widget.candidates.length; _index++) {
+      if (!mounted) return;
+      setState(() {});
+      final ua = await LinuxBrowser.instance.verify(_current);
+      if (!mounted) return;
+      if (ua != null) {
+        await CloudflareSession.instance.markVerified(_current.host, ua);
+        setState(() => _passed = true);
+        await Future.delayed(const Duration(milliseconds: 900));
+        if (mounted) Navigator.pop(context, _current);
+        return;
+      }
+      break; // the window was closed: the user gave up on this site
+    }
+    if (mounted) Navigator.pop(context);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = Theme.of(context).colorScheme.primary;
+    return Scaffold(
+      backgroundColor: Colors.black.withValues(alpha: 0.55),
+      body: Center(
+        child: Container(
+          width: 440,
+          padding: const EdgeInsets.fromLTRB(28, 26, 28, 18),
+          decoration: BoxDecoration(
+            color: const Color(0xF01C1C1E),
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+          ),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Icon(_passed ? CupertinoIcons.checkmark_shield_fill : CupertinoIcons.shield_lefthalf_fill,
+                size: 46, color: _passed ? const Color(0xFF30D158) : accent),
+            const SizedBox(height: 14),
+            Text(_passed ? 'Verified' : 'Verify ${widget.siteName}',
+                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 8),
+            Text(
+              _passed
+                  ? 'Searches include ${widget.siteName} now.'
+                  : 'A browser window opened with ${_current.host}. Pass the check there '
+                      '(tick the box if asked). It closes by itself when done.',
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 14, color: Ios.secondaryLabel, height: 1.4),
+            ),
+            const SizedBox(height: 18),
+            if (!_passed) CupertinoActivityIndicator(color: accent),
+            const SizedBox(height: 8),
+            CupertinoButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text(_passed ? 'Done' : 'Cancel', style: TextStyle(color: accent)),
+            ),
+          ]),
+        ),
+      ),
     );
   }
 }

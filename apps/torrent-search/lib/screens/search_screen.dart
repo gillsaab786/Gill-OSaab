@@ -297,7 +297,7 @@ class _SearchScreenState extends State<SearchScreen> {
             CloudflareSession.canVerify
                 ? '${_needsVerify.length} more source${_needsVerify.length == 1 ? '' : 's'} need a one-time check\n$names'
                 : '${_needsVerify.length} source${_needsVerify.length == 1 ? '' : 's'} need a browser check '
-                    '(only in the iPhone app for now)\n$names',
+                    '(install Brave or Chromium)\n$names',
             style: const TextStyle(fontSize: 13, color: Ios.secondaryLabel),
           ),
         ),
