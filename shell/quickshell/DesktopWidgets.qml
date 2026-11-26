@@ -77,7 +77,7 @@ PanelWindow {
         property bool wide: false
         width: wide ? 362 : 175; height: 175
         radius: 26
-        color: Theme.mix(Qt.rgba(1, 1, 1, 0.42), Qt.rgba(0.08, 0.09, 0.12, 0.42))
+        color: Theme.amoled ? Qt.rgba(0, 0, 0, 0.9) : Theme.mix(Qt.rgba(1, 1, 1, 0.42), Qt.rgba(0.08, 0.09, 0.12, 0.42))
         GlassRim { radius: 26 }
         Item { id: inner; anchors { fill: parent; margins: 16 } }
     }
@@ -101,7 +101,9 @@ PanelWindow {
         }
         Card { // Weather
             visible: Theme.widgetOn("weather", true)
-            gradient: Gradient {
+            gradient: Theme.amoled ? null : weatherSky
+            Gradient {
+                id: weatherSky
                 GradientStop { position: 0; color: desk.weather.day === false ? Qt.rgba(0.10, 0.14, 0.32, 0.78) : Qt.rgba(0.20, 0.52, 0.95, 0.72) }
                 GradientStop { position: 1; color: desk.weather.day === false ? Qt.rgba(0.05, 0.07, 0.18, 0.78) : Qt.rgba(0.36, 0.68, 1.0, 0.62) }
             }
