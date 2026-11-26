@@ -206,3 +206,23 @@ class Memory(unittest.TestCase):
         conf = (ROOT / "files/system/usr/lib/systemd/zram-generator.conf").read_text()
         self.assertIn("compression-algorithm = zstd", conf)
         self.assertIn("vm.swappiness = 180", (ROOT / "files/system/usr/lib/sysctl.d/60-gill-osaab.conf").read_text())
+
+
+class ThirtyFps(unittest.TestCase):
+    def test_glasses_page_offers_30_fps(self):
+        try:
+            from PySide6.QtWidgets import QApplication
+        except ImportError:
+            self.skipTest("no Qt")
+        import sys
+        sys.path.insert(0, os.path.dirname(__file__))
+        from test_settings_app import FakeBackend
+        gs = load("usr/bin/gosaab-settings")
+        app = QApplication.instance() or QApplication([])
+        b = FakeBackend()
+        saved = {}
+        b.set_glasses_key = lambda k, v: saved.__setitem__(k, v)
+        w = gs.Settings(b)
+        combo = w.glasses_hz["org.azahar_emu.azahar"]
+        combo.setCurrentIndex(combo.findData("30"))
+        self.assertEqual(saved["hz.org.azahar_emu.azahar"], "30")

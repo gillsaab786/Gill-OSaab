@@ -2389,6 +2389,7 @@ class Settings(QMainWindow):
             self.glasses_combo[app] = combo
             hz = QComboBox()
             hz.addItem("Any Hz", "")
+            hz.addItem("30 FPS (on 60 Hz)", "30")  # each frame shown exactly twice: smooth 30
             for r in ("60", "72", "90", "120"):
                 hz.addItem(f"{r} Hz", r)
             hz.setCurrentIndex(max(0, hz.findData(conf.get(f"hz.{app}", ""))))
@@ -2401,7 +2402,8 @@ class Settings(QMainWindow):
             bl.addWidget(hz)
             rows.append(Row(app, "", both))
         p.section("Per-app modes", rows, "When one of these apps is in front, the glasses switch to its mode and "
-                  "refresh rate (match the game: 60 Hz for most emulators, so motion is smooth).")
+                  "refresh rate. Match the game: 60 Hz for most emulators (3DS games at 30 FPS still look smooth at 60 Hz, "
+                  "each frame shows twice); choose 30 FPS to lock a game to 30 for steadier frames and longer battery.")
         p.finish()
         return p
 

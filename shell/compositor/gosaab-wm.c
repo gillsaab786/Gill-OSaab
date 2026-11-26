@@ -126,6 +126,7 @@ static const float COLOR_BUTTON_INACTIVE[4] = { 0.30f, 0.30f, 0.32f, 1.0f };
 enum gs_cursor_mode { CURSOR_PASSTHROUGH, CURSOR_MOVE, CURSOR_RESIZE };
 
 struct gs_server {
+	struct wl_event_source *fps_caps_timer;
 	struct wl_display *display;
 	struct wlr_backend *backend;
 	struct wlr_renderer *renderer;
@@ -270,6 +271,7 @@ struct gs_toplevel {
 	struct wlr_box geo_from;    /* visual box (layout coords) the glide starts from */
 	bool geo_pending;           /* waiting for the app to draw at its new size, then glide */
 	bool launch_zoom;           /* geo glide is an app opening out of its Dock/Launchpad icon */
+	double next_frame_ms;       /* frame-rate cap: when this app may draw its next frame */
 	struct gs_anim focus_anim;  /* shadow deepens / lightens on focus change */
 	struct gs_slot ov;          /* place in Mission Control */
 	int ws;                     /* which space this window lives on */
@@ -2839,6 +2841,96 @@ static void cursor_frame(struct wl_listener *listener, void *data) {
 
 /* ------------------------------------------------------------------ outputs */
 
+/* Frame-rate caps per app (e.g. 30 FPS for a 3DS game on 60 Hz glasses: each frame shows twice,
+ * evenly). The shell writes "app-id fps" lines to $XDG_RUNTIME_DIR/gosaab-fps-cap; read once a second
+ * when it changes. A capped app is told "draw now" only every 1/fps seconds. */
+#define FPS_CAPS_MAX 32
+static struct { char app[128]; int fps; } fps_caps[FPS_CAPS_MAX];
+static int fps_caps_n;
+static time_t fps_caps_mtime;
+
+static void fps_caps_reload(void) {
+	const char *runtime = getenv("XDG_RUNTIME_DIR");
+	char path[512];
+	snprintf(path, sizeof(path), "%s/gosaab-fps-cap", runtime ? runtime : "/tmp");
+	struct stat st;
+	if (stat(path, &st) != 0) {
+		fps_caps_n = 0;
+		fps_caps_mtime = 0;
+		return;
+	}
+	if (st.st_mtime == fps_caps_mtime) {
+		return;
+	}
+	fps_caps_mtime = st.st_mtime;
+	fps_caps_n = 0;
+	FILE *f = fopen(path, "r");
+	if (!f) {
+		return;
+	}
+	char app[128];
+	int fps;
+	while (fps_caps_n < FPS_CAPS_MAX && fscanf(f, "%127s %d", app, &fps) == 2) {
+		if (fps >= 10 && fps <= 240) {
+			snprintf(fps_caps[fps_caps_n].app, sizeof(fps_caps[0].app), "%s", app);
+			fps_caps[fps_caps_n++].fps = fps;
+		}
+	}
+	fclose(f);
+}
+
+static int fps_cap_for(struct gs_toplevel *t) {
+	const char *app = t->xdg_toplevel ? t->xdg_toplevel->app_id : NULL;
+	if (!app) {
+		return 0;
+	}
+	for (int i = 0; i < fps_caps_n; i++) {
+		if (strcasecmp(fps_caps[i].app, app) == 0) {
+			return fps_caps[i].fps;
+		}
+	}
+	return 0;
+}
+
+static int fps_caps_tick(void *data) {
+	struct gs_server *server = data;
+	fps_caps_reload();
+	wl_event_source_timer_update(server->fps_caps_timer, 1000);
+	return 0;
+}
+
+/* like wlr_scene_output_send_frame_done, but holds back capped apps until their next frame is due */
+static bool send_frame_done_capped(struct wlr_scene_node *node, struct wlr_scene_output *so,
+		struct timespec *now, double now_msv, bool held) {
+	if (!node->enabled) {
+		return held;
+	}
+	if (node->type == WLR_SCENE_NODE_BUFFER) {
+		struct wlr_scene_frame_done_event event = { .output = so, .when = *now };
+		wlr_scene_buffer_send_frame_done(wlr_scene_buffer_from_node(node), &event);
+		return held;
+	}
+	if (node->type != WLR_SCENE_NODE_TREE) {
+		return held;
+	}
+	struct gs_toplevel *t = node->data;
+	if (t && fps_caps_n > 0) {
+		int cap = fps_cap_for(t);
+		if (cap > 0) {
+			if (now_msv < t->next_frame_ms) {
+				return true; /* not yet: skip this app's frame callbacks this time */
+			}
+			double period = 1000.0 / cap;
+			t->next_frame_ms = (now_msv - t->next_frame_ms < period) ? t->next_frame_ms + period : now_msv + period;
+		}
+	}
+	struct wlr_scene_node *child;
+	wl_list_for_each(child, &wlr_scene_tree_from_node(node)->children, link) {
+		held = send_frame_done_capped(child, so, now, now_msv, held);
+	}
+	return held;
+}
+
 static void output_frame(struct wl_listener *listener, void *data) {
 	struct gs_output *output = wl_container_of(listener, output, frame);
 	struct gs_server *server = output->server;
@@ -2847,8 +2939,8 @@ static void output_frame(struct wl_listener *listener, void *data) {
 	wlr_scene_output_commit(scene_output, NULL);
 	struct timespec now;
 	clock_gettime(CLOCK_MONOTONIC, &now);
-	wlr_scene_output_send_frame_done(scene_output, &now);
-	if (animating) {
+	bool held = send_frame_done_capped(&server->scene->tree.node, scene_output, &now, now_ms(), false);
+	if (animating || held) { /* a capped app is waiting: keep frames coming until it is due */
 		wlr_output_schedule_frame(output->wlr_output);
 	}
 }
@@ -3190,6 +3282,8 @@ int main(int argc, char *argv[]) {
 	server.scale = 1.0f;
 	server.display = wl_display_create();
 	struct wl_event_loop *loop = wl_display_get_event_loop(server.display);
+	server.fps_caps_timer = wl_event_loop_add_timer(loop, fps_caps_tick, &server);
+	wl_event_source_timer_update(server.fps_caps_timer, 1000);
 	server.backend = wlr_backend_autocreate(loop, NULL);
 	if (server.backend == NULL) {
 		wlr_log(WLR_ERROR, "failed to create backend");
