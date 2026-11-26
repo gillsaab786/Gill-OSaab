@@ -1,0 +1,18 @@
+#!/bin/sh
+# fprintd, with the community Chipsailing CS9711 driver (GPD Win Max 2 2023+, USB 2541:9711 or
+# 2541:0236) when that reader is plugged in. Every other reader uses Fedora's libfprint.
+lib=/usr/lib64/gill-osaab/fprint-cs9711
+for d in /sys/bus/usb/devices/*; do
+  [ "$(cat "$d/idVendor" 2>/dev/null)" = 2541 ] || continue
+  case "$(cat "$d/idProduct" 2>/dev/null)" in
+    9711|0236)
+      if [ -e "$lib/libfprint-2.so.2" ]; then
+        # only if every library it needs is there (else the standard one, which at least starts)
+        if ! command -v ldd >/dev/null || ! LD_LIBRARY_PATH=$lib ldd /usr/libexec/fprintd | grep -q "not found"; then
+          export LD_LIBRARY_PATH=$lib
+        fi
+      fi
+      ;;
+  esac
+done
+exec /usr/libexec/fprintd "$@"

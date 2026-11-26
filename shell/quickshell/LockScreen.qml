@@ -25,6 +25,17 @@ Scope {
         pam.messageText = ""
         pam.start()
     }
+    // Fingerprint (Settings > Apps & Security): checked alongside the password, like Touch ID.
+    // Its own PAM stack (gill-osaab-fprint: pam_fprintd only), so typing a password still works.
+    FileView { id: fpConf; path: "/etc/gill-osaab/fingerprint.conf"; blockLoading: true }
+    readonly property bool fingerUnlock: fpConf.text().indexOf("enabled=on") >= 0
+    property int fingerTries: 0
+    function tryFinger() {
+        if (!fingerUnlock || fp.active || !sessionLock.locked || fingerTries >= 3) return
+        fingerTries++
+        fp.start()
+    }
+    Timer { id: fingerRetry; interval: 1500; onTriggered: root.tryFinger() }
     // typed password: answer the waiting prompt, or start a new check
     // Each screen has its own password field; they share what's typed through these:
     property string typed: ""
@@ -35,10 +46,10 @@ Scope {
         if (pam.active && pam.responseRequired) pam.respond(typed)
         else if (!pam.active) pam.start()
     }
-    function unlock() { cover = true; unlockTimer.start() }
+    function unlock() { cover = true; if (fp.active) fp.abort(); unlockTimer.start() }
     Timer { id: unlockTimer; interval: 300; onTriggered: sessionLock.locked = false }
     Timer { id: revealTimer; interval: 30; onTriggered: { root.cover = false; faceTimer.start() } }
-    Timer { id: faceTimer; interval: 400; onTriggered: root.tryFace() }
+    Timer { id: faceTimer; interval: 400; onTriggered: { root.tryFace(); root.fingerTries = 0; root.tryFinger() } }
 
     WlSessionLock {
         id: sessionLock
@@ -152,6 +163,15 @@ Scope {
                     MouseArea { anchors.fill: parent; anchors.margins: -10; enabled: !root.lookingForFace
                         onClicked: { if (pam.active) pam.abort(); root.tryFace() } }
                 }
+                Text { // fingerprint: touch the sensor
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    visible: root.fingerUnlock
+                    text: fp.active ? "Touch the fingerprint sensor" : "Use fingerprint again"
+                    color: Qt.rgba(1, 1, 1, fp.active ? 0.95 : 0.75)
+                    font { family: Theme.font; pixelSize: 13; weight: Font.DemiBold }
+                    MouseArea { anchors.fill: parent; anchors.margins: -10; enabled: !fp.active
+                        onClicked: { root.fingerTries = 0; root.tryFinger() } }
+                }
                 Text { // show/hide the touch keyboard
                     anchors.horizontalCenter: parent.horizontalCenter
                     text: root.keyboard ? "Hide keyboard" : "Show keyboard"
@@ -206,6 +226,25 @@ Scope {
             }
         }
         onError: pam.messageText = "Could not check the password"
+    }
+
+    PamContext {
+        id: fp
+        config: "gill-osaab-fprint"
+        user: root.user
+        onCompleted: result => {
+            if (!sessionLock.locked) return
+            if (result === PamResult.Success) {
+                if (pam.active) pam.abort()
+                root.clearPassword()
+                pam.messageText = ""
+                ShellState.haptic("success")
+                root.unlock()
+            } else {
+                pam.messageText = "Fingerprint not recognised"
+                fingerRetry.start()
+            }
+        }
     }
 
     IpcHandler {

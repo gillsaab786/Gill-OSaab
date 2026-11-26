@@ -232,6 +232,9 @@ class FakeBackend:
     def face_status(self):
         return getattr(self, "face", {"available": False, "camera": None})
 
+    def fingerprint_status(self):
+        return getattr(self, "fp", {"available": True, "reader": None})
+
     def secure_boot(self):
         return getattr(self, "sb", {"supported": True, "enabled": False, "nvidia_edition": False, "pending": ""})
 
@@ -623,8 +626,29 @@ class FaceUnlockPage(unittest.TestCase):
         self.assertNotIn("Set up…", names())
         b.face = {"available": True, "camera": "Integrated IR Camera", "enabled": False}
         self.assertIn("Set up…", names())
-        b.face["enabled"] = True
-        self.assertIn("Turn off and forget face", names())
+        b.face.update(enabled=True, faces=[{"id": 0, "name": "Jas"}, {"id": 1, "name": "Mum"}], max=5)
+        self.assertIn("Turn off and forget all faces", names())
+        self.assertIn("Add a face…", names())
+        self.assertEqual(names().count("Remove"), 2)
+        b.face["faces"] = [{"id": i, "name": f"P{i}"} for i in range(5)]
+        add = [x for x in gs.Settings(b).findChildren(gs.QPushButton) if x.text() == "Add a face…"][0]
+        self.assertFalse(add.isEnabled(), "5 faces is the most")
+
+
+@unittest.skipUnless(HAVE_QT, "PySide6 not installed")
+class FingerprintPage(unittest.TestCase):
+    def test_states(self):
+        from PySide6.QtWidgets import QApplication
+        gs = load("usr/bin/gosaab-settings")
+        QApplication.instance() or QApplication([])
+        b = FakeBackend()
+        texts = lambda: [x.text() for x in gs.Settings(b).findChildren(gs.QPushButton)]
+        self.assertNotIn("Turn off and forget fingers", texts())
+        b.fp = {"available": True, "reader": "Chipsailing CS9711 (GPD)", "experimental": True, "fingers": []}
+        self.assertIn("Set up…", texts())
+        b.fp["fingers"] = ["right-index-finger", "right-thumb"]
+        self.assertIn("Add a finger…", texts())
+        self.assertIn("Turn off and forget fingers", texts())
 
 
 @unittest.skipUnless(HAVE_QT, "PySide6 not installed")

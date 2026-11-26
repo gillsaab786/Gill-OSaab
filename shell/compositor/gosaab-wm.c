@@ -227,6 +227,8 @@ struct gs_server {
 	double three_t0, three_dx, three_dy;
 	int three_n;
 	bool pressing_touch;              /* press_at() is handling a finger, not the mouse */
+	bool pull_pending;                /* title-bar drag on a zoomed/split window: not pulled out yet */
+	double pull_x, pull_y;
 
 	/* on-screen keyboard pops up when a text box is tapped (text-input-v3) */
 	struct wlr_text_input_manager_v3 *text_input_mgr;
@@ -1101,6 +1103,7 @@ static void release_grab(struct gs_server *server) {
 		tile_toplevel(t, server->snap_zone);
 	}
 	server->snap_zone = 0;
+	server->pull_pending = false;
 	wlr_scene_node_set_enabled(&server->snap_preview->node, false);
 	server->cursor_mode = CURSOR_PASSTHROUGH;
 	server->grabbed = NULL;
@@ -1798,22 +1801,28 @@ static void toplevel_destroy(struct wl_listener *listener, void *data) {
 	free(t);
 }
 
+/* Dragging a split-screen or zoomed window's title bar pulls it out to its own size under the
+ * pointer. Only once the pointer really moves: a click or double-click mustn't un-zoom it. */
+static void pull_out(struct gs_server *server, struct gs_toplevel *t) {
+	double rel = (server->pull_x - t->tree->node.x) / (frame_w(t) > 0 ? frame_w(t) : 1);
+	if (t->tiled) {
+		t->tiled = false;
+		t->tile_zone = GS_ZONE_NONE;
+		request_frame_size(t, t->saved.width, t->saved.height);
+	} else if (t->maximized) {
+		set_maximized(t, false);
+	}
+	wlr_scene_node_set_position(&t->tree->node, (int)(server->cursor->x - rel * t->saved.width),
+		(int)server->cursor->y - chrome->title_h / 2);
+	server->grab_x = server->cursor->x - t->tree->node.x;
+	server->grab_y = server->cursor->y - t->tree->node.y;
+}
+
 static void begin_interactive(struct gs_toplevel *t, enum gs_cursor_mode mode, uint32_t edges) {
 	struct gs_server *server = t->server;
-	if (t->tiled && mode == CURSOR_MOVE) { /* pull a split-screen window out: back to its own size */
-		double rel = (server->cursor->x - t->tree->node.x) / (frame_w(t) > 0 ? frame_w(t) : 1);
-		t->tiled = false;
-		request_frame_size(t, t->saved.width, t->saved.height);
-		wlr_scene_node_set_position(&t->tree->node, (int)(server->cursor->x - rel * t->saved.width),
-			(int)server->cursor->y - chrome->title_h / 2);
-	}
-	if (t->maximized) {
-		/* un-zoom under the cursor, keeping it at the same relative spot */
-		double rel = (server->cursor->x - t->tree->node.x) / (frame_w(t) > 0 ? frame_w(t) : 1);
-		set_maximized(t, false);
-		wlr_scene_node_set_position(&t->tree->node, (int)(server->cursor->x - rel * t->saved.width),
-			(int)server->cursor->y - chrome->title_h / 2);
-	}
+	server->pull_pending = mode == CURSOR_MOVE && (t->tiled || t->maximized);
+	server->pull_x = server->cursor->x;
+	server->pull_y = server->cursor->y;
 	server->grabbed = t;
 	server->cursor_mode = mode;
 	if (mode == CURSOR_MOVE) {
@@ -3225,6 +3234,13 @@ static void process_cursor_resize(struct gs_server *server) {
 static void process_cursor_motion(struct gs_server *server, uint32_t time) {
 	if (server->cursor_mode == CURSOR_MOVE) {
 		struct gs_toplevel *t = server->grabbed;
+		if (server->pull_pending) {
+			if (fabs(server->cursor->x - server->pull_x) + fabs(server->cursor->y - server->pull_y) < 8) {
+				return;
+			}
+			server->pull_pending = false;
+			pull_out(server, t);
+		}
 		wlr_scene_node_set_position(&t->tree->node, server->cursor->x - server->grab_x,
 			server->cursor->y - server->grab_y);
 		snap_track(server);

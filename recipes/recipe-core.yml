@@ -9,6 +9,21 @@ description: Gill(OS) Core, a minimal gaming OS on Fedora bootc.
 base-image: quay.io/fedora/fedora-bootc
 image-version: "45"
 
+# The GPD Win Max 2 (2023+) fingerprint reader, a Chipsailing CS9711 (USB 2541:9711), isn't in
+# standard libfprint yet. Build the community driver (archeYR's fork, pinned) in a throwaway
+# stage so no compilers or -devel packages land in the image; fprintd only uses it when that
+# reader is plugged in (gosaab-fprintd).
+stages:
+  - name: fprint-cs9711
+    from: quay.io/fedora/fedora:45
+    modules:
+      - type: script
+        snippets:
+          - dnf -y -q install git meson ninja-build gcc gcc-c++ glib2-devel libgusb-devel pixman-devel opencv-devel doctest-devel libgudev-devel systemd-devel cairo-devel >/dev/null
+          - git clone -q https://github.com/archeYR/libfprint-CS9711 /src && git -C /src checkout -q 3c93fc2da6347624fc9c2d2f36a38fec64f99835
+          - meson setup /src/build /src --prefix=/usr --libdir=lib64 -Ddrivers=cs9711 -Dintrospection=false -Ddoc=false -Dgtk-examples=false -Dinstalled-tests=false -Dudev_rules=disabled -Dudev_hwdb=disabled >/dev/null && ninja -C /src/build >/dev/null
+          - mkdir -p /out && cp -a /src/build/libfprint/libfprint-2.so* /out/ && ls -l /out
+
 modules:
   - type: dnf
     repos:
@@ -67,6 +82,10 @@ modules:
         - bolt
         - iio-sensor-proxy
         - usbutils
+        # fingerprint unlock (lock screen + admin prompts; off until a finger is added in Settings)
+        - fprintd
+        - fprintd-pam
+        - opencv-core # for the GPD Win Max 2's CS9711 reader (driver built in the stage below)
         - python3-evdev
         - pciutils
         - wdisplays
@@ -150,6 +169,11 @@ modules:
         - wvkbd
 
   - from-file: common.yml
+
+  - type: copy
+    from: fprint-cs9711
+    src: /out/
+    dest: /usr/lib64/gill-osaab/fprint-cs9711/
 
   # Core-only: session files, Game Mode switch (SteamOS-compatible)
   - type: files

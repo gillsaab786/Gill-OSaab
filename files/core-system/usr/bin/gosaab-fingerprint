@@ -1,0 +1,138 @@
+#!/usr/bin/python3
+"""Fingerprint unlock (fprintd), like Touch ID: unlock the lock screen and approve admin prompts.
+
+  gosaab-fingerprint status        JSON: available, reader, experimental, enabled, fingers
+  gosaab-fingerprint add [FINGER]  add a finger (touch the sensor several times); up to 10
+  gosaab-fingerprint remove        forget every finger and turn fingerprint unlock off
+  gosaab-fingerprint on|off        use fingerprints (lock screen + admin prompts)
+
+Your password always works too. The GPD Win Max 2's reader (CS9711) uses a community driver
+that is still experimental."""
+import json
+import os
+import pwd
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+CONF = Path("/etc/gill-osaab/fingerprint.conf")
+POLKIT_PAM = Path("/etc/pam.d/polkit-1")
+FPRINT_LINE = "auth       sufficient   pam_fprintd.so max-tries=2 timeout=15"
+FINGERS = ["right-index-finger", "left-index-finger", "right-thumb", "left-thumb", "right-middle-finger",
+           "left-middle-finger", "right-ring-finger", "left-ring-finger", "right-little-finger", "left-little-finger"]
+EXPERIMENTAL = {("2541", "9711"), ("2541", "0236")}
+
+
+def reader(root=Path("/sys/bus/usb/devices")):
+    """(name, experimental) of a fingerprint reader on USB, or (None, False)"""
+    for d in sorted(root.glob("*")):
+        try:
+            vid, pid = (d / "idVendor").read_text().strip(), (d / "idProduct").read_text().strip()
+        except OSError:
+            continue
+        if (vid, pid) in EXPERIMENTAL:
+            return "Chipsailing CS9711 (GPD)", True
+        try:
+            name = (d / "product").read_text().strip()
+        except OSError:
+            name = ""
+        if re.search(r"finger|fprint|FPC|Goodix|Synaptics.*(FS|WBDI)|ELAN.*(WBF|finger)", name, re.I):
+            return name, False
+    return None, False
+
+
+def parse_fingers(text):
+    """`fprintd-list USER` -> enrolled finger names"""
+    return [m.group(1) for m in re.finditer(r"^\s*-\s*#\d+:\s*([a-z-]+)", text, re.M)]
+
+
+def fingers(user):
+    if not shutil.which("fprintd-list"):
+        return []
+    out = subprocess.run(["fprintd-list", user], capture_output=True, text=True, check=False, timeout=20)
+    return parse_fingers(out.stdout)
+
+
+def pam_with_finger(text, on):
+    lines = [ln for ln in text.splitlines() if "pam_fprintd.so" not in ln]
+    if on:
+        i = next((n for n, ln in enumerate(lines) if ln.startswith("auth")), len(lines))
+        lines.insert(i, FPRINT_LINE)
+    return "\n".join(lines) + "\n"
+
+
+def is_enabled():
+    try:
+        return "enabled=on" in CONF.read_text()
+    except OSError:
+        return False
+
+
+def set_enabled(on):
+    CONF.parent.mkdir(parents=True, exist_ok=True)
+    CONF.write_text(f"enabled={'on' if on else 'off'}\n")
+    if POLKIT_PAM.exists():  # admin prompts accept a finger too
+        POLKIT_PAM.write_text(pam_with_finger(POLKIT_PAM.read_text(), on))
+
+
+def target_user():
+    uid = os.environ.get("PKEXEC_UID") or os.environ.get("SUDO_UID") or str(os.getuid())
+    return pwd.getpwuid(int(uid)).pw_name
+
+
+def as_root(argv):
+    if os.geteuid() != 0:
+        os.execvp("pkexec", ["pkexec", os.path.realpath(__file__), *argv])
+
+
+def main(argv):
+    cmd = argv[0] if argv else "status"
+    name, experimental = reader()
+    if cmd == "status":
+        user = pwd.getpwuid(os.getuid()).pw_name
+        listed, have = "", []
+        if shutil.which("fprintd-list"):
+            out = subprocess.run(["fprintd-list", user], capture_output=True, text=True, check=False, timeout=20)
+            listed, have = out.stdout, parse_fingers(out.stdout)
+        if name is None and "Using device" in listed:  # a reader fprintd knows, e.g. the ROG Ally's
+            m = re.search(r"Fingerprints for user \S+ on (.+?)(?: \(|:)", listed)
+            name = m.group(1) if m else "Fingerprint reader"
+        print(json.dumps({"available": bool(shutil.which("fprintd-enroll")), "reader": name,
+                          "experimental": experimental, "enabled": is_enabled(), "fingers": have}))
+        return 0
+    if cmd not in ("add", "remove", "on", "off"):
+        print(__doc__.strip(), file=sys.stderr)
+        return 2
+    as_root(argv)
+    user = target_user()
+    if cmd in ("add", "on") and not shutil.which("fprintd-enroll"):
+        print("Fingerprint support isn't installed in this build.")
+        return 3
+    if cmd == "add":
+        have = fingers(user)
+        finger = argv[1] if len(argv) > 1 and argv[1] in FINGERS else next((f for f in FINGERS if f not in have), None)
+        if finger is None:
+            print("All ten fingers are already added.")
+            return 4
+        if experimental:
+            print("This reader uses a community driver that is still experimental.")
+        print(f"Adding {finger.replace('-', ' ')}: touch the sensor, lift, and repeat until it says done…")
+        rc = subprocess.run(["fprintd-enroll", "-f", finger, user], check=False).returncode
+        if rc == 0:
+            set_enabled(True)
+            print("Done: this finger now unlocks the screen and approves admin prompts.")
+        return rc
+    if cmd == "remove":
+        if shutil.which("fprintd-delete"):
+            subprocess.run(["fprintd-delete", user], check=False)
+        set_enabled(False)
+        print("Fingerprints removed; fingerprint unlock is off.")
+        return 0
+    set_enabled(cmd == "on")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

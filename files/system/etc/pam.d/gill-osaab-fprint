@@ -1,0 +1,5 @@
+#%PAM-1.0
+# Gill(OS) lock screen, fingerprint only (runs next to the password check, like Touch ID).
+# Used only when Settings > Apps & Security > Fingerprint is on.
+auth       required     pam_fprintd.so max-tries=3 timeout=30
+account    include      system-auth

@@ -1,12 +1,13 @@
 #!/usr/bin/python3
 """Face unlock for the lock screen (Howdy with an infrared "Windows Hello" camera).
 
-  gosaab-face status     JSON: available, camera, enrolled, enabled
-  gosaab-face add        learn your face (look at the camera)
-  gosaab-face remove     forget your face and turn face unlock off
-  gosaab-face on|off     use your face to unlock the screen
+  gosaab-face status         JSON: available, camera, enabled, faces [{id, name}]
+  gosaab-face add [NAME]     learn a face (look at the camera); up to 5 people, e.g. family
+  gosaab-face remove ID      forget one face (face unlock turns off when none are left)
+  gosaab-face remove         forget every face and turn face unlock off
+  gosaab-face on|off         use faces to unlock the screen
 
-Only the lock screen uses it: signing in after a restart and approving admin changes still need
+Every face added can unlock this account's lock screen. Only the lock screen uses it: signing in after a restart and approving admin changes still need
 your password. Only infrared cameras are used, because a photo can fool an ordinary camera.
 """
 import json
@@ -20,6 +21,8 @@ from pathlib import Path
 
 PAM = Path("/etc/pam.d/gill-osaab-lock")
 CONF = Path("/etc/gill-osaab/face.conf")
+FACES = Path("/etc/gill-osaab/faces.json")  # names for Settings (readable without admin rights)
+MAX_FACES = 5
 HOWDY_LINE = "auth       sufficient   pam_howdy.so"
 IR_NAME = re.compile(r"\bIR\b|infrared|Integrated I\b|Hello", re.I)
 
@@ -54,6 +57,47 @@ def enrolled(user):
     return out.returncode == 0 and bool(re.search(r"^\s*\d+", out.stdout, re.M))
 
 
+def parse_models(text):
+    """Rows of `howdy list`: "ID  Date  Time  Label" -> [{id, name}]"""
+    faces = []
+    for line in text.splitlines():
+        m = re.match(r"^\s*(\d+)\s+\d{4}-\d{2}-\d{2}\s+\d{1,2}:\d{2}(?::\d{2})?\s*(.*)$", line)
+        if m:
+            faces.append({"id": int(m.group(1)), "name": m.group(2).strip() or f"Face {int(m.group(1)) + 1}"})
+    return faces
+
+
+def clean_name(name, taken):
+    name = re.sub(r"[^\w .'-]", "", name or "").strip()[:24]
+    if not name:
+        n = 1
+        while f"Person {n}" in taken:
+            n += 1
+        name = f"Person {n}"
+    return name
+
+
+def list_faces(user):
+    if not shutil.which("howdy"):
+        return []
+    out = subprocess.run(["howdy", "-U", user, "list"], capture_output=True, text=True, check=False)
+    return parse_models(out.stdout) if out.returncode == 0 else []
+
+
+def save_faces(faces):
+    FACES.parent.mkdir(parents=True, exist_ok=True)
+    FACES.write_text(json.dumps(faces) + "\n")
+    FACES.chmod(0o644)
+
+
+def saved_faces():
+    try:
+        data = json.loads(FACES.read_text())
+        return [f for f in data if isinstance(f, dict) and isinstance(f.get("id"), int)]
+    except (OSError, ValueError):
+        return []
+
+
 def pam_with_face(text, on):
     """The lock screen's PAM file with or without the face step (before the password)."""
     lines = [ln for ln in text.splitlines() if "pam_howdy.so" not in ln]
@@ -86,8 +130,10 @@ def main(argv):
     cam, cam_name = ir_camera()
     if cmd == "status":
         user = pwd.getpwuid(os.getuid()).pw_name
+        faces = saved_faces()
         print(json.dumps({"available": bool(shutil.which("howdy")), "camera": cam_name, "enabled": is_enabled(),
-                          "enrolled": enrolled(user) if os.geteuid() == 0 else None}))
+                          "faces": faces, "max": MAX_FACES,
+                          "enrolled": enrolled(user) if os.geteuid() == 0 else bool(faces)}))
         return 0
     if cmd not in ("add", "remove", "on", "off"):
         print(__doc__.strip(), file=sys.stderr)
@@ -103,21 +149,40 @@ def main(argv):
                   "fooled by a photo.")
             return 3
     if cmd == "add":
+        faces = list_faces(user)
+        if len(faces) >= MAX_FACES:
+            print(f"Already {MAX_FACES} faces. Remove one in Settings first.")
+            return 4
+        name = clean_name(argv[1] if len(argv) > 1 else "", {f["name"] for f in faces})
         conf = howdy_conf()
         if conf:  # point Howdy at the infrared camera
             text = conf.read_text()
             conf.write_text(re.sub(r"(?m)^device_path\s*=.*$", f"device_path = {cam}", text))
-        print("Look at the camera…")
-        rc = subprocess.run(["howdy", "-U", user, "-y", "add"], check=False).returncode
+        print(f"{name}: look at the camera…")
+        # Howdy asks for the new face's label: answer with the name
+        rc = subprocess.run(["howdy", "-U", user, "add"], input=name + "\n", text=True, check=False).returncode
+        save_faces(list_faces(user))
         if rc == 0:
             set_enabled(True)
-            print("Done: your face now unlocks the screen.")
+            print(f"Done: {name}'s face now unlocks the screen.")
         return rc
     if cmd == "remove":
+        if len(argv) > 1:
+            if not argv[1].isdigit():
+                return 2
+            if shutil.which("howdy"):
+                subprocess.run(["howdy", "-U", user, "-y", "remove", argv[1]], check=False)
+            faces = list_faces(user)
+            save_faces(faces)
+            if not faces:
+                set_enabled(False)
+            print("Face removed." + ("" if faces else " No faces left; face unlock is off."))
+            return 0
         if shutil.which("howdy"):
             subprocess.run(["howdy", "-U", user, "-y", "clear"], check=False)
+        save_faces([])
         set_enabled(False)
-        print("Face removed; face unlock is off.")
+        print("Faces removed; face unlock is off.")
         return 0
     set_enabled(cmd == "on")
     return 0

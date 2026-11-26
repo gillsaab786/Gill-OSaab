@@ -391,6 +391,9 @@ class Backend:
     def face_status(self):
         return self._json(["gosaab-face", "status"], {})
 
+    def fingerprint_status(self):
+        return self._json(["gosaab-fingerprint", "status"], {})
+
     def secure_boot(self):
         return self._json(["gosaab-secureboot", "status"], {})
 
@@ -1933,6 +1936,7 @@ class Settings(QMainWindow):
         p.section("Security checkup", rows)
         self.encryption_section(p, sec.get("encryption", {}))
         self.face_section(p, self.backend.face_status())
+        self.fingerprint_section(p, self.backend.fingerprint_status())
         self.secureboot_section(p, self.backend.secure_boot(), sec.get("encryption", {}))
 
     def terminal(self, title, cmd):
@@ -1948,18 +1952,55 @@ class Settings(QMainWindow):
             p.section("Face unlock", [Row("No infrared camera found", "Face unlock needs an infrared (Windows "
                                           "Hello) camera, for safety.")])
             return
-        on = face.get("enabled")
-        b1 = QPushButton("Set up again…" if on else "Set up…")
-        b1.setObjectName("pill" if on else "primary")
-        b1.clicked.connect(self.terminal("Face unlock", "gosaab-face add"))
-        rows = [Row("Unlock with your face", f"Camera: {face.get('camera')}. Look at the screen to unlock it. "
-                    "Signing in after a restart and admin approvals still need your password.", b1)]
-        if on:
-            b2 = QPushButton("Turn off and forget face")
-            b2.setObjectName("pill")
-            b2.clicked.connect(self.terminal("Face unlock", "gosaab-face remove"))
-            rows.append(Row("Face unlock is on", "", b2))
+        faces = face.get("faces") or []
+        most = face.get("max", 5)
+        rows = []
+        for f in faces:
+            rm = QPushButton("Remove")
+            rm.setObjectName("pill")
+            rm.clicked.connect(self.terminal("Face unlock", f"gosaab-face remove {int(f['id'])}"))
+            rows.append(Row(str(f.get("name", "Face")), "Can unlock this PC.", rm))
+        add = QPushButton("Add a face…" if faces else "Set up…")
+        add.setObjectName("pill" if faces else "primary")
+        add.setEnabled(len(faces) < most)
+        add.clicked.connect(self.add_face)
+        rows.append(Row("Unlock with your face" if not faces else f"Add someone ({len(faces)} of {most})",
+                        f"Camera: {face.get('camera')}. Up to {most} people, e.g. family: anyone added can unlock "
+                        "this PC. Signing in after a restart and admin approvals still need your password.", add))
+        if face.get("enabled") and faces:
+            off = QPushButton("Turn off and forget all faces")
+            off.setObjectName("pill")
+            off.clicked.connect(self.terminal("Face unlock", "gosaab-face remove"))
+            rows.append(Row("Face unlock is on", "", off))
         p.section("Face unlock", rows)
+
+    def fingerprint_section(self, p, fp):
+        if not fp.get("reader"):
+            p.section("Fingerprint", [Row("No fingerprint reader found", "Fingerprint unlock works with the "
+                                          "reader in the power button on the ROG Ally and GPD Win Max 2.")])
+            return
+        fingers = fp.get("fingers") or []
+        add = QPushButton("Add a finger…" if fingers else "Set up…")
+        add.setObjectName("pill" if fingers else "primary")
+        add.setEnabled(len(fingers) < 10)
+        add.clicked.connect(self.terminal("Fingerprint", "gosaab-fingerprint add"))
+        note = " This reader uses a community driver that is still experimental." if fp.get("experimental") else ""
+        rows = [Row("Unlock with your fingerprint", f"Reader: {fp.get('reader')}. Unlocks the lock screen and "
+                    "approves admin prompts, like Touch ID. Your password always works too." + note, add)]
+        if fingers:
+            names = ", ".join(f.replace("-", " ") for f in fingers)
+            off = QPushButton("Turn off and forget fingers")
+            off.setObjectName("pill")
+            off.clicked.connect(self.terminal("Fingerprint", "gosaab-fingerprint remove"))
+            rows.append(Row(f"{len(fingers)} finger{'s' if len(fingers) != 1 else ''} added", names, off))
+        p.section("Fingerprint", rows)
+
+    def add_face(self):
+        from PySide6.QtWidgets import QInputDialog
+        import shlex
+        name, ok = QInputDialog.getText(self, "Add a face", "Whose face is it? (e.g. Jas, Mum)")
+        if ok:
+            self.terminal("Face unlock", "gosaab-face add " + shlex.quote(name.strip()[:24] or "Person"))()
 
     def secureboot_section(self, p, sb, enc):
         if not sb.get("supported"):

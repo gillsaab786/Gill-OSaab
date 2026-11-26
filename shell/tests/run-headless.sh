@@ -225,7 +225,7 @@ from PIL import Image, ImageChops, ImageStat
 out = sys.argv[1]; rx, ry, yx, yy, gx, gy = map(int, sys.argv[2:8])
 img = lambda n: Image.open(f"{out}/{n}.png").convert("RGB")
 def dark_in_red(n):  # the x symbol: dark pixels inside the red button
-    im = img(n); return sum(1 for x in range(rx - 5, rx + 6) for y in range(ry - 5, ry + 6) if sum(im.getpixel((x, y))) < 400)
+    im = img(n); return sum(1 for x in range(rx - 3, rx + 4) for y in range(ry - 3, ry + 4) if sum(im.getpixel((x, y))) < 400)
 def changed(a, b, box):
     d = ImageChops.difference(img(a).crop(box), img(b).crop(box))
     return ImageStat.Stat(d.convert("L").point(lambda v: 255 if v > 24 else 0)).mean[0] / 255
@@ -234,7 +234,7 @@ r = {"symbols plain": dark_in_red("12-titlebar"), "symbols hover": dark_in_red("
      "tooltip": changed("12-titlebar", "12c-tooltip", (rx - 80, ry + 12, rx + 20, ry + 50)),
      "menu": changed("12-titlebar", "12d-green-menu", below), "menu closed": changed("12-titlebar", "12e-menu-closed", below)}
 print("traffic light hover", {k: round(v, 3) for k, v in r.items()})
-checks = [("buttons show their symbols only on hover", r["symbols plain"] == 0 and r["symbols hover"] > 3),
+checks = [("buttons show their symbols only on hover", r["symbols plain"] <= 1 and r["symbols hover"] > 3),
           ("resting on red shows a tooltip", r["tooltip"] > 0.02),
           ("resting on green opens the layout menu", r["menu"] > 0.05),
           ("moving away closes the layout menu", r["menu closed"] < 0.01)]

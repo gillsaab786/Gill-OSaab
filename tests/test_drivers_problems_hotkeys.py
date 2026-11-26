@@ -517,6 +517,30 @@ class BatteryAndPanels(unittest.TestCase):
                 self.assertTrue(5 <= ms <= 80 and 0 <= strong <= 0xFFFF and 0 <= weak <= 0xFFFF)
 
 
+class FingerprintUnlock(unittest.TestCase):
+    fp = load_core("usr/bin/gosaab-fingerprint", "gosaab_fingerprint")
+
+    def test_list_parsing(self):
+        out = ("found 1 devices\nDevice at /net/reactivated/Fprint/Device/0\nUsing device /net/reactivated/Fprint/"
+               "Device/0\nFingerprints for user jas on Chipsailing (press):\n - #0: right-index-finger\n"
+               " - #1: left-thumb\n")
+        self.assertEqual(self.fp.parse_fingers(out), ["right-index-finger", "left-thumb"])
+
+    def test_polkit_pam(self):
+        base = "#%PAM-1.0\nauth       include      system-auth\naccount    include      system-auth\n"
+        on = self.fp.pam_with_finger(base, True)
+        self.assertEqual(on.splitlines()[1], self.fp.FPRINT_LINE)  # finger first, password still works
+        self.assertEqual(self.fp.pam_with_finger(on, False), base)
+
+    def test_gpd_reader(self):
+        with tempfile.TemporaryDirectory() as d:
+            dev = Path(d) / "1-3"
+            dev.mkdir()
+            (dev / "idVendor").write_text("2541\n")
+            (dev / "idProduct").write_text("9711\n")
+            self.assertEqual(self.fp.reader(Path(d)), ("Chipsailing CS9711 (GPD)", True))
+
+
 class FaceUnlock(unittest.TestCase):
     face = load_core("usr/bin/gosaab-face", "gosaab_face")
 
@@ -527,6 +551,14 @@ class FaceUnlock(unittest.TestCase):
         self.assertEqual(lines[1], self.face.HOWDY_LINE)  # face first, then the password
         self.assertEqual(self.face.pam_with_face(on, True).count("pam_howdy"), 1)
         self.assertEqual(self.face.pam_with_face(on, False), base)
+
+    def test_several_faces(self):
+        out = ("Known face models for jas:\n\n  ID  Date                 Label\n"
+               "  0   2026-11-27 05:10:01  Jas\n  1   2026-11-27 05:11:30  Mum\n")
+        self.assertEqual(self.face.parse_models(out), [{"id": 0, "name": "Jas"}, {"id": 1, "name": "Mum"}])
+        self.assertEqual(self.face.clean_name("", {"Person 1"}), "Person 2")
+        self.assertEqual(self.face.clean_name("Mum; rm -rf /", set()), "Mum rm -rf")
+        self.assertEqual(self.face.MAX_FACES, 5)
 
     def test_only_infrared_cameras(self):
         with tempfile.TemporaryDirectory() as d:
