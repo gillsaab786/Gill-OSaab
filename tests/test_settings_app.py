@@ -98,6 +98,13 @@ class FakeBackend:
     def set_input_setting(self, key, on):
         return 0
 
+    def input_value(self, key, default=""):
+        return getattr(self, "inputs", {}).get(key, default)
+
+    def set_input_value(self, key, value):
+        self.inputs = {**getattr(self, "inputs", {}), key: value}
+        return 0
+
     def boot_mode(self):
         return "auto"
 
@@ -279,12 +286,22 @@ class SettingsApp(unittest.TestCase):
         sw.setChecked(False)
         self.assertTrue(sw.isChecked(), "switch flips back when saving fails")
 
+    def test_touch_buttons_time(self):
+        b = FakeBackend()
+        w = self.gs.Settings(b)
+        labels = [btn.text() for btn in w.touch_buttons.group.buttons()]
+        self.assertEqual(labels, ["5 min", "10 min", "20 min", "30 min", "Always"])
+        self.assertTrue(w.touch_buttons.group.buttons()[1].isChecked(), "10 minutes by default")
+        w.touch_buttons.group.buttons()[4].click()
+        self.assertEqual(b.inputs["touch_buttons"], "always")
+
     def test_optional_features_are_off_by_default(self):
         b = FakeBackend()
         w = self.gs.Settings(b)
-        for key in ("phone_link", "shared_game_library", "vrr", "suspend_then_hibernate", "smart_updates", "undervolt"):
+        for key in ("phone_link", "shared_game_library", "suspend_then_hibernate", "smart_updates", "undervolt"):
             sw = w.switches[("features.conf", key)][0]
             self.assertFalse(sw.isChecked(), key)
+        self.assertTrue(w.switches[("features.conf", "vrr")][0].isChecked(), "VRR is on by default")
         sw = w.switches[("features.conf", "phone_link")][0]
         self.assertTrue(sw.isEnabled())
         sw.setChecked(True)

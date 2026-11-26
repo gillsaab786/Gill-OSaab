@@ -29,6 +29,7 @@ feature() { grep -qE "^$1[[:space:]]*=[[:space:]]*(on|true|1|yes)" /etc/gill-osa
 feature shared_game_library && /usr/libexec/gill-osaab/gosaab-library sync >/dev/null 2>&1
 # phone link: your phone's notifications, files and clipboard
 feature phone_link && [ -x /usr/libexec/kdeconnectd ] && /usr/libexec/kdeconnectd >/dev/null 2>&1 &
-vrr=""
-feature vrr && vrr="--adaptive-sync"   # FreeSync / VRR on screens that support it
+# FreeSync / VRR on screens that support it: on unless switched off in Settings
+vrr="--adaptive-sync"
+grep -qE '^vrr[[:space:]]*=[[:space:]]*(off|false|0|no)' /etc/gill-osaab/features.conf 2>/dev/null && vrr=""
 exec gamescope -e -f $vrr --mangoapp -- steam -gamepadui -steamos3 -steampal -steamdeck

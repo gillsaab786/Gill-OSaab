@@ -185,7 +185,8 @@ def find(rgb, tol=40):
                 xs += x; ys += y; n += 1
     return (round(xs / n), round(ys / n), n) if n > 10 else None
 red, yel, grn = find((255, 95, 87)), find((254, 188, 46)), find((40, 200, 64))
-if red and yel and grn and abs(red[1] - grn[1]) < 4 and 20 < yel[0] - red[0] < 40 and 20 < grn[0] - yel[0] < 40:
+# macOS-style buttons on the right of the title bar: (green) (yellow) (red), red at the edge
+if red and yel and grn and abs(red[1] - grn[1]) < 4 and 15 < red[0] - yel[0] < 60 and 15 < yel[0] - grn[0] < 60:
     print(red[0], red[1], yel[0], yel[1], grn[0], grn[1])
 EOF3
 }
@@ -201,9 +202,9 @@ out = sys.argv[1]; rx, ry, gx = int(sys.argv[2]), int(sys.argv[3]), int(sys.argv
 im = Image.open(f"{out}/12-titlebar.png").convert("RGB")
 if rx == 0:
     print("FAIL: title text is drawn"); sys.exit(1)
-# the title bar is dark grey; the centred title has light text pixels
-row = [im.getpixel((x, y)) for y in range(ry - 6, ry + 7) for x in range(gx + 30, im.size[0] - 30)]
-bar = im.getpixel((gx + 20, ry))
+# the title bar is dark grey; the centred title (left of the buttons) has light text pixels
+row = [im.getpixel((x, y)) for y in range(ry - 6, ry + 7) for x in range(30, gx - 30)]
+bar = im.getpixel((gx - 20, ry))
 text = sum(1 for p in row if p[0] > 150 and abs(p[0] - p[2]) < 30)
 print("title bar colour", bar, "light text pixels", text)
 ok = text > 40 and all(30 < c < 70 for c in bar)
@@ -211,12 +212,53 @@ print(("PASS: " if ok else "FAIL: ") + "title text is drawn on a dark title bar"
 sys.exit(0 if ok else 1)
 EOF4
 if [ ${#L[@]} -eq 6 ]; then
-  click ${L[4]} ${L[5]}; sleep 1.0; shot 13-zoomed          # green: zoom
+  # hover: like macOS the buttons show their symbols (x, -, arrows) while the pointer is over them
+  echo "move ${L[0]} ${L[1]}" >>"$CLICKS"; sleep 0.4; shot 12b-hover
+  echo "move ${L[0]} $((L[1] + 300))" >>"$CLICKS"; sleep 0.3
+  # tooltip: resting on red says "Close"; resting on green opens the layout menu
+  echo "move ${L[0]} ${L[1]}" >>"$CLICKS"; sleep 1.5; shot 12c-tooltip
+  echo "move ${L[4]} ${L[5]}" >>"$CLICKS"; sleep 1.3; shot 12d-green-menu
+  echo "move 300 900" >>"$CLICKS"; sleep 0.6; shot 12e-menu-closed
+  python3 - "$OUT" ${L[@]} <<'EOF4b' || fail=1
+import sys
+from PIL import Image, ImageChops, ImageStat
+out = sys.argv[1]; rx, ry, yx, yy, gx, gy = map(int, sys.argv[2:8])
+img = lambda n: Image.open(f"{out}/{n}.png").convert("RGB")
+def dark_in_red(n):  # the x symbol: dark pixels inside the red button
+    im = img(n); return sum(1 for x in range(rx - 5, rx + 6) for y in range(ry - 5, ry + 6) if sum(im.getpixel((x, y))) < 400)
+def changed(a, b, box):
+    d = ImageChops.difference(img(a).crop(box), img(b).crop(box))
+    return ImageStat.Stat(d.convert("L").point(lambda v: 255 if v > 24 else 0)).mean[0] / 255
+below = (max(0, gx - 200), gy + 20, min(1919, rx + 60), gy + 300)
+r = {"symbols plain": dark_in_red("12-titlebar"), "symbols hover": dark_in_red("12b-hover"),
+     "tooltip": changed("12-titlebar", "12c-tooltip", (rx - 80, ry + 12, rx + 20, ry + 50)),
+     "menu": changed("12-titlebar", "12d-green-menu", below), "menu closed": changed("12-titlebar", "12e-menu-closed", below)}
+print("traffic light hover", {k: round(v, 3) for k, v in r.items()})
+checks = [("buttons show their symbols only on hover", r["symbols plain"] == 0 and r["symbols hover"] > 3),
+          ("resting on red shows a tooltip", r["tooltip"] > 0.02),
+          ("resting on green opens the layout menu", r["menu"] > 0.05),
+          ("moving away closes the layout menu", r["menu closed"] < 0.01)]
+for name, ok in checks:
+    print(("PASS: " if ok else "FAIL: ") + name)
+sys.exit(0 if all(ok for _, ok in checks) else 1)
+EOF4b
+  # double-click the title bar: zoom to fill the screen (buttons end up at the top right)
+  printf '%s\n%s\n' "$((L[4] - 150)) ${L[5]}" "$((L[4] - 150)) ${L[5]}" >>"$CLICKS"; sleep 1.0; shot 13-zoomed
   Z=($(lights 13-zoomed)); echo "after zoom: ${Z[*]:-none}"
-  check "zoom button fills the screen" "[ \${#Z[@]} -eq 6 ] && [ \${Z[0]} -lt 30 ] && [ \${Z[1]} -lt 30 ]"
-  click ${Z[4]:-0} ${Z[5]:-0}; sleep 1.0; shot 14-unzoomed  # green again: back to normal size
+  check "double-click on the title bar fills the screen" "[ \${#Z[@]} -eq 6 ] && [ \${Z[0]} -gt 1870 ] && [ \${Z[1]} -lt 30 ]"
+  printf '%s\n%s\n' "$((Z[4] - 150)) ${Z[5]}" "$((Z[4] - 150)) ${Z[5]}" >>"$CLICKS"; sleep 1.0; shot 14-unzoomed
   U=($(lights 14-unzoomed)); echo "after un-zoom: ${U[*]:-none}"
-  check "zoom again restores the window" "[ \${#U[@]} -eq 6 ] && [ \${U[0]} -eq ${L[0]} ] && [ \${U[1]} -eq ${L[1]} ]"
+  check "double-click again restores the window" "[ \${#U[@]} -eq 6 ] && [ \${U[0]} -eq ${L[0]} ] && [ \${U[1]} -eq ${L[1]} ]"
+  # green: full screen like macOS; the title bar hides, and slides back when the pointer goes to the top
+  click ${U[4]:-0} ${U[5]:-0}; sleep 1.0; shot 14b-fullscreen
+  check "green button makes the window full screen (title bar hidden)" "[ -z \"\$(lights 14b-fullscreen)\" ]"
+  echo "move 960 0" >>"$CLICKS"; sleep 0.6; shot 14c-fullscreen-reveal
+  F=($(lights 14c-fullscreen-reveal)); echo "revealed: ${F[*]:-none}"
+  check "pointer at the top shows the full-screen title bar" "[ \${#F[@]} -eq 6 ] && [ \${F[0]} -gt 1870 ] && [ \${F[1]} -lt 30 ]"
+  click ${F[4]:-0} ${F[5]:-0}; sleep 1.0; shot 14d-left-fullscreen
+  V=($(lights 14d-left-fullscreen)); echo "after full screen: ${V[*]:-none}"
+  check "green again leaves full screen" "[ \${#V[@]} -eq 6 ] && [ \${V[0]} -eq ${L[0]} ] && [ \${V[1]} -eq ${L[1]} ]"
+  echo "move 300 900" >>"$CLICKS"; sleep 0.3
   click ${U[2]:-0} ${U[3]:-0}; sleep 1.0; shot 15-minimized # yellow: minimise
   M=($(lights 15-minimized))
   check "minimise button hides the window" "[ \${#M[@]} -eq 0 ] && kill -0 $WM"
@@ -272,13 +314,37 @@ for name, ok in checks:
     print(("PASS: " if ok else "FAIL: ") + name)
 sys.exit(0 if all(ok for _, ok in checks) else 1)
 EOF9
+  # touch: swipe up from the bottom edge opens Mission Control; the touch makes title bars big
+  echo "swipe 960 1075 960 850" >>"$CLICKS"; sleep 1.2; shot 37b-edge-swipe
+  BIG=($(lights 37b-edge-swipe)); echo "touch-size lights: ${BIG[*]:-none}"
+  python3 - "$OUT" <<'EOF9b' || fail=1
+import sys
+from PIL import Image, ImageChops, ImageStat
+out = sys.argv[1]
+d = ImageChops.difference(Image.open(f"{out}/37-space-1-without-it.png").convert("RGB"), Image.open(f"{out}/37b-edge-swipe.png").convert("RGB"))
+c = ImageStat.Stat(d.convert("L").point(lambda v: 255 if v > 24 else 0)).mean[0] / 255
+print("edge swipe change", round(c, 3))
+print(("PASS: " if c > 0.05 else "FAIL: ") + "swipe up from the bottom edge opens Mission Control")
+sys.exit(0 if c > 0.05 else 1)
+EOF9b
+  echo overview >>"$CLICKS"; sleep 1.0; shot 37c-touch-big
+  B=($(lights 37c-touch-big)); echo "touch-size lights: ${B[*]:-none}"
+  check "after a touch, window buttons grow for fingers" "[ \${#B[@]} -eq 6 ] && [ \$((B[0] - B[2])) -ge 36 ]"
+  echo touchreset >>"$CLICKS"; sleep 1.0; shot 37d-touch-reset
+  N=($(lights 37d-touch-reset)); echo "back to Mac size: ${N[*]:-none}"
+  check "when the touch time is up, buttons go back to Mac size" "[ \${#N[@]} -eq 6 ] && [ \$((N[0] - N[2])) -le 26 ]"
   # Split screen: drag the front window's title bar to the left edge -> left half
   shot 38-before-snap
   S=($(lights 38-before-snap)); echo "front window lights: ${S[*]:-none}"
   if [ ${#S[@]} -eq 6 ]; then
-    echo "drag $((S[4] + 60)) ${S[5]} 1 500" >>"$CLICKS"; sleep 1.5; shot 39-snapped-left
+    echo "drag $((S[4] - 120)) ${S[5]} 1 500" >>"$CLICKS"; sleep 1.5; shot 39-snapped-left
     T=($(lights 39-snapped-left)); echo "after snap: ${T[*]:-none}"
-    check "dragging to the left edge snaps the window to the left half" "[ \${#T[@]} -eq 6 ] && [ \${T[0]} -lt 40 ] && [ \${T[1]} -lt 40 ]"
+    check "dragging to the left edge snaps the window to the left half" "[ \${#T[@]} -eq 6 ] && [ \${T[0]} -lt 960 ] && [ \${T[0]} -gt 800 ] && [ \${T[1]} -lt 40 ]"
+    # drag to the top-right corner: a quarter
+    echo "drag $((T[4] - 120)) ${T[5]} 1919 20" >>"$CLICKS"; sleep 1.5; shot 39b-quarter
+    Q=($(lights 39b-quarter)); echo "after corner drag: ${Q[*]:-none}"
+    check "dragging to a corner snaps the window to a quarter" "[ \${#Q[@]} -eq 6 ] && [ \${Q[0]} -gt 1870 ] && [ \${Q[1]} -lt 40 ]"
+    T=("${Q[@]}")
     # touchscreen: a finger tap on the red button closes the window
     before=$(pgrep -c -x foot)
     echo "tap ${T[0]} ${T[1]}" >>"$CLICKS"; sleep 1.5; shot 40-touch-closed

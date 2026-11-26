@@ -186,6 +186,27 @@ class Backend:
             pass
         return default
 
+    def input_value(self, key, default=""):
+        try:
+            for line in self.INPUT_CONF.read_text().splitlines():
+                if line.startswith(key + "="):
+                    return line.split("=", 1)[1].strip()
+        except OSError:
+            pass
+        return default
+
+    def set_input_value(self, key, value):
+        lines = []
+        try:
+            lines = [ln for ln in self.INPUT_CONF.read_text().splitlines() if not ln.startswith(key + "=")]
+        except OSError:
+            pass
+        lines.append(f"{key}={value}")
+        self.INPUT_CONF.parent.mkdir(parents=True, exist_ok=True)
+        self.INPUT_CONF.write_text("\n".join(lines) + "\n")
+        subprocess.run(["pkill", "-RTMIN+2", "-x", "gosaab-wm"], check=False)  # apply now
+        return 0
+
     def set_input_setting(self, key, on):
         lines = []
         try:
@@ -2141,6 +2162,17 @@ class Settings(QMainWindow):
             rows.append(Row(title, sub, sw))
         p.section("Touchpad", rows, "Pinch to zoom works in apps. Three fingers: swipe sideways to change "
                   "space, up for Mission Control.")
+        # touch screen: window buttons grow for fingers after a touch, then go back to Mac size
+        cur = self.backend.input_value("touch_buttons", "10")
+        self.touch_buttons = segmented([("5", "5 min"), ("10", "10 min"), ("20", "20 min"), ("30", "30 min"),
+                                        ("always", "Always")], cur if cur in ("5", "10", "20", "30", "always") else "10",
+                                       lambda v: self.backend.set_input_value("touch_buttons", v))
+        p.section("Touch screen", [Row("Big window buttons after a touch", "When you touch the screen, window "
+                                       "buttons grow so fingers hit them easily, then shrink back to Mac size.",
+                                       self.touch_buttons)],
+                  "Swipe up from the bottom edge for Mission Control, down from the top left for notifications, "
+                  "down from the top right for Control Centre. Three fingers: sideways to switch apps. The keyboard "
+                  "pops up when you tap a text box.")
         reset = p.button("Apply Gill(OS) look (top bar + dock)")
         reset.clicked.connect(self.apply_look)
         p.finish()
@@ -2645,7 +2677,7 @@ class Settings(QMainWindow):
                 "library in Game Mode, next to your Steam games.", self.switch("features.conf", "shared_game_library",
                                                                               default=False)),
             Row("VRR (FreeSync)", "Smoother games on screens that support variable refresh. Applies the next "
-                "time you sign in or start Game Mode.", self.switch("features.conf", "vrr", default=False)),
+                "time you sign in or start Game Mode.", self.switch("features.conf", "vrr", default=True)),
             Row("Suspend, then hibernate", "After 2 hours asleep the PC saves everything to disk and turns off, so "
                 "the battery doesn't drain. Needs free disk space the size of your memory. Doesn't work while "
                 "Secure Boot is on.", self.switch("features.conf", "suspend_then_hibernate", default=False)),

@@ -3,8 +3,12 @@
  *
  * Built on wlroots 0.20 + scenefx 0.5 (blur, rounded corners, shadows).
  * Started from scenefx's tinywl example (MIT) and grown into Gill(OS)'s own:
- *   - macOS-style window chrome: title bars with traffic-light buttons, centred title,
+ *   - macOS-style window chrome: title bars with traffic-light buttons (on the right: green,
+ *     yellow, red), symbols on hover, tooltips, the green button's layout menu, centred title,
  *     rounded corners, soft drop shadows, background blur, inactive windows dimmed
+ *   - touch: after a finger touches the screen, title bars and buttons grow for fingers (for
+ *     5/10/20/30 minutes or always, Settings), edge swipes, three-finger swipes, and the
+ *     on-screen keyboard pops up when a text box is tapped
  *   - macOS/iOS-style motion: windows spring open and fade/shrink closed
  *   - layer-shell for the Gill(OS) bar, dock and wallpaper
  *   - new windows centred, zoom (maximise), minimise, fullscreen, Alt/Super+Tab
@@ -14,8 +18,10 @@
  * the title bar (server-side windows only) is at the top, the app's content below it.
  *
  * Run:  gosaab-wm [-s "startup command"]
- * Keys: Super+Q close, Super+M minimise, Super+F zoom, Super+Return terminal,
- *       Alt/Super+Tab switch windows
+ * Keys: Super+Q close, Super+M minimise, Super+F zoom, Super+Ctrl+F full screen,
+ *       Super+Return terminal, Alt/Super+Tab switch windows
+ * Mouse: green = full screen, Alt+green or double-click the title bar = zoom; rest on green for
+ *       the layout menu (halves, quarters, thirds, fill and arrange)
  * Test hooks: SIGUSR1 closes the focused window; SIGUSR2 minimises it;
  *             GOSAAB_TEST_CLICKS=<file> replays "x y" clicks written to that file;
  *             the socket name is written to $XDG_RUNTIME_DIR/gosaab-wm.socket;
@@ -81,6 +87,7 @@
 #include <wlr/types/wlr_seat.h>
 #include <wlr/types/wlr_single_pixel_buffer_v1.h>
 #include <wlr/types/wlr_subcompositor.h>
+#include <wlr/types/wlr_text_input_v3.h>
 #include <wlr/types/wlr_viewporter.h>
 #include <wlr/types/wlr_xcursor_manager.h>
 #include <wlr/types/wlr_xdg_decoration_v1.h>
@@ -190,7 +197,42 @@ struct gs_server {
 	int npointers;
 	int touch_grab_id;          /* finger dragging a title bar / resize edge, or -1 */
 	struct wlr_scene_rect *snap_preview; /* where a dragged window will snap */
-	int snap_zone;              /* 0 none, 1 left half, 2 right half, 3 full */
+	int snap_zone;              /* enum gs_zone: where a dragged window will land */
+
+	/* traffic lights: hover shows their symbols, a tooltip, and (green) the layout menu */
+	struct gs_toplevel *hover_t;   /* window whose buttons the pointer is over */
+	int hover_part;                /* GS_PART_CLOSE/MINIMIZE/ZOOM */
+	struct wl_event_source *hover_timer;
+	struct wlr_scene_tree *tip_tree;  /* tooltip: "Close", "Minimise", "Enter Full Screen" */
+	struct wlr_scene_rect *tip_bg;
+	struct wlr_scene_buffer *tip_text;
+	struct wlr_buffer *tip_buffer;
+	struct wlr_scene_tree *menu_tree; /* the green button's layout menu */
+	struct gs_toplevel *menu_t;
+	struct wlr_box menu_box;          /* layout coords */
+	struct wlr_box menu_anchor;       /* the green button it hangs from */
+	int menu_hover;                   /* item under the pointer, -1 none */
+
+	/* touch: big title bars/buttons for a while after the screen is touched */
+	bool touch_big;
+	int touch_minutes;                /* 5/10/20/30, or 0 = always big */
+	struct wl_event_source *touch_timer;
+	double last_touch_ms, last_key_ms;
+	struct { int32_t id; double x0, y0, x, y; bool used; } fingers[10];
+	int nfingers;
+	int edge_id;                      /* finger doing an edge swipe, or -1 */
+	int edge_kind;                    /* 1 bottom, 2 top-left, 3 top-right, 4 top (full screen) */
+	bool edge_done;
+	bool three_finger;                /* three fingers on the screen: switch apps / Mission Control */
+	double three_t0, three_dx, three_dy;
+	int three_n;
+	bool pressing_touch;              /* press_at() is handling a finger, not the mouse */
+
+	/* on-screen keyboard pops up when a text box is tapped (text-input-v3) */
+	struct wlr_text_input_manager_v3 *text_input_mgr;
+	struct wl_listener new_text_input;
+	struct wl_list text_inputs;       /* gs_text_input.link */
+	bool osk_auto_shown;
 	struct wl_listener request_cursor_shape;
 
 	struct wlr_seat *seat;
@@ -278,6 +320,8 @@ struct gs_toplevel {
 	bool in_overview;           /* has a place in the current Mission Control */
 	struct wl_listener request_move, request_resize, request_maximize, request_minimize, request_fullscreen;
 	bool mapped, placed, maximized, minimized, fullscreen, ssd, activated, tiled;
+	int tile_zone;              /* enum gs_zone while tiled */
+	bool reveal;                /* full screen: title bar shown because the pointer is at the top */
 	struct wlr_box saved; /* frame box before zoom/fullscreen */
 	struct wlr_xdg_toplevel_decoration_v1 *decoration;
 	struct wlr_buffer *last_buffer; /* latest frame, kept for the close animation */
@@ -327,7 +371,15 @@ struct gs_keyboard {
 	struct wl_list link;
 	struct gs_server *server;
 	struct wlr_keyboard *wlr_keyboard;
+	bool virtual; /* the on-screen keyboard */
 	struct wl_listener modifiers, key, destroy;
+};
+
+struct gs_text_input {
+	struct wl_list link;
+	struct gs_server *server;
+	struct wlr_text_input_v3 *input;
+	struct wl_listener enable, disable, destroy;
 };
 
 struct gs_decoration {
@@ -340,6 +392,13 @@ static void set_maximized(struct gs_toplevel *t, bool maximized);
 static void set_fullscreen(struct gs_toplevel *t, bool fullscreen);
 static void request_frame_size(struct gs_toplevel *t, int w, int h);
 static void close_toplevel(struct gs_toplevel *t);
+
+static void text_inputs_focus(struct gs_server *server, struct wlr_surface *surface);
+static void forget_toplevel(struct gs_server *server, struct gs_toplevel *t);
+static void menu_close(struct gs_server *server);
+
+/* the title bar look in use: Mac-sized, or big for fingers after the screen is touched */
+static const struct gs_chrome *chrome = &GS_CHROME_MAC;
 
 /* ------------------------------------------------------------------ helpers */
 
@@ -448,7 +507,7 @@ static struct wlr_box *content_geo(struct gs_toplevel *t) {
 }
 
 static int title_h(struct gs_toplevel *t) {
-	return gs_title_height(t->ssd && !t->fullscreen);
+	return gs_title_height(chrome, t->ssd && !t->fullscreen);
 }
 
 static int frame_w(struct gs_toplevel *t) {
@@ -462,6 +521,12 @@ static int frame_h(struct gs_toplevel *t) {
 /* the screen a window is mostly on */
 static struct gs_output *toplevel_output(struct gs_toplevel *t) {
 	return output_at(t->server, t->tree->node.x + frame_w(t) / 2.0, t->tree->node.y + frame_h(t) / 2.0);
+}
+
+/* widest the centred title may be without running into the buttons on the right */
+static int title_max_w(struct gs_toplevel *t) {
+	int w = frame_w(t);
+	return 2 * (gs_buttons_left(chrome, w) - w / 2) - 16;
 }
 
 static struct fx_corner_radii content_corners(struct gs_toplevel *t) {
@@ -487,7 +552,7 @@ static void titlebar_render_title(struct gs_toplevel *t) {
 	if (title == NULL || title[0] == '\0') {
 		title = t->xdg_toplevel->app_id;
 	}
-	int max_w = frame_w(t) - 2 * (GS_BUTTON_X0 + 3 * (GS_BUTTON_D + GS_BUTTON_GAP)) - 8;
+	int max_w = title_max_w(t);
 	if (title == NULL || max_w < 20) {
 		return;
 	}
@@ -504,44 +569,57 @@ static void titlebar_render_title(struct gs_toplevel *t) {
 	tb->title_buffer = buffer; /* our own reference, dropped on re-render/destroy */
 }
 
-/* Lay out the title bar at the given scale/opacity (for animations), at (ox, oy). */
+/* Lay out the title bar at the given scale/opacity (for animations), at (ox, oy).
+ * Buttons on the right like this: (green) (yellow) (red). Like macOS, they are grey on windows in
+ * the back and show their symbols (x, -, arrows) while the pointer is over them; with big touch
+ * buttons the symbols always show, since a finger can't hover. */
 static void titlebar_layout(struct gs_toplevel *t, int ox, int oy, float scale, float alpha) {
 	struct gs_titlebar *tb = &t->tb;
-	bool show = title_h(t) > 0;
+	bool show = title_h(t) > 0 || (t->reveal && t->ssd);
 	wlr_scene_node_set_enabled(&tb->tree->node, show);
 	if (!show) {
 		return;
 	}
-	int w = (int)lroundf(frame_w(t) * scale);
-	int h = (int)lroundf(GS_TITLE_H * scale);
+	int fw = frame_w(t);
+	int w = (int)lroundf(fw * scale);
+	int h = (int)lroundf(chrome->title_h * scale);
 	wlr_scene_node_set_position(&tb->tree->node, ox, oy);
+	if (t->reveal) {
+		wlr_scene_node_raise_to_top(&tb->tree->node); /* over the full-screen app */
+	}
 	float c[4];
 	scale_color(t->activated ? COLOR_TITLE_ACTIVE : COLOR_TITLE_INACTIVE, alpha, c);
 	wlr_scene_rect_set_size(tb->bg, w, h);
 	wlr_scene_rect_set_color(tb->bg, c);
-	wlr_scene_rect_set_corner_radii(tb->bg, t->maximized ? corner_radii_none() :
+	wlr_scene_rect_set_corner_radii(tb->bg, (t->maximized || t->fullscreen) ? corner_radii_none() :
 		corner_radii_top((int)lroundf(CORNER_RADIUS * scale)));
-	int d = (int)lroundf(GS_BUTTON_D * scale);
-	/* glass pill: from the first button's left edge to the last button's right edge, padded */
-	int pad = (int)lroundf(GS_PILL_PAD * scale);
-	int px0 = (int)lroundf((gs_button_cx(0) - GS_BUTTON_D / 2.0) * scale) - pad;
-	int px1 = (int)lroundf((gs_button_cx(2) + GS_BUTTON_D / 2.0) * scale) + pad;
-	int ph = d + pad * 2;
-	float glass = t->activated ? 0.13f : 0.07f; /* colours are premultiplied: white at 13% */
-	scale_color((float[4]){ glass, glass, glass, glass }, alpha, c);
-	wlr_scene_rect_set_size(tb->pill, px1 - px0, ph);
-	wlr_scene_rect_set_color(tb->pill, c);
-	wlr_scene_rect_set_corner_radii(tb->pill, corner_radii_all(ph / 2));
-	wlr_scene_node_set_position(&tb->pill->node, px0, (h - ph) / 2);
+	bool hover = t->server->hover_t == t;
+	bool lit = t->activated || hover;
+	bool symbols = hover || t->server->touch_big;
+	int d = (int)lroundf(chrome->d * scale);
+	/* touch: the buttons sit in a Liquid Glass capsule; Mac look: no capsule, like macOS */
+	wlr_scene_node_set_enabled(&tb->pill->node, chrome->pill > 0);
+	if (chrome->pill > 0) {
+		int pad = (int)lroundf(chrome->pill * scale);
+		int px0 = (int)lroundf((gs_button_cx(chrome, fw, 2) - chrome->d / 2.0) * scale) - pad;
+		int px1 = (int)lroundf((gs_button_cx(chrome, fw, 0) + chrome->d / 2.0) * scale) + pad;
+		int ph = d + pad * 2;
+		float glass = t->activated ? 0.13f : 0.07f; /* colours are premultiplied: white at 13% */
+		scale_color((float[4]){ glass, glass, glass, glass }, alpha, c);
+		wlr_scene_rect_set_size(tb->pill, px1 - px0, ph);
+		wlr_scene_rect_set_color(tb->pill, c);
+		wlr_scene_rect_set_corner_radii(tb->pill, corner_radii_all(ph / 2));
+		wlr_scene_node_set_position(&tb->pill->node, px0, (h - ph) / 2);
+	}
 	for (int i = 0; i < 3; i++) {
-		scale_color(t->activated ? COLOR_BUTTONS[i] : COLOR_BUTTON_INACTIVE, alpha, c);
+		scale_color(lit ? COLOR_BUTTONS[i] : COLOR_BUTTON_INACTIVE, alpha, c);
 		wlr_scene_rect_set_size(tb->buttons[i], d, d);
 		wlr_scene_rect_set_color(tb->buttons[i], c);
 		wlr_scene_rect_set_corner_radii(tb->buttons[i], corner_radii_all(d / 2));
-		int cx = (int)lroundf(gs_button_cx(i) * scale);
+		int cx = (int)lroundf(gs_button_cx(chrome, fw, i) * scale);
 		wlr_scene_node_set_position(&tb->buttons[i]->node, cx - d / 2, (h - d) / 2);
 		if (tb->glyphs[i]) {
-			wlr_scene_node_set_enabled(&tb->glyphs[i]->node, t->activated);
+			wlr_scene_node_set_enabled(&tb->glyphs[i]->node, symbols && lit);
 			wlr_scene_buffer_set_dest_size(tb->glyphs[i], d, d);
 			wlr_scene_buffer_set_opacity(tb->glyphs[i], alpha);
 			wlr_scene_node_set_position(&tb->glyphs[i]->node, cx - d / 2, (h - d) / 2);
@@ -560,7 +638,7 @@ static struct wlr_buffer *glyph_buffer(int i) {
 	static struct wlr_buffer *glyphs[3];
 	static const float ink[4] = { 0.30f * 0.6f, 0.0f, 0.0f, 0.6f }; /* dark, see-through ink */
 	if (glyphs[i] == NULL) {
-		glyphs[i] = gs_glyph_render(i, GS_BUTTON_D, 3.0f, ink);
+		glyphs[i] = gs_glyph_render(i, GS_CHROME_TOUCH.d, 3.0f, ink); /* sharp at both sizes */
 	}
 	return glyphs[i];
 }
@@ -571,7 +649,7 @@ static void titlebar_create(struct gs_toplevel *t) {
 	tb->bg = wlr_scene_rect_create(tb->tree, 0, 0, COLOR_TITLE_ACTIVE);
 	tb->pill = wlr_scene_rect_create(tb->tree, 0, 0, (float[4]){ 0.13f, 0.13f, 0.13f, 0.13f });
 	for (int i = 0; i < 3; i++) {
-		tb->buttons[i] = wlr_scene_rect_create(tb->tree, GS_BUTTON_D, GS_BUTTON_D, COLOR_BUTTONS[i]);
+		tb->buttons[i] = wlr_scene_rect_create(tb->tree, chrome->d, chrome->d, COLOR_BUTTONS[i]);
 		struct wlr_buffer *g = glyph_buffer(i);
 		tb->glyphs[i] = g ? wlr_scene_buffer_create(tb->tree, g) : NULL;
 	}
@@ -834,6 +912,7 @@ static void focus_surface(struct gs_server *server, struct wlr_surface *surface)
 	} else {
 		wlr_seat_keyboard_notify_enter(server->seat, surface, NULL, 0, NULL);
 	}
+	text_inputs_focus(server, surface);
 }
 
 static bool exclusive_layer_has_focus(struct gs_server *server) {
@@ -948,25 +1027,37 @@ static void begin_glide(struct gs_toplevel *t) {
 
 /* ------------------------------------------------------------------ snapping (split screen) */
 
-static struct wlr_box snap_box(struct gs_server *server, int zone) {
-	struct wlr_box a = output_usable_area(server);
-	int gap = 6;
-	switch (zone) {
-	case 1: return (struct wlr_box){ a.x + gap, a.y + gap, a.width / 2 - gap * 3 / 2, a.height - gap * 2 };
-	case 2: return (struct wlr_box){ a.x + a.width / 2 + gap / 2, a.y + gap, a.width / 2 - gap * 3 / 2, a.height - gap * 2 };
-	default: return a;
-	}
+/* A layout zone (halves, quarters, thirds) on a screen's usable area, with small gaps */
+static struct wlr_box snap_box(struct gs_server *server, struct gs_output *output, int zone) {
+	struct wlr_box a = usable_area_of(server, output);
+	int b[4];
+	gs_zone_box(zone, a.x, a.y, a.width, a.height, 6, b);
+	return (struct wlr_box){ b[0], b[1], b[2], b[3] };
 }
 
-/* Put a window on the left/right half (1/2) or back to its own size (0). */
+/* Put a window in a zone (left half, top-right quarter, left third...) or back to its own
+ * size (GS_ZONE_NONE). GS_ZONE_FILL zooms it to fill the screen. */
 static void tile_toplevel(struct gs_toplevel *t, int zone) {
+	if (t->fullscreen) {
+		set_fullscreen(t, false);
+	}
+	if (zone == GS_ZONE_FILL) {
+		if (t->tiled) {
+			t->tiled = false;
+			t->tile_zone = GS_ZONE_NONE;
+		}
+		set_maximized(t, true);
+		wlr_xdg_surface_schedule_configure(t->xdg_toplevel->base);
+		return;
+	}
 	if (t->maximized) {
 		set_maximized(t, false);
 	}
-	if (zone == 0) {
+	if (zone == GS_ZONE_NONE) {
 		if (t->tiled) {
 			begin_glide(t);
 			t->tiled = false;
+			t->tile_zone = GS_ZONE_NONE;
 			wlr_scene_node_set_position(&t->tree->node, t->saved.x, t->saved.y);
 			request_frame_size(t, t->saved.width, t->saved.height);
 		}
@@ -977,24 +1068,25 @@ static void tile_toplevel(struct gs_toplevel *t, int zone) {
 	}
 	begin_glide(t);
 	t->tiled = true;
-	struct wlr_box b = snap_box(t->server, zone);
+	t->tile_zone = zone;
+	struct wlr_box b = snap_box(t->server, toplevel_output(t), zone);
 	wlr_scene_node_set_position(&t->tree->node, b.x, b.y);
 	request_frame_size(t, b.width, b.height);
 	refresh_toplevel(t);
 }
 
-/* While dragging a window: which edge is the pointer at? Shows a glass preview there. */
+/* While dragging a window: which edge or corner is the pointer at? Shows a glass preview there. */
 static void snap_track(struct gs_server *server) {
-	struct wlr_box a = output_full_area(server);
-	double x = server->cursor->x, y = server->cursor->y;
-	int zone = x <= a.x + 4 ? 1 : x >= a.x + a.width - 5 ? 2 : y <= a.y + 4 ? 3 : 0;
+	struct gs_output *output = current_output(server);
+	struct wlr_box a = full_area_of(server, output);
+	int zone = gs_drag_zone(a.x, a.y, a.width, a.height, server->cursor->x, server->cursor->y);
 	if (zone == server->snap_zone) {
 		return;
 	}
 	server->snap_zone = zone;
-	wlr_scene_node_set_enabled(&server->snap_preview->node, zone != 0);
-	if (zone) {
-		struct wlr_box b = snap_box(server, zone);
+	wlr_scene_node_set_enabled(&server->snap_preview->node, zone != GS_ZONE_NONE);
+	if (zone != GS_ZONE_NONE) {
+		struct wlr_box b = snap_box(server, output, zone);
 		wlr_scene_node_set_position(&server->snap_preview->node, b.x, b.y);
 		wlr_scene_rect_set_size(server->snap_preview, b.width, b.height);
 		wlr_scene_node_raise_to_top(&server->snap_preview->node);
@@ -1005,13 +1097,8 @@ static void snap_track(struct gs_server *server) {
 static void release_grab(struct gs_server *server) {
 	if (server->cursor_mode == CURSOR_MOVE && server->grabbed && server->snap_zone) {
 		struct gs_toplevel *t = server->grabbed;
-		if (server->snap_zone == 3) {
-			t->tiled = false;
-			set_maximized(t, true);
-			wlr_xdg_surface_schedule_configure(t->xdg_toplevel->base);
-		} else {
-			tile_toplevel(t, server->snap_zone);
-		}
+		server->cursor_mode = CURSOR_PASSTHROUGH; /* so zooming glides */
+		tile_toplevel(t, server->snap_zone);
 	}
 	server->snap_zone = 0;
 	wlr_scene_node_set_enabled(&server->snap_preview->node, false);
@@ -1063,6 +1150,9 @@ static void move_to_workspace(struct gs_toplevel *t, int ws) {
 
 /* Show every window side by side (or go back). `pick` gets focus when leaving. */
 static void overview_set(struct gs_server *server, bool on, struct gs_toplevel *pick) {
+	if (on) {
+		menu_close(server);
+	}
 	if (server->overview == on) {
 		return;
 	}
@@ -1311,6 +1401,7 @@ static void set_fullscreen(struct gs_toplevel *t, bool fullscreen) {
 	if (t->fullscreen == fullscreen) {
 		return;
 	}
+	t->reveal = false;
 	if (fullscreen) {
 		struct wlr_box full = full_area_of(t->server, toplevel_output(t));
 		t->saved = (struct wlr_box){ t->tree->node.x, t->tree->node.y, frame_w(t), frame_h(t) };
@@ -1480,7 +1571,7 @@ static void toplevel_commit(struct wl_listener *listener, void *data) {
 	}
 	if (t->ssd && t->mapped) {
 		/* re-render the title when the width changes enough to matter */
-		int max_w = frame_w(t) - 2 * (GS_BUTTON_X0 + 3 * (GS_BUTTON_D + GS_BUTTON_GAP)) - 8;
+		int max_w = title_max_w(t);
 		if (t->tb.title == NULL || t->tb.title_w > max_w || t->tb.title_w + 4 < max_w) {
 			titlebar_render_title(t);
 		}
@@ -1627,8 +1718,9 @@ static void start_close_animation(struct gs_toplevel *t) {
 		closing_add_rect(c, 0, 0, fw, th, CORNER_RADIUS,
 			t->activated ? COLOR_TITLE_ACTIVE : COLOR_TITLE_INACTIVE, true);
 		for (int i = 0; i < 3; i++) {
-			closing_add_rect(c, gs_button_cx(i) - GS_BUTTON_D / 2, (th - GS_BUTTON_D) / 2, GS_BUTTON_D,
-				GS_BUTTON_D, GS_BUTTON_D / 2, t->activated ? COLOR_BUTTONS[i] : COLOR_BUTTON_INACTIVE, false);
+			int d = chrome->d;
+			closing_add_rect(c, gs_button_cx(chrome, fw, i) - d / 2, (th - d) / 2, d, d, d / 2,
+				t->activated ? COLOR_BUTTONS[i] : COLOR_BUTTON_INACTIVE, false);
 		}
 		if (t->tb.title_buffer) {
 			struct wlr_scene_buffer *title = wlr_scene_buffer_create(c->tree, t->tb.title_buffer);
@@ -1656,6 +1748,7 @@ static void toplevel_unmap(struct wl_listener *listener, void *data) {
 	struct gs_toplevel *t = wl_container_of(listener, t, unmap);
 	struct gs_server *server = t->server;
 	overview_set(server, false, NULL);
+	forget_toplevel(server, t);
 	if (!server->shutting_down) {
 		start_close_animation(t);
 	}
@@ -1712,14 +1805,14 @@ static void begin_interactive(struct gs_toplevel *t, enum gs_cursor_mode mode, u
 		t->tiled = false;
 		request_frame_size(t, t->saved.width, t->saved.height);
 		wlr_scene_node_set_position(&t->tree->node, (int)(server->cursor->x - rel * t->saved.width),
-			(int)server->cursor->y - GS_TITLE_H / 2);
+			(int)server->cursor->y - chrome->title_h / 2);
 	}
 	if (t->maximized) {
 		/* un-zoom under the cursor, keeping it at the same relative spot */
 		double rel = (server->cursor->x - t->tree->node.x) / (frame_w(t) > 0 ? frame_w(t) : 1);
 		set_maximized(t, false);
 		wlr_scene_node_set_position(&t->tree->node, (int)(server->cursor->x - rel * t->saved.width),
-			(int)server->cursor->y - GS_TITLE_H / 2);
+			(int)server->cursor->y - chrome->title_h / 2);
 	}
 	server->grabbed = t;
 	server->cursor_mode = mode;
@@ -2148,6 +2241,562 @@ static void shell_ipc(const char *call) {
 	spawn(cmd);
 }
 
+/* ------------------------------------------------------------------ traffic lights: hover, tooltips, layout menu */
+
+#define HOVER_TIP_MS 900  /* red/yellow: a tooltip says what the button does */
+#define HOVER_MENU_MS 550 /* green: the layout menu opens, like macOS Sequoia */
+
+static void tooltip_hide(struct gs_server *server) {
+	if (server->tip_tree) {
+		wlr_scene_node_set_enabled(&server->tip_tree->node, false);
+	}
+}
+
+static void tooltip_show(struct gs_server *server, struct gs_toplevel *t, int part) {
+	const char *text = part == GS_PART_CLOSE ? "Close" : part == GS_PART_MINIMIZE ? "Minimise" :
+		t->fullscreen ? "Exit Full Screen" : "Enter Full Screen";
+	if (server->tip_tree == NULL) {
+		server->tip_tree = wlr_scene_tree_create(server->layers.overlay);
+		server->tip_bg = wlr_scene_rect_create(server->tip_tree, 0, 0,
+			(float[4]){ 0.15f * 0.94f, 0.15f * 0.94f, 0.17f * 0.94f, 0.94f });
+	}
+	if (server->tip_text) {
+		wlr_scene_node_destroy(&server->tip_text->node);
+		server->tip_text = NULL;
+	}
+	if (server->tip_buffer) {
+		wlr_buffer_drop(server->tip_buffer);
+		server->tip_buffer = NULL;
+	}
+	int tw = 0, th = 0;
+	server->tip_buffer = gs_text_render(text, "Inter 10", COLOR_TEXT_ACTIVE, 240, 2.0f, &tw, &th);
+	if (server->tip_buffer == NULL) {
+		return;
+	}
+	server->tip_text = wlr_scene_buffer_create(server->tip_tree, server->tip_buffer);
+	wlr_scene_buffer_set_dest_size(server->tip_text, tw, th);
+	int bw = tw + 16, bh = th + 8;
+	wlr_scene_rect_set_size(server->tip_bg, bw, bh);
+	wlr_scene_rect_set_corner_radii(server->tip_bg, corner_radii_all(6));
+	wlr_scene_node_set_position(&server->tip_text->node, 8, 4);
+	int fw = frame_w(t);
+	int i = part - GS_PART_CLOSE;
+	struct wlr_box full = full_area_of(server, toplevel_output(t));
+	int x = t->tree->node.x + gs_button_cx(chrome, fw, i) - bw / 2;
+	int y = t->tree->node.y + chrome->title_h + 4;
+	if (x + bw > full.x + full.width - 4) {
+		x = full.x + full.width - 4 - bw;
+	}
+	if (x < full.x + 4) {
+		x = full.x + 4;
+	}
+	wlr_scene_node_set_position(&server->tip_tree->node, x, y);
+	wlr_scene_node_raise_to_top(&server->tip_tree->node);
+	wlr_scene_node_set_enabled(&server->tip_tree->node, true);
+	schedule_frames(server);
+}
+
+/* ---- the green button's layout menu: halves, quarters, thirds, fill and arrange, full screen */
+enum { MI_ZONE, MI_ARRANGE, MI_FULLSCREEN };
+struct gs_menu_item {
+	int kind, arg;
+	struct wlr_box box; /* layout coords */
+	struct wlr_scene_rect *bg;
+};
+#define MENU_MAX 20
+static struct gs_menu_item menu_items[MENU_MAX];
+static int menu_n;
+
+static const float MENU_ITEM_BG[4] = { 0.10f, 0.10f, 0.10f, 0.10f };
+static const float MENU_ITEM_HOVER[4] = { 0.24f, 0.24f, 0.24f, 0.24f };
+static const float MENU_ACCENT[4] = { 0.039f, 0.518f, 1.0f, 1.0f }; /* #0a84ff */
+
+/* the windows "Fill & Arrange" places: this one plus the next ones on the same screen */
+static const int arrange_zones[5][4] = {
+	{ 0 }, { GS_ZONE_FILL }, { GS_ZONE_LEFT, GS_ZONE_RIGHT },
+	{ GS_ZONE_LEFT, GS_ZONE_TR, GS_ZONE_BR }, { GS_ZONE_TL, GS_ZONE_TR, GS_ZONE_BL, GS_ZONE_BR },
+};
+
+static void menu_close(struct gs_server *server) {
+	if (server->menu_tree) {
+		wlr_scene_node_destroy(&server->menu_tree->node);
+		server->menu_tree = NULL;
+		schedule_frames(server);
+	}
+	server->menu_t = NULL;
+	server->menu_hover = -1;
+	menu_n = 0;
+}
+
+static void menu_text(struct wlr_scene_tree *tree, const char *text, const char *font, const float color[4],
+		int x, int y) {
+	int tw = 0, th = 0;
+	struct wlr_buffer *b = gs_text_render(text, font, color, 400, 2.0f, &tw, &th);
+	if (b == NULL) {
+		return;
+	}
+	struct wlr_scene_buffer *sb = wlr_scene_buffer_create(tree, b);
+	wlr_buffer_drop(b); /* the scene buffer keeps it */
+	if (sb) {
+		wlr_scene_buffer_set_dest_size(sb, tw, th);
+		wlr_scene_node_set_position(&sb->node, x, y);
+	}
+}
+
+/* one small screen picture with the zone(s) lit in blue */
+static void menu_icon(struct gs_server *server, int kind, int arg, int x, int y, int iw, int ih) {
+	if (menu_n >= MENU_MAX) {
+		return;
+	}
+	struct gs_menu_item *it = &menu_items[menu_n++];
+	it->kind = kind;
+	it->arg = arg;
+	it->box = (struct wlr_box){ server->menu_box.x + x, server->menu_box.y + y, iw, ih };
+	it->bg = wlr_scene_rect_create(server->menu_tree, iw, ih, MENU_ITEM_BG);
+	wlr_scene_rect_set_corner_radii(it->bg, corner_radii_all(6));
+	wlr_scene_node_set_position(&it->bg->node, x, y);
+	int zones[4] = { arg }, nz = 1;
+	if (kind == MI_ARRANGE) {
+		nz = arg;
+		for (int i = 0; i < nz; i++) {
+			zones[i] = arrange_zones[arg][i];
+		}
+	}
+	for (int i = 0; i < nz; i++) {
+		int b[4];
+		gs_zone_box(zones[i] == GS_ZONE_FILL ? GS_ZONE_NONE : zones[i], x + 4, y + 4, iw - 8, ih - 8, 2, b);
+		float a = i == 0 ? 1.0f : 0.55f;
+		float c[4];
+		scale_color(MENU_ACCENT, a, c);
+		struct wlr_scene_rect *r = wlr_scene_rect_create(server->menu_tree, b[2], b[3], c);
+		wlr_scene_rect_set_corner_radii(r, corner_radii_all(3));
+		wlr_scene_node_set_position(&r->node, b[0], b[1]);
+	}
+}
+
+static void menu_open(struct gs_server *server, struct gs_toplevel *t) {
+	menu_close(server);
+	tooltip_hide(server);
+	if (t == NULL || !t->mapped) {
+		return;
+	}
+	bool big = server->touch_big;
+	int iw = big ? 58 : 44, ih = big ? 38 : 29, gap = big ? 10 : 7, pad = big ? 14 : 11;
+	int label_h = big ? 24 : 20, fs_h = big ? 44 : 30;
+	const char *label_font = big ? "Inter Semi-Bold 11" : "Inter Semi-Bold 9";
+	const char *item_font = big ? "Inter 13" : "Inter 11";
+	int w = pad * 2 + iw * 4 + gap * 3;
+	int h = pad + label_h + (ih + gap) * 3 + label_h + ih + gap + 8 + fs_h + pad - 4;
+	int fw = frame_w(t);
+	int gx = t->tree->node.x + gs_button_cx(chrome, fw, 2);
+	int gy = t->tree->node.y + chrome->title_h / 2;
+	server->menu_anchor = (struct wlr_box){ gx - chrome->d / 2 - chrome->gap / 2, gy - chrome->d / 2 - 4,
+		chrome->d + chrome->gap, chrome->d + 8 };
+	struct wlr_box full = full_area_of(server, toplevel_output(t));
+	int x = gx - w / 2, y = t->tree->node.y + chrome->title_h + 2;
+	if (x + w > full.x + full.width - 6) {
+		x = full.x + full.width - 6 - w;
+	}
+	if (x < full.x + 6) {
+		x = full.x + 6;
+	}
+	if (y + h > full.y + full.height - 6) {
+		y = full.y + full.height - 6 - h;
+	}
+	server->menu_box = (struct wlr_box){ x, y, w, h };
+	server->menu_t = t;
+	server->menu_hover = -1;
+	server->menu_tree = wlr_scene_tree_create(server->layers.overlay);
+	wlr_scene_node_set_position(&server->menu_tree->node, x, y);
+	/* Liquid Glass panel: blurred desktop behind, dark tint, rounded */
+	struct wlr_scene_blur *blur = wlr_scene_blur_create(server->menu_tree, w, h);
+	wlr_scene_blur_set_corner_radii(blur, corner_radii_all(14));
+	struct wlr_scene_rect *bg = wlr_scene_rect_create(server->menu_tree, w, h,
+		(float[4]){ 0.11f * 0.82f, 0.11f * 0.82f, 0.13f * 0.82f, 0.82f });
+	wlr_scene_rect_set_corner_radii(bg, corner_radii_all(14));
+	static const float label_color[4] = { 0.62f, 0.62f, 0.66f, 1.0f };
+	static const int rows[3][4] = {
+		{ GS_ZONE_LEFT, GS_ZONE_RIGHT, GS_ZONE_TOP, GS_ZONE_BOTTOM },
+		{ GS_ZONE_TL, GS_ZONE_TR, GS_ZONE_BL, GS_ZONE_BR },
+		{ GS_ZONE_LEFT3, GS_ZONE_CENTRE3, GS_ZONE_RIGHT3, GS_ZONE_LEFT23 },
+	};
+	int cy = pad;
+	menu_text(server->menu_tree, "Move & Resize", label_font, label_color, pad + 2, cy);
+	cy += label_h;
+	for (int r = 0; r < 3; r++) {
+		for (int c = 0; c < 4; c++) {
+			menu_icon(server, MI_ZONE, rows[r][c], pad + c * (iw + gap), cy, iw, ih);
+		}
+		cy += ih + gap;
+	}
+	menu_text(server->menu_tree, "Fill & Arrange", label_font, label_color, pad + 2, cy);
+	cy += label_h;
+	for (int n = 1; n <= 4; n++) {
+		menu_icon(server, n == 1 ? MI_ZONE : MI_ARRANGE, n == 1 ? GS_ZONE_FILL : n, pad + (n - 1) * (iw + gap),
+			cy, iw, ih);
+	}
+	cy += ih + gap + 4;
+	struct wlr_scene_rect *line = wlr_scene_rect_create(server->menu_tree, w - pad * 2, 1,
+		(float[4]){ 0.14f, 0.14f, 0.14f, 0.14f });
+	wlr_scene_node_set_position(&line->node, pad, cy - 4);
+	if (menu_n < MENU_MAX) {
+		struct gs_menu_item *it = &menu_items[menu_n++];
+		it->kind = MI_FULLSCREEN;
+		it->arg = 0;
+		it->box = (struct wlr_box){ x + pad - 4, y + cy, w - pad * 2 + 8, fs_h };
+		it->bg = wlr_scene_rect_create(server->menu_tree, it->box.width, fs_h, (float[4]){ 0, 0, 0, 0 });
+		wlr_scene_rect_set_corner_radii(it->bg, corner_radii_all(8));
+		wlr_scene_node_set_position(&it->bg->node, pad - 4, cy);
+		menu_text(server->menu_tree, t->fullscreen ? "Exit Full Screen" : "Enter Full Screen", item_font,
+			COLOR_TEXT_ACTIVE, pad + 6, cy + (big ? 11 : 7));
+	}
+	schedule_frames(server);
+}
+
+static int menu_item_at(struct gs_server *server, double lx, double ly) {
+	for (int i = 0; i < menu_n; i++) {
+		if (wlr_box_contains_point(&menu_items[i].box, lx, ly)) {
+			return i;
+		}
+	}
+	return -1;
+}
+
+static void menu_set_hover(struct gs_server *server, int idx) {
+	if (idx == server->menu_hover) {
+		return;
+	}
+	for (int i = 0; i < menu_n; i++) {
+		bool on = i == idx;
+		if (menu_items[i].kind == MI_FULLSCREEN) {
+			wlr_scene_rect_set_color(menu_items[i].bg, on ? MENU_ACCENT : (float[4]){ 0, 0, 0, 0 });
+		} else {
+			wlr_scene_rect_set_color(menu_items[i].bg, on ? MENU_ITEM_HOVER : MENU_ITEM_BG);
+		}
+	}
+	server->menu_hover = idx;
+	schedule_frames(server);
+}
+
+static bool box_contains_grown(const struct wlr_box *b, int grow, double x, double y) {
+	return x >= b->x - grow && y >= b->y - grow && x < b->x + b->width + grow && y < b->y + b->height + grow;
+}
+
+/* Pointer moved while the menu is open: highlight the item under it; leaving the menu (and the
+ * green button) closes it. Returns true when the pointer is over the menu. */
+static bool menu_motion(struct gs_server *server, double lx, double ly) {
+	if (server->menu_t == NULL) {
+		return false;
+	}
+	if (box_contains_grown(&server->menu_box, 0, lx, ly)) {
+		menu_set_hover(server, menu_item_at(server, lx, ly));
+		return true;
+	}
+	menu_set_hover(server, -1);
+	/* a little slack around the menu and the button, and the gap between them, so a shaky hand
+	 * on the way down doesn't close it */
+	bool bridge = lx >= server->menu_anchor.x - 10 && lx < server->menu_anchor.x + server->menu_anchor.width + 10 &&
+		ly >= server->menu_anchor.y && ly < server->menu_box.y + 4;
+	if (!server->pressing_touch && !box_contains_grown(&server->menu_box, 14, lx, ly) &&
+			!box_contains_grown(&server->menu_anchor, 6, lx, ly) && !bridge) {
+		menu_close(server);
+	}
+	return false;
+}
+
+static void arrange_windows(struct gs_server *server, struct gs_toplevel *t, int n) {
+	struct gs_toplevel *list[4] = { t };
+	int count = 1;
+	struct gs_output *out = toplevel_output(t);
+	struct gs_toplevel *o;
+	wl_list_for_each(o, &server->toplevels, link) {
+		if (count >= n) {
+			break;
+		}
+		if (o != t && o->mapped && !o->minimized && o->ws == server->ws && toplevel_output(o) == out) {
+			list[count++] = o;
+		}
+	}
+	for (int i = 0; i < count; i++) {
+		tile_toplevel(list[i], count == 1 ? GS_ZONE_FILL : arrange_zones[count][i]);
+	}
+	focus_toplevel(t);
+}
+
+static void menu_activate(struct gs_server *server, int idx) {
+	struct gs_toplevel *t = server->menu_t;
+	if (t == NULL || idx < 0 || idx >= menu_n) {
+		return;
+	}
+	struct gs_menu_item it = menu_items[idx];
+	menu_close(server);
+	switch (it.kind) {
+	case MI_ZONE:
+		tile_toplevel(t, it.arg);
+		break;
+	case MI_ARRANGE:
+		arrange_windows(server, t, it.arg);
+		break;
+	case MI_FULLSCREEN:
+		set_fullscreen(t, !t->fullscreen);
+		break;
+	}
+}
+
+/* A press (mouse or finger) while the menu is open. Returns true if the menu took it. */
+static bool menu_press(struct gs_server *server, double lx, double ly) {
+	if (server->menu_t == NULL) {
+		return false;
+	}
+	int idx = menu_item_at(server, lx, ly);
+	if (idx >= 0) {
+		menu_activate(server, idx);
+		return true;
+	}
+	if (box_contains_grown(&server->menu_box, 0, lx, ly)) {
+		return true;
+	}
+	menu_close(server);
+	return false;
+}
+
+/* The pointer is over a window's traffic lights (or left them). */
+static void hover_set(struct gs_server *server, struct gs_toplevel *t, int part) {
+	if (t == server->hover_t && part == server->hover_part) {
+		return;
+	}
+	struct gs_toplevel *old = server->hover_t;
+	server->hover_t = t;
+	server->hover_part = part;
+	tooltip_hide(server);
+	if (old && old != t && old->mapped) {
+		refresh_toplevel(old);
+	}
+	if (t) {
+		refresh_toplevel(t);
+	}
+	if (server->hover_timer) {
+		wl_event_source_timer_update(server->hover_timer,
+			t && part ? (part == GS_PART_ZOOM ? HOVER_MENU_MS : HOVER_TIP_MS) : 0);
+	}
+	schedule_frames(server);
+}
+
+static int hover_tick(void *data) {
+	struct gs_server *server = data;
+	struct gs_toplevel *t = server->hover_t;
+	if (t == NULL || !t->mapped || server->menu_t || server->cursor_mode != CURSOR_PASSTHROUGH) {
+		return 0;
+	}
+	if (server->hover_part == GS_PART_ZOOM) {
+		menu_open(server, t);
+	} else if (server->hover_part) {
+		tooltip_show(server, t, server->hover_part);
+	}
+	return 0;
+}
+
+/* A window is going away: drop every pointer to it. */
+static void forget_toplevel(struct gs_server *server, struct gs_toplevel *t) {
+	if (server->hover_t == t) {
+		server->hover_t = NULL;
+		server->hover_part = 0;
+		tooltip_hide(server);
+	}
+	if (server->menu_t == t) {
+		menu_close(server);
+	}
+}
+
+/* Full screen, like macOS: move the pointer to the top of the screen and the title bar (with
+ * the buttons to leave full screen) slides over the app; move away and it hides again. */
+static void reveal_update(struct gs_server *server) {
+	struct gs_toplevel *f = focused_toplevel(server), *t;
+	wl_list_for_each(t, &server->toplevels, link) {
+		if (t->reveal && (t != f || !t->fullscreen)) {
+			t->reveal = false;
+			refresh_toplevel(t);
+		}
+	}
+	if (f == NULL || !f->fullscreen || !f->ssd || server->active_constraint || server->overview) {
+		return;
+	}
+	struct wlr_box full = full_area_of(server, toplevel_output(f));
+	double x = server->cursor->x, y = server->cursor->y - full.y;
+	bool on_screen = x >= full.x && x < full.x + full.width;
+	bool want = f->reveal ? (on_screen && y < chrome->title_h + 30) || server->menu_t == f : on_screen && y <= 2;
+	if (want != f->reveal) {
+		f->reveal = want;
+		refresh_toplevel(f);
+		schedule_frames(server);
+	}
+}
+
+/* ------------------------------------------------------------------ touch mode */
+
+/* Settings > Device > Touch: how long title bars stay big after a touch (input.conf
+ * touch_buttons=5|10|20|30|always). Returns minutes, 0 for always. */
+static int touch_setting_minutes(void) {
+	const char *home = getenv("HOME");
+	char path[512], line[128];
+	snprintf(path, sizeof(path), "%s/.config/gill-osaab/input.conf", home ? home : "/");
+	int minutes = 10;
+	FILE *f = fopen(path, "r");
+	if (f) {
+		while (fgets(line, sizeof(line), f)) {
+			if (strncmp(line, "touch_buttons=", 14) == 0) {
+				minutes = strncmp(line + 14, "always", 6) == 0 ? 0 : atoi(line + 14);
+				if (minutes < 0 || minutes > 240) {
+					minutes = 10;
+				}
+			}
+		}
+		fclose(f);
+	}
+	return minutes;
+}
+
+/* Switch every title bar between the Mac look and the big touch look. Windows that fill the
+ * screen or a zone keep filling it exactly (the app is asked for its new size). */
+static void chrome_set(struct gs_server *server, bool big) {
+	if (server->touch_big == big) {
+		return;
+	}
+	server->touch_big = big;
+	chrome = big ? &GS_CHROME_TOUCH : &GS_CHROME_MAC;
+	menu_close(server);
+	tooltip_hide(server);
+	struct gs_toplevel *t;
+	wl_list_for_each(t, &server->toplevels, link) {
+		if (!t->mapped) {
+			continue;
+		}
+		if (t->maximized) {
+			struct wlr_box a = usable_area_of(server, toplevel_output(t));
+			request_frame_size(t, a.width, a.height);
+		} else if (t->tiled) {
+			struct wlr_box b = snap_box(server, toplevel_output(t), t->tile_zone);
+			request_frame_size(t, b.width, b.height);
+		}
+		if (t->ssd) {
+			titlebar_render_title(t);
+		}
+		refresh_toplevel(t);
+	}
+	schedule_frames(server);
+}
+
+static int touch_timer_tick(void *data) {
+	struct gs_server *server = data;
+	if (server->touch_minutes > 0) {
+		chrome_set(server, false);
+	}
+	return 0;
+}
+
+static void touch_activity(struct gs_server *server) {
+	server->last_touch_ms = now_ms();
+	chrome_set(server, true);
+	if (server->touch_minutes > 0 && server->touch_timer) {
+		wl_event_source_timer_update(server->touch_timer, server->touch_minutes * 60000);
+	}
+}
+
+static void touch_settings_load(struct gs_server *server) {
+	server->touch_minutes = touch_setting_minutes();
+	if (server->touch_minutes == 0) {
+		chrome_set(server, true);
+	} else if (server->touch_big && server->touch_timer) {
+		wl_event_source_timer_update(server->touch_timer, server->touch_minutes * 60000);
+	}
+}
+
+/* ------------------------------------------------------------------ on-screen keyboard */
+
+#define OSK_CMD "wvkbd-mobintl -L 300 -H 260 -R 12 --bg 1c1c1ed9 --fg 48484af2 --fg-sp 2c2c2ef2 " \
+	"--press 0a84ffff --press-sp 0a84ffff --text ffffffff --text-sp ffffffff --fn 'Inter 18'"
+
+/* Like an iPad: the keyboard pops up when a text box is tapped, unless a real keyboard was used
+ * more recently than the touch screen. */
+static void osk_show(struct gs_server *server) {
+	if (!server->has_touch || server->last_touch_ms <= server->last_key_ms || server->last_touch_ms <= 0 ||
+			getenv("GOSAAB_NO_OSK")) {
+		return;
+	}
+	server->osk_auto_shown = true;
+	spawn("pkill --signal USR2 -x wvkbd-mobintl || exec " OSK_CMD);
+}
+
+static void osk_hide(struct gs_server *server) {
+	if (!server->osk_auto_shown) {
+		return;
+	}
+	server->osk_auto_shown = false;
+	spawn("pkill --signal USR1 -x wvkbd-mobintl");
+}
+
+static void text_input_enable(struct wl_listener *listener, void *data) {
+	struct gs_text_input *ti = wl_container_of(listener, ti, enable);
+	osk_show(ti->server);
+}
+
+static void text_input_disable(struct wl_listener *listener, void *data) {
+	struct gs_text_input *ti = wl_container_of(listener, ti, disable);
+	osk_hide(ti->server);
+}
+
+static void text_input_destroy(struct wl_listener *listener, void *data) {
+	struct gs_text_input *ti = wl_container_of(listener, ti, destroy);
+	if (ti->input->current_enabled) {
+		osk_hide(ti->server);
+	}
+	wl_list_remove(&ti->enable.link);
+	wl_list_remove(&ti->disable.link);
+	wl_list_remove(&ti->destroy.link);
+	wl_list_remove(&ti->link);
+	free(ti);
+}
+
+/* Tell each app's text inputs whether that app has the keyboard */
+static void text_inputs_focus(struct gs_server *server, struct wlr_surface *surface) {
+	struct wl_client *client = surface ? wl_resource_get_client(surface->resource) : NULL;
+	struct gs_text_input *ti;
+	wl_list_for_each(ti, &server->text_inputs, link) {
+		struct wlr_text_input_v3 *in = ti->input;
+		if (in->focused_surface && in->focused_surface != surface) {
+			wlr_text_input_v3_send_leave(in);
+		}
+		if (surface && in->focused_surface != surface && wl_resource_get_client(in->resource) == client) {
+			wlr_text_input_v3_send_enter(in, surface);
+		}
+	}
+	if (surface == NULL) {
+		osk_hide(server);
+	}
+}
+
+static void handle_new_text_input(struct wl_listener *listener, void *data) {
+	struct gs_server *server = wl_container_of(listener, server, new_text_input);
+	struct wlr_text_input_v3 *in = data;
+	if (in->seat != server->seat) {
+		return;
+	}
+	struct gs_text_input *ti = calloc(1, sizeof(*ti));
+	ti->server = server;
+	ti->input = in;
+	ti->enable.notify = text_input_enable;
+	wl_signal_add(&in->events.enable, &ti->enable);
+	ti->disable.notify = text_input_disable;
+	wl_signal_add(&in->events.disable, &ti->disable);
+	ti->destroy.notify = text_input_destroy;
+	wl_signal_add(&in->events.destroy, &ti->destroy);
+	wl_list_insert(&server->text_inputs, &ti->link);
+	struct wlr_surface *focused = server->seat->keyboard_state.focused_surface;
+	if (focused && wl_resource_get_client(focused->resource) == wl_resource_get_client(in->resource)) {
+		wlr_text_input_v3_send_enter(in, focused);
+	}
+}
+
 static bool handle_keybinding(struct gs_server *server, uint32_t mods, xkb_keysym_t sym) {
 	if (server->locked) {
 		return false; /* every key goes to the lock screen */
@@ -2160,6 +2809,17 @@ static bool handle_keybinding(struct gs_server *server, uint32_t mods, xkb_keysy
 		} else { /* the shell shows the app switcher; letting go of Alt/Super picks the app */
 			shell_ipc((mods & WLR_MODIFIER_SHIFT) ? "switcher previous" : "switcher next");
 			server->switching = true;
+		}
+		return true;
+	}
+	if (server->menu_t && sym == XKB_KEY_Escape) {
+		menu_close(server);
+		return true;
+	}
+	if (super && (mods & WLR_MODIFIER_CTRL) && sym == XKB_KEY_f) { /* full screen, like Ctrl+Cmd+F */
+		struct gs_toplevel *t = focused_toplevel(server);
+		if (t) {
+			set_fullscreen(t, !t->fullscreen);
 		}
 		return true;
 	}
@@ -2271,6 +2931,9 @@ static void keyboard_key(struct wl_listener *listener, void *data) {
 	struct gs_server *server = kb->server;
 	struct wlr_keyboard_key_event *event = data;
 	user_activity(server);
+	if (!kb->virtual) {
+		server->last_key_ms = now_ms(); /* a real keyboard: don't pop up the on-screen one */
+	}
 	uint32_t keycode = event->keycode + 8;
 	const xkb_keysym_t *syms;
 	int nsyms = xkb_state_key_get_syms(kb->wlr_keyboard->xkb_state, keycode, &syms);
@@ -2301,6 +2964,7 @@ static void new_keyboard(struct gs_server *server, struct wlr_input_device *devi
 	struct gs_keyboard *kb = calloc(1, sizeof(*kb));
 	kb->server = server;
 	kb->wlr_keyboard = wlr_keyboard;
+	kb->virtual = virtual;
 	if (!virtual) { /* an on-screen keyboard brings its own keymap */
 		struct xkb_context *context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
 		struct xkb_keymap *keymap = xkb_keymap_new_from_names(context, NULL, XKB_KEYMAP_COMPILE_NO_FLAGS);
@@ -2496,7 +3160,7 @@ static struct gs_hit hit_test(struct gs_server *server, double lx, double ly) {
 	}
 	if (hit.toplevel && !hit.surface) {
 		struct gs_toplevel *t = hit.toplevel;
-		hit.part = gs_frame_hit(frame_w(t), content_geo(t)->height, title_h(t) > 0,
+		hit.part = gs_frame_hit(chrome, frame_w(t), content_geo(t)->height, title_h(t) > 0 || t->reveal,
 			lx - t->tree->node.x, ly - t->tree->node.y, &hit.edges);
 		return hit;
 	}
@@ -2511,7 +3175,7 @@ static struct gs_hit hit_test(struct gs_server *server, double lx, double ly) {
 			continue;
 		}
 		unsigned edges;
-		enum gs_frame_part part = gs_frame_hit(frame_w(t), content_geo(t)->height, true,
+		enum gs_frame_part part = gs_frame_hit(chrome, frame_w(t), content_geo(t)->height, true,
 			lx - t->tree->node.x, ly - t->tree->node.y, &edges);
 		if (part == GS_PART_RESIZE) {
 			hit.toplevel = t;
@@ -2571,12 +3235,27 @@ static void process_cursor_motion(struct gs_server *server, uint32_t time) {
 		return;
 	}
 	if (server->overview) {
+		hover_set(server, NULL, 0);
 		wlr_cursor_set_xcursor(server->cursor, server->cursor_mgr, "default");
 		wlr_seat_pointer_clear_focus(server->seat);
 		check_constraint(server, NULL);
 		return;
 	}
+	if (menu_motion(server, server->cursor->x, server->cursor->y)) { /* over the layout menu */
+		hover_set(server, NULL, 0);
+		wlr_cursor_set_xcursor(server->cursor, server->cursor_mgr, "default");
+		wlr_seat_pointer_clear_focus(server->seat);
+		return;
+	}
 	struct gs_hit hit = hit_test(server, server->cursor->x, server->cursor->y);
+	{ /* over a window's traffic lights? (symbols, tooltip, green's layout menu) */
+		bool button = hit.toplevel && !hit.surface && hit.part >= GS_PART_CLOSE && hit.part <= GS_PART_ZOOM &&
+			!server->locked;
+		if (server->menu_t && server->menu_t == hit.toplevel && hit.part == GS_PART_ZOOM) {
+			button = true; /* stay on green while its menu is open */
+		}
+		hover_set(server, button ? hit.toplevel : NULL, button ? (int)hit.part : 0);
+	}
 	if (server->locked && hit.surface && wlr_session_lock_surface_v1_try_from_wlr_surface(hit.surface) == NULL) {
 		hit.surface = NULL; /* nothing but the lock screen is reachable while locked */
 	}
@@ -2611,6 +3290,7 @@ static void cursor_motion(struct wl_listener *listener, void *data) {
 		}
 	}
 	wlr_cursor_move(server->cursor, &event->pointer->base, event->delta_x, event->delta_y);
+	reveal_update(server);
 	process_cursor_motion(server, event->time_msec);
 }
 
@@ -2619,6 +3299,7 @@ static void cursor_motion_absolute(struct wl_listener *listener, void *data) {
 	struct wlr_pointer_motion_absolute_event *event = data;
 	user_activity(server);
 	wlr_cursor_warp_absolute(server->cursor, &event->pointer->base, event->x, event->y);
+	reveal_update(server);
 	process_cursor_motion(server, event->time_msec);
 }
 
@@ -2627,6 +3308,10 @@ static void press_at(struct gs_server *server, double lx, double ly) {
 	if (server->locked) {
 		return;
 	}
+	if (menu_press(server, lx, ly)) {
+		return;
+	}
+	tooltip_hide(server);
 	struct gs_hit hit = hit_test(server, lx, ly);
 	if (server->overview) { /* pick a window, or click the desktop to go back */
 		overview_set(server, false, (hit.toplevel && !hit.toplevel->minimized) ? hit.toplevel : NULL);
@@ -2651,9 +3336,26 @@ static void press_at(struct gs_server *server, double lx, double ly) {
 	case GS_PART_MINIMIZE:
 		minimize_toplevel(t);
 		break;
-	case GS_PART_ZOOM:
-		set_maximized(t, !t->maximized);
+	case GS_PART_ZOOM: {
+		/* like macOS: green = full screen, Option(Alt)+green = zoom to fill the screen.
+		 * A finger can't hover, so a tap shows the layout menu (it has Full Screen too). */
+		struct wlr_keyboard *kb = wlr_seat_get_keyboard(server->seat);
+		bool alt = kb && (wlr_keyboard_get_modifiers(kb) & WLR_MODIFIER_ALT);
+		if (server->pressing_touch && !t->fullscreen) {
+			menu_open(server, t);
+		} else if (alt) {
+			if (t->fullscreen) {
+				set_fullscreen(t, false);
+			}
+			if (t->tiled) {
+				tile_toplevel(t, GS_ZONE_NONE);
+			}
+			set_maximized(t, !t->maximized);
+		} else {
+			set_fullscreen(t, !t->fullscreen);
+		}
 		break;
+	}
 	case GS_PART_TITLE:
 		if (server->last_click_toplevel == t && now - server->last_click_ms < DOUBLE_CLICK_MS) {
 			set_maximized(t, !t->maximized); /* double-click the title bar to zoom, like macOS */
@@ -2757,10 +3459,24 @@ static void hold_end(struct wl_listener *listener, void *data) {
 }
 
 /* ---- touchscreen: fingers go to apps; on title bars and buttons a finger acts like the mouse */
-static void touch_press(struct gs_server *server, int32_t id, uint32_t time, double lx, double ly) {
-	user_activity(server);
+static void touch_press_normal(struct gs_server *server, int32_t id, uint32_t time, double lx, double ly) {
+	if (server->menu_t && !box_contains_grown(&server->menu_box, 0, lx, ly)) {
+		struct gs_hit h = hit_test(server, lx, ly);
+		if (!(h.toplevel == server->menu_t && h.part == GS_PART_ZOOM)) {
+			menu_close(server); /* a tap anywhere else closes the layout menu */
+		}
+	}
 	struct gs_hit hit = hit_test(server, lx, ly);
-	if (hit.surface && !server->overview &&
+	{ /* a full-screen title bar shown by an edge swipe hides on a tap anywhere else */
+		struct gs_toplevel *t;
+		wl_list_for_each(t, &server->toplevels, link) {
+			if (t->reveal && !(hit.toplevel == t && !hit.surface) && server->menu_t != t) {
+				t->reveal = false;
+				refresh_toplevel(t);
+			}
+		}
+	}
+	if (hit.surface && !server->overview && !server->menu_t &&
 			(!server->locked || wlr_session_lock_surface_v1_try_from_wlr_surface(hit.surface))) {
 		if (hit.toplevel) {
 			focus_toplevel(hit.toplevel);
@@ -2768,15 +3484,187 @@ static void touch_press(struct gs_server *server, int32_t id, uint32_t time, dou
 		wlr_seat_touch_notify_down(server->seat, hit.surface, time, id, hit.sx, hit.sy);
 		return;
 	}
-	if (server->touch_grab_id < 0) { /* title bar, traffic lights, edges, desktop */
+	if (server->touch_grab_id < 0) { /* title bar, traffic lights, edges, desktop, layout menu */
 		server->touch_grab_id = id;
 		wlr_cursor_warp(server->cursor, NULL, lx, ly);
+		server->pressing_touch = true;
 		press_at(server, lx, ly);
+		server->pressing_touch = false;
 	}
+}
+
+static void touch_release_normal(struct gs_server *server, int32_t id, uint32_t time) {
+	if (id == server->touch_grab_id) {
+		server->touch_grab_id = -1;
+		release_grab(server);
+		return;
+	}
+	if (wlr_seat_touch_get_point(server->seat, id)) {
+		wlr_seat_touch_notify_up(server->seat, time, id);
+	}
+}
+
+static int finger_find(struct gs_server *server, int32_t id) {
+	for (int i = 0; i < server->nfingers; i++) {
+		if (server->fingers[i].id == id) {
+			return i;
+		}
+	}
+	return -1;
+}
+
+static void finger_remove(struct gs_server *server, int i) {
+	if (i < 0) {
+		return;
+	}
+	server->fingers[i] = server->fingers[--server->nfingers];
+}
+
+#define EDGE_BAND 14    /* px from the screen edge where an edge swipe starts */
+#define EDGE_TRIGGER 60 /* px a finger travels inward to trigger it */
+
+/* iPad-style edge swipes: up from the bottom = Mission Control, down from the top left =
+ * notifications, down from the top right = Control Centre, down from the top of a full-screen
+ * app = its title bar */
+static int edge_kind_at(struct gs_server *server, double lx, double ly) {
+	struct gs_output *o = output_at(server, lx, ly);
+	struct wlr_box full = full_area_of(server, o);
+	if (ly >= full.y + full.height - EDGE_BAND) {
+		return 1;
+	}
+	if (ly <= full.y + EDGE_BAND - 4) {
+		if (lx < full.x + full.width * 0.3) {
+			return 2;
+		}
+		if (lx > full.x + full.width * 0.7) {
+			return 3;
+		}
+		struct gs_toplevel *f = focused_toplevel(server);
+		if (f && f->fullscreen && f->ssd) {
+			return 4;
+		}
+	}
+	return 0;
+}
+
+static void edge_action(struct gs_server *server, int kind) {
+	switch (kind) {
+	case 1:
+		overview_set(server, !server->overview, NULL);
+		break;
+	case 2:
+		shell_ipc("notifications toggle");
+		break;
+	case 3:
+		shell_ipc("controlcenter toggle");
+		break;
+	case 4: {
+		struct gs_toplevel *f = focused_toplevel(server);
+		if (f && f->fullscreen) {
+			f->reveal = true;
+			refresh_toplevel(f);
+			schedule_frames(server);
+		}
+		break;
+	}
+	}
+}
+
+/* Three fingers swiped together: sideways = switch app, up = Mission Control, down = back */
+static void three_finger_action(struct gs_server *server) {
+	if (server->three_n <= 0 || server->locked) {
+		return;
+	}
+	double dx = server->three_dx / server->three_n, dy = server->three_dy / server->three_n;
+	if (fabs(dx) > fabs(dy) && fabs(dx) > 100) {
+		if (dx < 0) {
+			/* the app used just before this one (like a quick Alt+Tab) */
+			struct gs_toplevel *f = focused_toplevel(server), *t;
+			wl_list_for_each(t, &server->toplevels, link) {
+				if (t != f && t->mapped && !t->minimized && t->ws == server->ws) {
+					focus_toplevel(t);
+					break;
+				}
+			}
+		} else {
+			focus_next_toplevel(server);
+		}
+	} else if (dy < -100) {
+		overview_set(server, true, NULL);
+	} else if (dy > 100) {
+		overview_set(server, false, NULL);
+	}
+}
+
+static void touch_press(struct gs_server *server, int32_t id, uint32_t time, double lx, double ly) {
+	user_activity(server);
+	touch_activity(server);
+	if (server->nfingers == 0) {
+		server->three_t0 = now_ms();
+	}
+	if (server->nfingers < 10 && finger_find(server, id) < 0) {
+		int i = server->nfingers++;
+		server->fingers[i].id = id;
+		server->fingers[i].x0 = server->fingers[i].x = lx;
+		server->fingers[i].y0 = server->fingers[i].y = ly;
+		server->fingers[i].used = false;
+	}
+	if (server->three_finger) {
+		return;
+	}
+	if (server->nfingers >= 3 && now_ms() - server->three_t0 < 400 && !server->locked) {
+		/* three fingers landed together: a system gesture. Lift the fingers apps already got. */
+		server->three_finger = true;
+		server->three_dx = server->three_dy = 0;
+		server->three_n = 0;
+		for (int i = 0; i < server->nfingers; i++) {
+			int32_t fid = server->fingers[i].id;
+			if (fid == server->touch_grab_id) {
+				server->touch_grab_id = -1;
+				server->cursor_mode = CURSOR_PASSTHROUGH;
+				server->grabbed = NULL;
+				server->snap_zone = 0;
+				wlr_scene_node_set_enabled(&server->snap_preview->node, false);
+			} else if (wlr_seat_touch_get_point(server->seat, fid)) {
+				wlr_seat_touch_notify_up(server->seat, time, fid);
+			}
+		}
+		server->edge_id = -1;
+		return;
+	}
+	if (!server->locked && server->edge_id < 0 && server->nfingers == 1) {
+		int kind = edge_kind_at(server, lx, ly);
+		if (kind) {
+			server->edge_id = id;
+			server->edge_kind = kind;
+			server->edge_done = false;
+			return;
+		}
+	}
+	touch_press_normal(server, id, time, lx, ly);
 }
 
 static void touch_move(struct gs_server *server, int32_t id, uint32_t time, double lx, double ly) {
 	user_activity(server);
+	int fi = finger_find(server, id);
+	if (fi >= 0) {
+		server->fingers[fi].x = lx;
+		server->fingers[fi].y = ly;
+	}
+	if (server->three_finger) {
+		return;
+	}
+	if (id == server->edge_id) {
+		if (!server->edge_done && fi >= 0) {
+			double dy = ly - server->fingers[fi].y0;
+			bool go = server->edge_kind == 1 ? dy < -EDGE_TRIGGER : dy > EDGE_TRIGGER;
+			if (go) {
+				server->edge_done = true;
+				edge_action(server, server->edge_kind);
+			}
+		}
+		return;
+	}
 	if (id == server->touch_grab_id) {
 		wlr_cursor_warp(server->cursor, NULL, lx, ly);
 		process_cursor_motion(server, time);
@@ -2791,14 +3679,31 @@ static void touch_move(struct gs_server *server, int32_t id, uint32_t time, doub
 }
 
 static void touch_release(struct gs_server *server, int32_t id, uint32_t time) {
-	if (id == server->touch_grab_id) {
-		server->touch_grab_id = -1;
-		release_grab(server);
+	int fi = finger_find(server, id);
+	if (server->three_finger) {
+		if (fi >= 0) {
+			server->three_dx += server->fingers[fi].x - server->fingers[fi].x0;
+			server->three_dy += server->fingers[fi].y - server->fingers[fi].y0;
+			server->three_n++;
+		}
+		finger_remove(server, fi);
+		if (server->nfingers == 0) {
+			server->three_finger = false;
+			three_finger_action(server);
+		}
 		return;
 	}
-	if (wlr_seat_touch_get_point(server->seat, id)) {
-		wlr_seat_touch_notify_up(server->seat, time, id);
+	if (id == server->edge_id) {
+		server->edge_id = -1;
+		if (!server->edge_done && fi >= 0) { /* it was just a tap near the edge: give it to whatever is there */
+			touch_press_normal(server, id, time, server->fingers[fi].x0, server->fingers[fi].y0);
+			touch_release_normal(server, id, time);
+		}
+		finger_remove(server, fi);
+		return;
 	}
+	finger_remove(server, fi);
+	touch_release_normal(server, id, time);
 }
 
 static void touch_down(struct wl_listener *listener, void *data) {
@@ -3138,6 +4043,7 @@ static int handle_input_settings(int sig, void *data) {
 	for (int i = 0; i < server->npointers; i++) {
 		configure_pointer(server->pointers[i]);
 	}
+	touch_settings_load(server); /* how long the big touch buttons stay */
 	return 0;
 }
 
@@ -3166,6 +4072,18 @@ static int test_click_tick(void *data) {
 				workspace_switch(server, n - 1);
 			} else if (sscanf(line, "movews %d", &n) == 1) {
 				move_to_workspace(focused_toplevel(server), n - 1);
+			} else if (sscanf(line, "move %lf %lf", &x, &y) == 2) { /* the mouse moves there (hover) */
+				wlr_cursor_warp(server->cursor, NULL, x, y);
+				reveal_update(server);
+				process_cursor_motion(server, 0);
+			} else if (strncmp(line, "touchreset", 10) == 0) { /* the touch buttons' time ran out */
+				chrome_set(server, false);
+			} else if (sscanf(line, "swipe %lf %lf %lf %lf", &x, &y, &x2, &y2) == 4) { /* one finger swipe */
+				touch_press(server, 8, 0, x, y);
+				for (int i = 1; i <= 10; i++) {
+					touch_move(server, 8, 0, x + (x2 - x) * i / 10, y + (y2 - y) * i / 10);
+				}
+				touch_release(server, 8, 0);
 			} else if (sscanf(line, "tap %lf %lf", &x, &y) == 2) { /* a finger tap on the touchscreen */
 				touch_press(server, 7, 0, x, y);
 				touch_release(server, 7, 0);
@@ -3432,6 +4350,15 @@ int main(int argc, char *argv[]) {
 	server.hold_end.notify = hold_end;
 	wl_signal_add(&server.cursor->events.hold_end, &server.hold_end);
 	server.touch_grab_id = -1;
+	server.edge_id = -1;
+	server.menu_hover = -1;
+	server.hover_timer = wl_event_loop_add_timer(loop, hover_tick, &server);
+	server.touch_timer = wl_event_loop_add_timer(loop, touch_timer_tick, &server);
+	touch_settings_load(&server);
+	wl_list_init(&server.text_inputs);
+	server.text_input_mgr = wlr_text_input_manager_v3_create(server.display);
+	server.new_text_input.notify = handle_new_text_input;
+	wl_signal_add(&server.text_input_mgr->events.text_input, &server.new_text_input);
 	server.touch_down.notify = touch_down;
 	wl_signal_add(&server.cursor->events.touch_down, &server.touch_down);
 	server.touch_up.notify = touch_up;
@@ -3505,7 +4432,7 @@ int main(int argc, char *argv[]) {
 		&server.new_constraint, &server.request_activate, &server.new_lock, &server.new_inhibitor,
 		&server.swipe_begin, &server.swipe_update, &server.swipe_end, &server.pinch_begin, &server.pinch_update,
 		&server.pinch_end, &server.hold_begin, &server.hold_end, &server.touch_down, &server.touch_up,
-		&server.touch_motion, &server.touch_cancel, &server.touch_frame,
+		&server.touch_motion, &server.touch_cancel, &server.touch_frame, &server.new_text_input,
 		&server.layout_change, &server.output_mgr_apply, &server.output_mgr_test, &server.output_power_set_mode,
 	};
 	for (size_t i = 0; i < sizeof(server_listeners) / sizeof(server_listeners[0]); i++) {
