@@ -399,6 +399,8 @@ static void text_inputs_focus(struct gs_server *server, struct wlr_surface *surf
 static void forget_toplevel(struct gs_server *server, struct gs_toplevel *t);
 static void menu_close(struct gs_server *server);
 
+static struct wlr_scene_tree *background_tree; /* wallpapers: always get frame callbacks */
+
 /* the title bar look in use: Mac-sized, or big for fingers after the screen is touched */
 static const struct gs_chrome *chrome = &GS_CHROME_MAC;
 
@@ -1296,6 +1298,29 @@ static void layer_commit(struct wl_listener *listener, void *data) {
 	if (l->mapped && ls->current.layer == ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND &&
 			!wl_list_empty(&ls->surface->current.frame_callback_list)) {
 		schedule_frames(l->server);
+	}
+	if (getenv("GOSAAB_DEBUG_LAYERS") && ls->current.layer == ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND) {
+		static double last;
+		double now = now_ms();
+		if (now - last > 500) {
+			last = now;
+			struct wlr_scene_buffer *sb = NULL;
+			struct wlr_scene_node *child;
+			wl_list_for_each(child, &l->scene->tree->children, link) {
+				if (child->type == WLR_SCENE_NODE_TREE) {
+					struct wlr_scene_node *c2;
+					wl_list_for_each(c2, &wlr_scene_tree_from_node(child)->children, link) {
+						if (c2->type == WLR_SCENE_NODE_BUFFER) sb = wlr_scene_buffer_from_node(c2);
+					}
+				} else if (child->type == WLR_SCENE_NODE_BUFFER) {
+					sb = wlr_scene_buffer_from_node(child);
+				}
+			}
+			wlr_log(WLR_INFO, "bg commit %s mapped=%d callbacks=%d primary_output=%p bgtree=%p",
+				ls->namespace ? ls->namespace : "?", l->mapped,
+				!wl_list_empty(&ls->surface->current.frame_callback_list), sb ? (void *)sb->primary_output : (void *)-1,
+				(void *)background_tree);
+		}
 	}
 }
 
@@ -3827,7 +3852,6 @@ static int fps_caps_tick(void *data) {
 }
 
 /* like wlr_scene_output_send_frame_done, but holds back capped apps until their next frame is due */
-static struct wlr_scene_tree *background_tree; /* wallpapers: always get frame callbacks */
 
 static bool send_frame_done_capped(struct wlr_scene_node *node, struct wlr_scene_output *so,
 		struct timespec *now, double now_msv, bool held, bool background) {

@@ -378,7 +378,7 @@ if command -v qs >/dev/null; then
   # a session bus, for notifications
   DBUS_SESSION_BUS_ADDRESS=$(dbus-daemon --session --fork --print-address 2>/dev/null) && export DBUS_SESSION_BUS_ADDRESS
   rm -f "$XDG_RUNTIME_DIR/gosaab-wm.socket"
-  "$BUILD/gosaab-wm" -s "swaybg -i $WALL -m fill" >"$OUT/gosaab-wm-shell.log" 2>&1 &
+  GOSAAB_DEBUG_LAYERS=1 "$BUILD/gosaab-wm" -s "swaybg -i $WALL -m fill" >"$OUT/gosaab-wm-shell.log" 2>&1 &
   WM=$!
   for _ in $(seq 1 50); do [ -s "$XDG_RUNTIME_DIR/gosaab-wm.socket" ] && break; sleep 0.1; done
   export WAYLAND_DISPLAY=$(cat "$XDG_RUNTIME_DIR/gosaab-wm.socket")
@@ -440,6 +440,7 @@ if command -v qs >/dev/null; then
   qs -p "$SHELLDIR" ipc call shell appearance wallpaper live:flow; sleep 2.5; shot 23j-live-flow-a
   echo "live wallpaper clock: $(qs -p "$SHELLDIR" ipc call shell liveTime)"
   sleep 1.5; shot 23k-live-flow-b
+  grep "bg commit" "$OUT/gosaab-wm-shell.log" | tail -6
   echo "live wallpaper clock: $(qs -p "$SHELLDIR" ipc call shell liveTime)"
   qs -p "$SHELLDIR" ipc call shell appearance wallpaper live:earth; sleep 2.5; shot 23l-live-earth
   qs -p "$SHELLDIR" ipc call shell appearance wallpaper tide; sleep 1.5
