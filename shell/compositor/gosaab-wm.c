@@ -1291,6 +1291,12 @@ static void layer_commit(struct wl_listener *listener, void *data) {
 	if (l->mapped) {
 		layer_update_blur(l);
 	}
+	/* A wallpaper asking for its next frame (a live wallpaper) gets one, even when the scene
+	 * thinks it's hidden behind something: otherwise it never hears "draw now" and freezes. */
+	if (l->mapped && ls->current.layer == ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND &&
+			!wl_list_empty(&ls->surface->current.frame_callback_list)) {
+		schedule_frames(l->server);
+	}
 }
 
 static void layer_map(struct wl_listener *listener, void *data) {

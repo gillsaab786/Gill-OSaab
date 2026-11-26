@@ -30,13 +30,13 @@ void main() {
   });
 
   testWidgets('handheld screen: icon-only sidebar', (tester) async {
-    await pumpAt(tester, const Size(1100, 700));
+    await pumpAt(tester, const Size(900, 600));
     expect(find.text('Torrent Search'), findsNothing);
     expect(find.byIcon(CupertinoIcons.bookmark_fill), findsWidgets);
   });
 
   testWidgets('switching to Settings', (tester) async {
-    await pumpAt(tester, const Size(1920, 1080));
+    await pumpAt(tester, const Size(1920, 5000)); // tall, so the whole list is built
     await tester.tap(find.byIcon(CupertinoIcons.gear_solid));
     await tester.pump(const Duration(milliseconds: 300));
     expect(find.text('Trackers'), findsWidgets);
