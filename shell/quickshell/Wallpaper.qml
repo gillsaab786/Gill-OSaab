@@ -16,13 +16,19 @@ PanelWindow {
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
 
     readonly property size pixels: Qt.size(modelData ? modelData.width : 1920, modelData ? modelData.height : 1080)
+    // live wallpapers (Earth, Moon, Dunes, Flow) draw themselves
+    Loader {
+        anchors.fill: parent
+        active: Theme.liveWallpaper !== ""
+        sourceComponent: LiveWallpaper { name: Theme.liveWallpaper }
+    }
     Image {
         anchors.fill: parent
         source: "file://" + Theme.wallpaperFor(false)
         sourceSize: wall.pixels
         fillMode: Image.PreserveAspectCrop
         asynchronous: true
-        visible: Theme.dynamicWallpaper || !Theme.dark
+        visible: Theme.liveWallpaper === "" && (Theme.dynamicWallpaper || !Theme.dark)
     }
     Image {
         anchors.fill: parent
@@ -31,6 +37,6 @@ PanelWindow {
         fillMode: Image.PreserveAspectCrop
         asynchronous: true
         opacity: Theme.dynamicWallpaper ? Theme.darkness : 1
-        visible: opacity > 0.001
+        visible: Theme.liveWallpaper === "" && opacity > 0.001
     }
 }

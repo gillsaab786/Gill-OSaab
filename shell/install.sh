@@ -4,7 +4,7 @@
 set -euo pipefail
 SRC=${1:-$(dirname "$(readlink -f "$0")")}
 BUILD_DEPS="gcc make meson ninja-build pkgconf wayland-devel wayland-protocols-devel wlroots-devel scenefx-devel
-  libxkbcommon-devel pixman-devel pango-devel cairo-devel libdrm-devel libinput-devel git-core mesa-libEGL-devel mesa-libgbm-devel libglvnd-devel"
+  libxkbcommon-devel pixman-devel pango-devel cairo-devel libdrm-devel libinput-devel git-core mesa-libEGL-devel mesa-libgbm-devel libglvnd-devel qt6-qtshadertools"
 dnf -y install $BUILD_DEPS
 sh "$SRC/compositor/fetch-scenefx.sh"
 meson setup /tmp/gosaab-wm-build "$SRC/compositor" --prefix=/usr --buildtype=release
@@ -32,6 +32,8 @@ fi
 install -d /usr/share/gill-osaab/shell /etc/xdg/quickshell
 cp -r "$SRC/quickshell/." /usr/share/gill-osaab/shell/
 ln -sfn /usr/share/gill-osaab/shell /etc/xdg/quickshell/gill-osaab
+# live wallpapers: compile their shaders for this Qt
+sh /usr/share/gill-osaab/shell/shaders/build.sh /usr/share/gill-osaab/shell/shaders
 
 # login screen theme
 if [ -d "$SRC/sddm-theme" ]; then

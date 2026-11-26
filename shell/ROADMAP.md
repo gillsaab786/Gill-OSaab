@@ -16,6 +16,16 @@ Qt Quick via Quickshell. Runs on the Gill(OS) Core image (minimal Fedora bootc).
   workspace, so use the ci-shots branch.
 
 ## Next up (asked by Jas, do these first)
+Done 2026-11-27 (2): Mac-style traffic lights on the RIGHT (green, yellow, red; Jas's choice), macOS size,
+symbols on hover, tooltips, green = full screen (title bar reveals at the top), Alt+green/double-click = zoom,
+rest on green = layout menu (halves, quarters, thirds, fill & arrange, full screen), corner drags to
+quarters. Touch: big glass buttons for 5/10/20/30 min or always after a touch (input.conf touch_buttons),
+edge swipes, 3-finger app switch, wvkbd pops up via text-input-v3. VRR on by default. Fingerprint
+(fprintd; GPD Win Max 2 CS9711 community driver built in a recipe stage, used via gosaab-fprintd only
+when that reader is present; lock screen runs a separate gill-osaab-fprint PAM next to the password).
+Face unlock: up to 5 named faces. Google Play registration window (gosaab-android-register). Live
+wallpapers (shaders/*.frag -> .qsb at build): Earth (real day/night), Moon (real phase), Dunes (sky
+follows the day), Flow (accent + light/dark); stills in GillOSaab-Live. Not tested on real hardware.
 Done 2026-11-27: Optional Features made real, all off by default: phone link (kde-connect, firewall via
 gosaab-features-apply), shared game library (gosaab-library: Steam shortcuts.vdf, tagged Gill(OS)), VRR
 (gamescope --adaptive-sync / GOSAAB_VRR in gosaab-wm), suspend-then-hibernate (swap file + sleep.conf,

@@ -81,8 +81,17 @@ Singleton {
         return env !== "" ? env.replace(/\/contents\/.*$/, "") : "/usr/share/wallpapers/GillOSaab"
     }
     readonly property string wallpaperChoice: setting("wallpaper", "tide")
+    // Live wallpapers (shaders/*.frag): "live:earth", "live:moon", "live:dunes", "live:flow".
+    // The lock screen and previews use a still picture of each.
+    readonly property string liveWallpaper: /^live:(earth|moon|dunes|flow)$/.test(wallpaperChoice) ? wallpaperChoice.substring(5) : ""
+    readonly property bool liveMotion: setting("liveMotion", true) !== false
+    function liveStill(name, isDark) {
+        const dir = wallpaperDir + "-Live/contents/"
+        return dir + (name === "flow" && !isDark ? "flow-light" : name) + ".jpg"
+    }
     function wallpaperFor(isDark) {
         const w = wallpaperChoice
+        if (liveWallpaper !== "") return liveStill(liveWallpaper, isDark)
         if (w.startsWith("/")) return w
         const dir = w.startsWith("classic") ? wallpaperDir + "-Classic" : wallpaperDir
         const d = w.endsWith("-light") ? false : w.endsWith("-dark") ? true : isDark
@@ -90,7 +99,7 @@ Singleton {
         const black = w.endsWith("-black") || (d && amoled && !w.startsWith("classic"))
         return dir + "/contents/" + (black ? "images_black" : d ? "images_dark" : "images") + "/3840x2160.png"
     }
-    readonly property bool dynamicWallpaper: !wallpaperChoice.startsWith("/") && !/-(light|dark|black)$/.test(wallpaperChoice)
+    readonly property bool dynamicWallpaper: !wallpaperChoice.startsWith("/") && liveWallpaper === "" && !/-(light|dark|black)$/.test(wallpaperChoice)
     readonly property string wallpaper: wallpaperFor(dark)
 
     readonly property int radius: 22

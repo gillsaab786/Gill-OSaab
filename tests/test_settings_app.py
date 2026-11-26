@@ -151,6 +151,8 @@ class FakeBackend:
     def wallpaper_thumb(self, folder, dark):
         return ""
 
+    WALLPAPERS = __import__("pathlib").Path("/nonexistent/wallpapers")
+
     def lights_status(self):
         return getattr(self, "lights", {"ally": False})
 
@@ -288,6 +290,16 @@ class SettingsApp(unittest.TestCase):
         sw = w.switches[("updates.conf", "os")][0]
         sw.setChecked(False)
         self.assertTrue(sw.isChecked(), "switch flips back when saving fails")
+
+    def test_live_wallpapers(self):
+        b = FakeBackend()
+        w = self.gs.Settings(b)
+        self.assertEqual(len(w.live_picker.group.buttons()), 4)
+        w.live_picker.group.buttons()[0].click()
+        self.assertEqual(b.appearance().get("wallpaper"), "live:earth")
+        self.assertFalse(any(x.isChecked() for x in w.wall_picker.group.buttons()), "one wallpaper at a time")
+        w.live_motion.setChecked(False)
+        self.assertIs(b.appearance().get("liveMotion"), False)
 
     def test_touch_buttons_time(self):
         b = FakeBackend()

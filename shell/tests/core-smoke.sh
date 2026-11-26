@@ -52,6 +52,7 @@ check "fingerprint: fprintd + PAM + GPD CS9711 driver" "command -v fprintd-enrol
 check "fingerprint status runs" "gosaab-fingerprint status | python3 -c 'import json,sys; d=json.load(sys.stdin); assert \"fingers\" in d'"
 check "CS9711 driver's libraries are all present" "! LD_LIBRARY_PATH=/usr/lib64/gill-osaab/fprint-cs9711 ldd /usr/lib64/gill-osaab/fprint-cs9711/libfprint-2.so.2 | grep 'not found'"
 check "face unlock lists several faces" "gosaab-face status | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d[\"max\"] == 5 and \"faces\" in d'"
+check "live wallpapers: shaders compiled and stills shipped" "ls /usr/share/gill-osaab/shell/shaders/earth.frag.qsb /usr/share/wallpapers/GillOSaab-Live/contents/earth.jpg /usr/share/gill-osaab/shell/shaders/moon.frag.qsb /usr/share/wallpapers/GillOSaab-Live/contents/moon.jpg /usr/share/gill-osaab/shell/shaders/dunes.frag.qsb /usr/share/wallpapers/GillOSaab-Live/contents/dunes.jpg /usr/share/gill-osaab/shell/shaders/flow.frag.qsb /usr/share/wallpapers/GillOSaab-Live/contents/flow.jpg >/dev/null"
 check "Google Play registration window ships" "[ -x /usr/bin/gosaab-android-register ] && [ -x /usr/libexec/gill-osaab/gosaab-android-id ] && grep -q android-id /usr/share/polkit-1/actions/org.gillosaab.config.policy"
 check "shared game library tool runs" "HOME=/tmp/libtest /usr/libexec/gill-osaab/gosaab-library list | python3 -c 'import json,sys; json.load(sys.stdin)'"
 check "emulator 3D tool runs" "HOME=/tmp/3dtest gosaab-3d status | grep -q dolphin"

@@ -2159,11 +2159,24 @@ class Settings(QMainWindow):
                  ("classic", "Aurora", [th("GillOSaab-Classic", True)])]
         self.wall_picker = picker([(v, PreviewTile(n, paint_picture(paths), 104, 60)) for v, n, paths in walls],
                                   ap.get("wallpaper", "tide"), lambda v: self.backend.set_appearance("wallpaper", v), 8)
+        live_dir = self.backend.WALLPAPERS / "GillOSaab-Live" / "contents"
+        lives = [("live:earth", "Earth"), ("live:moon", "Moon"), ("live:dunes", "Dunes"), ("live:flow", "Flow")]
+        self.live_picker = picker([(v, PreviewTile(n, paint_picture([str(live_dir / f"thumb-{v[5:]}.jpg")]), 104, 60))
+                                   for v, n in lives], ap.get("wallpaper", "tide"), lambda v: self.pick_wallpaper(v), 8)
+        self.wall_picker.group.buttonClicked.connect(lambda _b: self.clear_picker(self.live_picker))
+        self.live_motion = Switch()
+        self.live_motion.set_quiet(ap.get("liveMotion", True) is not False)
+        self.live_motion.toggled.connect(lambda on: (haptic("toggle"), self.backend.set_appearance("liveMotion", on)))
         own = QPushButton("Choose…")
         own.setObjectName("pill")
         own.clicked.connect(self.choose_wallpaper)
         p.section("Wallpaper", [Row("", "", self.wall_picker), Row("Your own picture", "", own)],
                   "Tide follows Light and Dark, cross-fading at sunset when Appearance is Auto.")
+        p.section("Live wallpapers", [Row("", "", self.live_picker),
+                                      Row("Motion", "Off: a still picture (saves a little battery). On battery "
+                                          "they move at half speed.", self.live_motion)],
+                  "Earth shows the real day and night from your clock and time zone, Moon tonight's phase, "
+                  "Dunes the sky through your day. Flow follows Light and Dark and your accent colour.")
 
         widgets = ap.get("widgets", {}) if isinstance(ap.get("widgets"), dict) else {}
         rows = []
@@ -2222,6 +2235,19 @@ class Settings(QMainWindow):
         reset.clicked.connect(self.apply_look)
         p.finish()
         return p
+
+    def pick_wallpaper(self, value):
+        self.backend.set_appearance("wallpaper", value)
+        self.clear_picker(self.wall_picker)
+
+    @staticmethod
+    def clear_picker(box):
+        """Uncheck a picker whose choice now lives in the other picker (one wallpaper at a time)."""
+        group = box.group
+        group.setExclusive(False)
+        for b in group.buttons():
+            b.setChecked(False)
+        group.setExclusive(True)
 
     def set_widget(self, key, on):
         widgets = self.backend.appearance().get("widgets", {})

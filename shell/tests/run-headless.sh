@@ -436,6 +436,11 @@ if command -v qs >/dev/null; then
   qs -p "$SHELLDIR" ipc call controlcenter toggle; qs -p "$SHELLDIR" ipc call shell amoled false; sleep 1.5
   check "icon style setting reaches the shell" "qs -p $SHELLDIR ipc call shell appearance iconStyle tinted && [ \"\$(qs -p $SHELLDIR ipc call shell iconStyle)\" = tinted ]"
   qs -p "$SHELLDIR" ipc call shell appearance iconStyle default; sleep 0.5
+  # live wallpapers: the shader draws and moves; Earth looks different from Flow
+  qs -p "$SHELLDIR" ipc call shell appearance wallpaper live:flow; sleep 2.5; shot 23j-live-flow-a
+  sleep 1.5; shot 23k-live-flow-b
+  qs -p "$SHELLDIR" ipc call shell appearance wallpaper live:earth; sleep 2.5; shot 23l-live-earth
+  qs -p "$SHELLDIR" ipc call shell appearance wallpaper tide; sleep 1.5
   # on-screen keyboard (Control Centre > Keyboard)
   if command -v wvkbd-mobintl >/dev/null; then
     qs -p "$SHELLDIR" ipc call shell keyboard; sleep 1.5; shot 23b-onscreen-keyboard
@@ -529,6 +534,8 @@ checks = [
   ("the desktop comes back after Game Mode", changed("29-after-launchpad", "29f-arrived", (0, 30, W, H - 140)) < 0.02),
   ("Downloads stack fans out above the Dock", changed("23c-volume-bezel", "23d-dock-downloads-stack", (W // 2, H // 2, W, H - 110)) > 0.01),
   ("AMOLED black: most of the screen is truly black (pixels off)", black_share("23h-amoled-black") > 0.5),
+  ("live wallpaper moves (Flow)", changed("23j-live-flow-a", "23k-live-flow-b", (0, H // 4, W, 3 * H // 4)) > 0.002),
+  ("live wallpaper Earth draws (differs from Flow)", changed("23k-live-flow-b", "23l-live-earth", (0, H // 4, W, H - 120)) > 0.2),
   ("light mode switches to the light wallpaper", changed("23e-trash-full-menu", "23f-light-mode", (0, H // 3, W, 2 * H // 3)) > 0.3),
 ]
 bad = 0
