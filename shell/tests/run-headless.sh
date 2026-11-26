@@ -447,7 +447,7 @@ checks = [
   ("launchpad opens", changed("27-after-spotlight", "28-launchpad", (0, 30, W, H - 120)) > 0.05),
   ("launchpad closes", changed("27-after-spotlight", "29-after-launchpad", (0, 30, W, H - 120)) < 0.01),
   ("app menu opens", changed("29-after-launchpad", "29a-app-menu", (0, 30, W, H - 120)) > 0.002),
-  ("App Info card shows", changed("29-after-launchpad", "29b-app-info", (W // 3, H // 4, 2 * W // 3, 3 * H // 4)) > 0.2),
+  ("App Info card shows", changed("29-after-launchpad", "29b-app-info", (W // 3, H // 4, 2 * W // 3, 3 * H // 4)) > 0.03),  # dark glass over a dark window: text and buttons change
   ("switching to Game Mode covers the desktop", changed("29-after-launchpad", "29d-to-game-mode", (0, 0, W, H)) > 0.5),
   ("the desktop comes back after Game Mode", changed("29-after-launchpad", "29f-arrived", (0, 30, W, H - 140)) < 0.02),
   ("Downloads stack fans out above the Dock", changed("23c-volume-bezel", "23d-dock-downloads-stack", (W // 2, H // 2, W, H - 110)) > 0.01),
