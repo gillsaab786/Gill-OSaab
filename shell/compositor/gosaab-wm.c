@@ -3821,14 +3821,24 @@ static int fps_caps_tick(void *data) {
 }
 
 /* like wlr_scene_output_send_frame_done, but holds back capped apps until their next frame is due */
+static struct wlr_scene_tree *background_tree; /* wallpapers: always get frame callbacks */
+
 static bool send_frame_done_capped(struct wlr_scene_node *node, struct wlr_scene_output *so,
-		struct timespec *now, double now_msv, bool held) {
+		struct timespec *now, double now_msv, bool held, bool background) {
 	if (!node->enabled) {
 		return held;
 	}
 	if (node->type == WLR_SCENE_NODE_BUFFER) {
 		struct wlr_scene_frame_done_event event = { .output = so, .when = *now };
-		wlr_scene_buffer_send_frame_done(wlr_scene_buffer_from_node(node), &event);
+		struct wlr_scene_buffer *buffer = wlr_scene_buffer_from_node(node);
+		if (background) {
+			/* A live wallpaper must keep drawing even where the scene thinks it can't be seen
+			 * (desktop widgets and panels over it): otherwise the app stops getting frame
+			 * callbacks, its toolkit decides it's hidden, and the wallpaper freezes. */
+			wl_signal_emit_mutable(&buffer->events.frame_done, &event);
+		} else {
+			wlr_scene_buffer_send_frame_done(buffer, &event);
+		}
 		return held;
 	}
 	if (node->type != WLR_SCENE_NODE_TREE) {
@@ -3847,7 +3857,8 @@ static bool send_frame_done_capped(struct wlr_scene_node *node, struct wlr_scene
 	}
 	struct wlr_scene_node *child;
 	wl_list_for_each(child, &wlr_scene_tree_from_node(node)->children, link) {
-		held = send_frame_done_capped(child, so, now, now_msv, held);
+		held = send_frame_done_capped(child, so, now, now_msv, held,
+			background || wlr_scene_tree_from_node(node) == background_tree);
 	}
 	return held;
 }
@@ -3860,7 +3871,16 @@ static void output_frame(struct wl_listener *listener, void *data) {
 	wlr_scene_output_commit(scene_output, NULL);
 	struct timespec now;
 	clock_gettime(CLOCK_MONOTONIC, &now);
-	bool held = send_frame_done_capped(&server->scene->tree.node, scene_output, &now, now_ms(), false);
+	/* wallpapers get frame callbacks unless an app fills the screen (no point drawing then) */
+	background_tree = server->layers.background;
+	struct gs_toplevel *ft;
+	wl_list_for_each(ft, &server->toplevels, link) {
+		if (ft->mapped && !ft->minimized && ft->ws == server->ws && (ft->maximized || ft->fullscreen)) {
+			background_tree = NULL;
+			break;
+		}
+	}
+	bool held = send_frame_done_capped(&server->scene->tree.node, scene_output, &now, now_ms(), false, false);
 	if (animating || held) { /* a capped app is waiting: keep frames coming until it is due */
 		wlr_output_schedule_frame(output->wlr_output);
 	}
@@ -4051,28 +4071,6 @@ static void crash_handler(int sig) {
 	backtrace_symbols_fd(frames, n, 2);
 	signal(sig, SIG_DFL);
 	raise(sig);
-}
-
-/* Debug (SIGRTMIN+3): which layer surfaces can be seen (and so get frame callbacks) */
-static void dump_visible(struct wlr_scene_node *node, const char *ns) {
-	if (node->type == WLR_SCENE_NODE_BUFFER) {
-		pixman_box32_t *e = pixman_region32_extents(&node->visible);
-		wlr_log(WLR_INFO, "visible %s: enabled=%d extents=%d,%d-%d,%d", ns, node->enabled, e->x1, e->y1, e->x2, e->y2);
-	} else if (node->type == WLR_SCENE_NODE_TREE) {
-		struct wlr_scene_node *child;
-		wl_list_for_each(child, &wlr_scene_tree_from_node(node)->children, link) {
-			dump_visible(child, ns);
-		}
-	}
-}
-
-static int handle_debug_visible(int sig, void *data) {
-	struct gs_server *server = data;
-	struct gs_layer *l;
-	wl_list_for_each(l, &server->layer_surfaces, link) {
-		dump_visible(&l->scene->tree->node, l->layer_surface->namespace ? l->layer_surface->namespace : "?");
-	}
-	return 0;
 }
 
 /* Settings changed the touchpad options (it sends SIGRTMIN+2) */
@@ -4425,7 +4423,6 @@ int main(int argc, char *argv[]) {
 	wl_event_loop_add_signal(loop, SIGUSR2, handle_sigusr2, &server);
 	wl_event_loop_add_signal(loop, SIGRTMIN + 1, handle_sigoverview, &server);
 	wl_event_loop_add_signal(loop, SIGRTMIN + 2, handle_input_settings, &server); /* the shell asks for Mission Control */
-	wl_event_loop_add_signal(loop, SIGRTMIN + 3, handle_debug_visible, &server);
 	wl_event_loop_add_signal(loop, SIGTERM, handle_sigterm, &server);
 	wl_event_loop_add_signal(loop, SIGINT, handle_sigterm, &server);
 	signal(SIGCHLD, SIG_IGN);
