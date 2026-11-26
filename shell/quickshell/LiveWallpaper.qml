@@ -32,6 +32,7 @@ Item {
         transformOrigin: Item.TopLeft
         smooth: true
         fragmentShader: Qt.resolvedUrl("shaders/" + live.name + ".frag.qsb")
+        onStatusChanged: if (status === ShaderEffect.Error) console.warn("live wallpaper", live.name, "failed:", log)
 
         property real time: live.t
         property real aspect: live.width / Math.max(1, live.height)

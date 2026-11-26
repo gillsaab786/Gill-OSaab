@@ -36,6 +36,15 @@ float fbm(vec3 p) {
     }
     return s;
 }
+// no array constructors: older GPUs (GLSL ES 1.0) can't take them
+vec3 ribbonTint(int i) {
+    if (i == 0) return vec3(0.20, 0.85, 0.95);
+    if (i == 1) return vec3(0.50, 0.35, 1.00);
+    if (i == 2) return vec3(1.00, 0.40, 0.65);
+    if (i == 3) return vec3(0.25, 0.55, 1.00);
+    return vec3(0.65, 0.95, 0.85);
+}
+
 vec3 hueShift(vec3 c, float h) {
     // rotate the colour around the grey axis (accent colour shift)
     const vec3 k = vec3(0.57735);
@@ -51,8 +60,6 @@ void main() {
     vec3 bg = mix(vec3(0.05, 0.06, 0.16), vec3(0.01, 0.012, 0.035), smoothstep(0.0, 1.0, y));
     vec3 add = vec3(0.0);
     // ribbons of light, each folding slowly at its own pace
-    const vec3 tints[5] = vec3[5](vec3(0.20, 0.85, 0.95), vec3(0.50, 0.35, 1.00), vec3(1.00, 0.40, 0.65),
-                                  vec3(0.25, 0.55, 1.00), vec3(0.65, 0.95, 0.85));
     for (int i = 0; i < 5; i++) {
         float fi = float(i);
         float f = 0.9 + fi * 0.35;
@@ -66,7 +73,7 @@ void main() {
         float core = exp(-d * d * 6.0);
         // aurora curtains: faint vertical streaks rising from each ribbon
         float curtain = exp(-max(yc - y, 0.0) * 9.0) * step(y, yc) * (0.5 + 0.5 * noise3(vec3(x * 18.0, fi, t * 0.8)));
-        vec3 tint = hueShift(tints[i], hue);
+        vec3 tint = hueShift(ribbonTint(i), hue);
         add += tint * (glow * 0.35 + core * 0.35 + curtain * 0.10) * (0.75 + 0.25 * sin(x * 2.0 - t + fi));
     }
     vec3 col = 1.0 - exp(-(bg + add) * 1.4); // gentle tone curve: bright but never blown out
