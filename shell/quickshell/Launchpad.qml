@@ -165,7 +165,7 @@ PanelWindow {
                                         IconTile {
                                             anchors.horizontalCenter: parent.horizontalCenter
                                             width: 72; height: 72
-                                            source: Theme.icon(modelData.icon, "application-x-executable")
+                                            source: Theme.icon(modelData.icon, "application-x-executable"); label: Theme.displayName(modelData)
                                             scale: appMouse.pressed ? 0.88 : appMouse.containsMouse ? 1.06 : 1
                                             Behavior on scale { NumberAnimation { duration: Theme.fast } }
                                         }

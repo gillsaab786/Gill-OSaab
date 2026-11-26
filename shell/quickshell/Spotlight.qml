@@ -250,7 +250,7 @@ PanelWindow {
                         Row {
                             anchors { left: parent.left; leftMargin: 10; right: parent.right; rightMargin: 110; verticalCenter: parent.verticalCenter }
                             spacing: 12
-                            IconTile { visible: modelData.kind === "app"; width: 30; height: 30; source: modelData.icon || "" }
+                            IconTile { visible: modelData.kind === "app"; width: 30; height: 30; source: modelData.icon || ""; label: modelData.title || "" }
                             Rectangle {
                                 visible: modelData.kind !== "app"
                                 width: 30; height: 30; radius: 8

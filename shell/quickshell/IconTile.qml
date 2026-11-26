@@ -11,6 +11,8 @@ import Quickshell.Widgets
 Item {
     id: tile
     property string source: ""
+    property string label: ""  // app name: its first letter stands in when the app has no icon
+    readonly property bool missing: source === "" || img.status === Image.Error
     property string style: Theme.iconStyle
     readonly property bool effects: GraphicsInfo.api !== GraphicsInfo.Software && style !== "default"
 
@@ -31,10 +33,27 @@ Item {
         anchors.margins: tile.effects ? parent.width * 0.17 : 0
         source: tile.source
         asynchronous: true
-        visible: !tile.effects
+        visible: !tile.effects && !tile.missing
+    }
+    Rectangle { // no icon anywhere: a glass squircle with the app's initial, like macOS's generic app
+        visible: tile.missing
+        anchors.fill: parent
+        anchors.margins: parent.width * 0.06
+        radius: width * 0.26
+        gradient: Gradient {
+            GradientStop { position: 0; color: Qt.lighter(Theme.accent, 1.25) }
+            GradientStop { position: 1; color: Qt.darker(Theme.accent, 1.35) }
+        }
+        GlassRim { radius: parent.radius }
+        Text {
+            anchors.centerIn: parent
+            text: (tile.label.trim()[0] || "?").toUpperCase()
+            color: "white"
+            font { family: Theme.font; pixelSize: parent.height * 0.5; weight: Font.DemiBold }
+        }
     }
     MultiEffect {
-        visible: tile.effects
+        visible: tile.effects && !tile.missing
         anchors.fill: img
         source: img
         saturation: tile.style === "clear" || tile.style === "tinted" ? -1 : 0.1

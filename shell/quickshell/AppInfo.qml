@@ -105,7 +105,7 @@ PanelWindow {
 
             Row {
                 spacing: 16
-                IconTile { width: 72; height: 72; source: info.app ? Theme.icon(info.app.icon, "application-x-executable") : "" }
+                IconTile { width: 72; height: 72; source: info.app ? Theme.icon(info.app.icon, "application-x-executable") : ""; label: info.app ? Theme.displayName(info.app) : "" }
                 Column {
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: 6

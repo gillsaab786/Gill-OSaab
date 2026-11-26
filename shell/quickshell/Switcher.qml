@@ -105,6 +105,7 @@ PanelWindow {
                         Behavior on scale { SpringAnimation { spring: 5; damping: 0.35; epsilon: 0.002 } }
                         source: Theme.icon(parent.entry ? parent.entry.icon : "", parent.modelData.appId,
                                            (parent.modelData.appId || "").toLowerCase(), "application-x-executable")
+                        label: parent.entry ? Theme.displayName(parent.entry) : (parent.modelData.appId || "")
                     }
                     MouseArea {
                         anchors.fill: parent
