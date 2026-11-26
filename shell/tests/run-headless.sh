@@ -440,6 +440,7 @@ if command -v qs >/dev/null; then
   qs -p "$SHELLDIR" ipc call shell appearance wallpaper live:flow; sleep 2.5; shot 23j-live-flow-a
   echo "live wallpaper clock: $(qs -p "$SHELLDIR" ipc call shell liveTime)"
   sleep 1.5; shot 23k-live-flow-b
+  kill -s RTMIN+3 $WM 2>/dev/null; sleep 0.3; grep "visible " "$OUT/gosaab-wm-shell.log" | tail -30
   echo "live wallpaper clock: $(qs -p "$SHELLDIR" ipc call shell liveTime)"
   qs -p "$SHELLDIR" ipc call shell appearance wallpaper live:earth; sleep 2.5; shot 23l-live-earth
   qs -p "$SHELLDIR" ipc call shell appearance wallpaper tide; sleep 1.5

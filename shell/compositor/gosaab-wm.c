@@ -4053,6 +4053,28 @@ static void crash_handler(int sig) {
 	raise(sig);
 }
 
+/* Debug (SIGRTMIN+3): which layer surfaces can be seen (and so get frame callbacks) */
+static void dump_visible(struct wlr_scene_node *node, const char *ns) {
+	if (node->type == WLR_SCENE_NODE_BUFFER) {
+		pixman_box32_t *e = pixman_region32_extents(&node->visible);
+		wlr_log(WLR_INFO, "visible %s: enabled=%d extents=%d,%d-%d,%d", ns, node->enabled, e->x1, e->y1, e->x2, e->y2);
+	} else if (node->type == WLR_SCENE_NODE_TREE) {
+		struct wlr_scene_node *child;
+		wl_list_for_each(child, &wlr_scene_tree_from_node(node)->children, link) {
+			dump_visible(child, ns);
+		}
+	}
+}
+
+static int handle_debug_visible(int sig, void *data) {
+	struct gs_server *server = data;
+	struct gs_layer *l;
+	wl_list_for_each(l, &server->layer_surfaces, link) {
+		dump_visible(&l->scene->tree->node, l->layer_surface->namespace ? l->layer_surface->namespace : "?");
+	}
+	return 0;
+}
+
 /* Settings changed the touchpad options (it sends SIGRTMIN+2) */
 static int handle_input_settings(int sig, void *data) {
 	struct gs_server *server = data;
@@ -4403,6 +4425,7 @@ int main(int argc, char *argv[]) {
 	wl_event_loop_add_signal(loop, SIGUSR2, handle_sigusr2, &server);
 	wl_event_loop_add_signal(loop, SIGRTMIN + 1, handle_sigoverview, &server);
 	wl_event_loop_add_signal(loop, SIGRTMIN + 2, handle_input_settings, &server); /* the shell asks for Mission Control */
+	wl_event_loop_add_signal(loop, SIGRTMIN + 3, handle_debug_visible, &server);
 	wl_event_loop_add_signal(loop, SIGTERM, handle_sigterm, &server);
 	wl_event_loop_add_signal(loop, SIGINT, handle_sigterm, &server);
 	signal(SIGCHLD, SIG_IGN);
