@@ -47,7 +47,10 @@ Scope {
         id: bannerWindow
         anchors { top: true; right: true }
         margins { top: 8; right: 8 }
-        implicitWidth: 372
+        // 3D glasses (side by side): banners show once for each eye
+        readonly property real eyeShift: ShellState.stereo && screen ? screen.width / 2 : 0
+        implicitWidth: 372 + eyeShift
+        mask: Region { item: column }
         implicitHeight: Math.max(1, column.height + 4)
         // banners step aside (fade) when Control Centre or Notification Centre opens
         readonly property bool show: root.banners.length > 0 && !ShellState.notificationCenter && !ShellState.controlCenter
@@ -57,9 +60,17 @@ Scope {
         WlrLayershell.namespace: "gosaab-notifications:r24"
         WlrLayershell.layer: WlrLayer.Overlay
 
+        ShaderEffectSource { // the second eye's copy
+            visible: bannerWindow.eyeShift > 0
+            sourceItem: bannerWindow.eyeShift > 0 ? column : null
+            x: column.x + bannerWindow.eyeShift
+            width: column.width; height: column.height
+            opacity: column.opacity
+            live: true
+        }
         Column {
             id: column
-            width: parent.width
+            width: 372
             opacity: bannerWindow.show ? 1 : 0
             Behavior on opacity { NumberAnimation { duration: Theme.fast; easing.type: Easing.OutCubic } }
             spacing: 8

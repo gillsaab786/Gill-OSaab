@@ -1,0 +1,181 @@
+#!/usr/bin/python3
+"""Shared game library: your Windows, Android and Linux games and emulators inside Steam (Game Mode),
+next to your Steam games. Settings > Optional Features > Shared game library.
+
+  gosaab-library sync      add/refresh them as Steam shortcuts (Steam must be closed; Game Mode runs
+                           this just before Steam starts), and remove ones that were uninstalled
+  gosaab-library remove    take all of Gill(OS)'s shortcuts out again
+  gosaab-library list      what would be added (JSON)
+
+Only shortcuts Gill(OS) added (tagged "Gill(OS)") are ever changed; your own stay as they are.
+Games are apps in the Game category, plus the emulators. Each one starts through `gio launch`.
+"""
+import configparser
+import json
+import os
+import re
+import struct
+import subprocess
+import sys
+import zlib
+from pathlib import Path
+
+HOME = Path.home()
+STEAM = HOME / ".local/share/Steam"
+TAG = "Gill(OS)"
+EMULATORS = re.compile(r"retroarch|dolphin|pcsx2|rpcs3|azahar|citra|lime3ds|duckstation|ppsspp|cemu|xemu|melonds|"
+                       r"ryujinx|shadps4|vita3k|mgba|xenia|eden|emulationstation|es-de", re.I)
+SKIP = re.compile(r"^(steam|com\.valvesoftware\.steam|gosaab-|wine-|org\.gnome|org\.kde)", re.I)
+
+
+# ------------------------------------------------------------------ binary VDF (Steam's shortcuts.vdf)
+def vdf_load(data):
+    def read_str(i):
+        end = data.index(b"\0", i)
+        return data[i:end].decode("utf-8", "replace"), end + 1
+
+    def read_map(i):
+        out = {}
+        while i < len(data):
+            t = data[i]
+            i += 1
+            if t == 0x08:
+                return out, i
+            key, i = read_str(i)
+            if t == 0x00:
+                out[key], i = read_map(i)
+            elif t == 0x01:
+                out[key], i = read_str(i)
+            elif t == 0x02:
+                out[key] = struct.unpack_from("<i", data, i)[0]
+                i += 4
+            else:
+                raise ValueError(f"unknown VDF type {t}")
+        return out, i
+    if not data:
+        return {"shortcuts": {}}
+    root, _ = read_map(0)
+    return root
+
+
+def vdf_dump(obj):
+    out = bytearray()
+
+    def write_map(m):
+        for k, v in m.items():
+            key = str(k).encode() + b"\0"
+            if isinstance(v, dict):
+                out.extend(b"\x00" + key)
+                write_map(v)
+                out.append(0x08)
+            elif isinstance(v, int):
+                out.extend(b"\x02" + key + struct.pack("<i", v))
+            else:
+                out.extend(b"\x01" + key + str(v).encode() + b"\0")
+    write_map(obj)
+    out.append(0x08)
+    return bytes(out)
+
+
+def shortcut_appid(exe, name):
+    """The id Steam gives a non-Steam game (also names its artwork)."""
+    crc = zlib.crc32((exe + name).encode()) | 0x80000000
+    return struct.unpack("<i", struct.pack("<I", crc))[0]
+
+
+# ------------------------------------------------------------------ games installed on Gill(OS)
+def app_dirs():
+    dirs = [HOME / ".local/share/applications", HOME / ".local/share/flatpak/exports/share/applications",
+            Path("/var/lib/flatpak/exports/share/applications")]
+    dirs += [Path(d) / "applications" for d in os.environ.get("XDG_DATA_DIRS", "/usr/share").split(":") if d]
+    return dirs
+
+
+def games(dirs=None):
+    found = {}
+    for d in dirs or app_dirs():
+        if not d.is_dir():
+            continue
+        for f in d.rglob("*.desktop"):
+            app_id = "-".join(f.relative_to(d).with_suffix("").parts)
+            if app_id in found or SKIP.search(app_id):
+                continue
+            cp = configparser.RawConfigParser(strict=False, interpolation=None)
+            cp.optionxform = str
+            try:
+                cp.read_string(f.read_text(errors="replace"))
+                e = dict(cp.items("Desktop Entry"))
+            except (configparser.Error, OSError):
+                continue
+            if e.get("NoDisplay", "").lower() == "true" or e.get("Hidden", "").lower() == "true":
+                continue
+            cats = e.get("Categories", "")
+            if "Game" not in cats.split(";") and not EMULATORS.search(app_id + " " + e.get("Name", "")):
+                continue
+            kind = "Android" if app_id.startswith("waydroid.") else "Windows" if "wine" in e.get("Exec", "").lower() \
+                or "--wine-run" in e.get("Exec", "") else "Linux"
+            found[app_id] = {"id": app_id, "name": e.get("Name", app_id), "file": str(f), "kind": kind,
+                             "icon": e.get("Icon", "")}
+    return sorted(found.values(), key=lambda g: g["name"].lower())
+
+
+def shortcut_for(game):
+    exe = '"/usr/bin/gio"'
+    name = game["name"]
+    return {"appid": shortcut_appid(exe, name), "AppName": name, "Exe": exe, "StartDir": '"' + str(HOME) + '"',
+            "icon": game["icon"] if game["icon"].startswith("/") else "", "ShortcutPath": "",
+            "LaunchOptions": f'launch "{game["file"]}"', "IsHidden": 0, "AllowDesktopConfig": 1,
+            "AllowOverlay": 1, "OpenVR": 0, "Devkit": 0, "DevkitGameID": "", "DevkitOverrideAppID": 0,
+            "LastPlayTime": 0, "FlatpakAppID": "", "tags": {"0": TAG, "1": game["kind"]}}
+
+
+def merge(existing, wanted):
+    """Your own shortcuts untouched; Gill(OS)'s replaced by the current list."""
+    mine = [s for s in existing.get("shortcuts", {}).values()
+            if isinstance(s, dict) and TAG not in (s.get("tags") or {}).values()]
+    new = mine + [shortcut_for(g) for g in wanted]
+    return {"shortcuts": {str(i): s for i, s in enumerate(new)}}
+
+
+def steam_running():
+    return subprocess.run(["pgrep", "-x", "steam"], capture_output=True, check=False).returncode == 0
+
+
+def user_files():
+    return sorted((STEAM / "userdata").glob("*/config/shortcuts.vdf")) or \
+        [d / "config/shortcuts.vdf" for d in sorted((STEAM / "userdata").glob("[0-9]*")) if d.name != "0"]
+
+
+def write_all(wanted):
+    done = 0
+    for f in user_files():
+        try:
+            existing = vdf_load(f.read_bytes()) if f.exists() else {"shortcuts": {}}
+        except (OSError, ValueError, struct.error):
+            continue  # never overwrite a file we can't read
+        f.parent.mkdir(parents=True, exist_ok=True)
+        tmp = f.with_suffix(".gosaab")
+        tmp.write_bytes(vdf_dump(merge(existing, wanted)))
+        os.replace(tmp, f)
+        done += 1
+    return done
+
+
+def main(argv):
+    cmd = argv[0] if argv else "list"
+    if cmd == "list":
+        print(json.dumps(games()))
+        return 0
+    if cmd in ("sync", "remove"):
+        if steam_running():
+            print("Steam is open; the library updates the next time Game Mode starts.")
+            return 0
+        n = write_all(games() if cmd == "sync" else [])
+        print(f"Updated {n} Steam account(s).")
+        return 0
+    print(__doc__.strip(), file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

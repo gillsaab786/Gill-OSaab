@@ -33,6 +33,12 @@ for f in "$HOME/.config/environment.d/61-gill-osaab-gpu.conf"; do [ -f "$f" ] &&
 /usr/libexec/gill-osaab/gosaab-activity watch & # Smart TDP: video/idle; pop-up when graphics change
 /usr/libexec/gill-osaab/gosaab-haptic serve & # controller buzz for switches and sliders
 mkdir -p "$HOME/.config/gill-osaab"
+# Settings > Optional Features (all off unless you turn them on)
+feature() { grep -qE "^$1[[:space:]]*=[[:space:]]*(on|true|1|yes)" /etc/gill-osaab/features.conf 2>/dev/null; }
+feature phone_link && [ -x /usr/libexec/kdeconnectd ] && /usr/libexec/kdeconnectd >/dev/null 2>&1 &
+feature shared_game_library && (pgrep -x steam >/dev/null || /usr/libexec/gill-osaab/gosaab-library sync >/dev/null 2>&1) &
+# Netflix & co in Brave: protected streaming (Widevine) on, once
+/usr/libexec/gill-osaab/gosaab-widevine ensure 2>/dev/null
 # clipboard history for Spotlight (text only, kept in memory, password-manager copies skipped)
 wl-paste --type text --watch /usr/libexec/gill-osaab/gosaab-clipboard store &
 fps_env="$HOME/.config/environment.d/60-gill-osaab-fps.conf"

@@ -60,6 +60,8 @@ ShellRoot {
         function keyboard(): void { ShellState.toggleKeyboard() }
         function dockPopup(name: string): void { ShellState.dockPopup = name }
         function hideApp(id: string, hide: bool): void { Theme.setHidden(id, hide) }
+        function amoled(on: bool): void { Theme.set("amoled", on) }
+        function isAmoled(): bool { return Theme.amoled }
         function dockApps(): string { return Theme.dockApps.join(",") }
     }
 }

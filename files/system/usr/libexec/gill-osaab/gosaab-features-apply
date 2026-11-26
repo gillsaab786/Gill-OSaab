@@ -1,0 +1,64 @@
+#!/bin/sh
+# (admin; run by gosaab-config after Settings > Optional Features changes) set up what a switch needs:
+#   phone_link              open the phone-link ports (KDE Connect, 1714-1764) on the firewall, or close them
+#   suspend_then_hibernate  a hibernation file the size of your memory, sleep 2 h then hibernate; or undo it
+# Everything else (VRR, shared library, undervolting, smart updates) is read where it is used.
+set -u
+CONF=/etc/gill-osaab/features.conf
+on() { grep -qE "^$1[[:space:]]*=[[:space:]]*(on|true|1|yes)" "$CONF" 2>/dev/null; }
+log() { logger -t gill-osaab "features: $*"; echo "$*"; }
+
+phone_link() {
+  command -v firewall-cmd >/dev/null || return 0
+  if on phone_link; then
+    firewall-cmd --permanent --add-service=kdeconnect >/dev/null 2>&1 && firewall-cmd --add-service=kdeconnect >/dev/null 2>&1
+    log "phone link ports open"
+  else
+    firewall-cmd --permanent --remove-service=kdeconnect >/dev/null 2>&1; firewall-cmd --remove-service=kdeconnect >/dev/null 2>&1
+    log "phone link ports closed"
+  fi
+}
+
+SWAP=/var/swap/hibernate.swap
+UNIT=/etc/systemd/system/var-swap-hibernate.swap
+hibernate() {
+  if on suspend_then_hibernate; then
+    if [ ! -s "$SWAP" ]; then
+      mem_kb=$(awk '/MemTotal/{print $2}' /proc/meminfo)
+      need=$(( mem_kb * 1024 + 268435456 ))
+      free=$(df -B1 --output=avail /var | tail -1)
+      [ "$free" -gt $(( need + 4294967296 )) ] || { log "not enough free space for hibernation"; exit 3; }
+      mkdir -p /var/swap && chmod 700 /var/swap
+      chattr +C /var/swap 2>/dev/null   # btrfs: no copy-on-write (required for a swap file)
+      fallocate -l "$need" "$SWAP" || dd if=/dev/zero of="$SWAP" bs=1M count=$(( need / 1048576 )) status=none
+      chmod 600 "$SWAP" && mkswap "$SWAP" >/dev/null
+    fi
+    # used only for hibernating: lower priority than compressed memory, so everyday swapping stays in RAM
+    cat > "$UNIT" <<EOF
+[Unit]
+Description=Gill(OS) hibernation file
+[Swap]
+What=$SWAP
+Priority=-10
+[Install]
+WantedBy=swap.target
+EOF
+    mkdir -p /etc/systemd/sleep.conf.d /etc/systemd/logind.conf.d
+    printf '[Sleep]\nAllowSuspendThenHibernate=yes\nHibernateDelaySec=2h\n' > /etc/systemd/sleep.conf.d/60-gill-osaab.conf
+    printf '[Login]\nHandleLidSwitch=suspend-then-hibernate\nHandleSuspendKey=suspend-then-hibernate\n' \
+      > /etc/systemd/logind.conf.d/60-gill-osaab-hibernate.conf
+    systemctl daemon-reload && systemctl enable --now var-swap-hibernate.swap >/dev/null 2>&1
+    log "suspend-then-hibernate on (after 2 h asleep)"
+  else
+    systemctl disable --now var-swap-hibernate.swap >/dev/null 2>&1
+    rm -f "$UNIT" /etc/systemd/sleep.conf.d/60-gill-osaab.conf /etc/systemd/logind.conf.d/60-gill-osaab-hibernate.conf "$SWAP"
+    systemctl daemon-reload
+    log "suspend-then-hibernate off"
+  fi
+}
+
+case "${1:-}" in
+  phone_link) phone_link ;;
+  suspend_then_hibernate) hibernate ;;
+  *) : ;;
+esac

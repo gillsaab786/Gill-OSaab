@@ -32,6 +32,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <time.h>
 #include <unistd.h>
 #include <sys/stat.h>
@@ -1507,6 +1508,57 @@ static bool launch_origin(struct wlr_box *box) {
 	return ok;
 }
 
+/* XREAL glasses + handheld: an emulator's second screen (3DS/DS bottom screen, Wii U GamePad view)
+ * belongs on the built-in touchscreen while the game plays in the glasses. */
+static bool contains_ci(const char *hay, const char *needle) {
+	if (!hay || !needle) {
+		return false;
+	}
+	size_t n = strlen(needle);
+	for (; *hay; hay++) {
+		if (strncasecmp(hay, needle, n) == 0) {
+			return true;
+		}
+	}
+	return false;
+}
+
+static bool second_screen_window(struct gs_toplevel *t) {
+	const char *app = t->xdg_toplevel->app_id, *title = t->xdg_toplevel->title;
+	static const char *emulators[] = { "citra", "azahar", "lime3ds", "melonds", "desmume", "cemu", NULL };
+	static const char *titles[] = { "secondary", "bottom screen", "lower screen", "gamepad view", "window 2", NULL };
+	bool emu = false;
+	for (int i = 0; emulators[i]; i++) {
+		emu = emu || contains_ci(app, emulators[i]) || contains_ci(title, emulators[i]);
+	}
+	if (!emu) {
+		return false;
+	}
+	for (int i = 0; titles[i]; i++) {
+		if (contains_ci(title, titles[i])) {
+			return true;
+		}
+	}
+	return false;
+}
+
+/* the built-in screen, only when another screen (the glasses) is also on */
+static struct gs_output *internal_output_with_glasses(struct gs_server *server) {
+	struct gs_output *o, *internal = NULL;
+	int enabled = 0;
+	wl_list_for_each(o, &server->outputs, link) {
+		if (!o->wlr_output->enabled) {
+			continue;
+		}
+		enabled++;
+		const char *n = o->wlr_output->name;
+		if (!internal && (strncmp(n, "eDP", 3) == 0 || strncmp(n, "DSI", 3) == 0 || strncmp(n, "LVDS", 4) == 0)) {
+			internal = o;
+		}
+	}
+	return enabled >= 2 ? internal : NULL;
+}
+
 static void toplevel_map(struct wl_listener *listener, void *data) {
 	struct gs_toplevel *t = wl_container_of(listener, t, map);
 	overview_set(t->server, false, NULL);
@@ -1515,6 +1567,12 @@ static void toplevel_map(struct wl_listener *listener, void *data) {
 	if (!t->placed) {
 		place_centered(t);
 		t->placed = true;
+	}
+	struct gs_output *touch = second_screen_window(t) ? internal_output_with_glasses(t->server) : NULL;
+	if (touch) {
+		struct wlr_box full = full_area_of(t->server, touch);
+		wlr_scene_node_set_position(&t->tree->node, full.x, full.y);
+		set_fullscreen(t, true);
 	}
 	wl_list_insert(&t->server->toplevels, &t->link);
 	ftl_create(t);
@@ -2920,6 +2978,12 @@ static void server_new_output(struct wl_listener *listener, void *data) {
 			sscanf(size, "%dx%d", &w, &h);
 		}
 		wlr_output_state_set_custom_mode(&state, w, h, 60000);
+	}
+	if (getenv("GOSAAB_VRR") && wlr_output->adaptive_sync_supported) { /* VRR / FreeSync when switched on */
+		wlr_output_state_set_adaptive_sync_enabled(&state, true);
+		if (!wlr_output_test_state(wlr_output, &state)) {
+			wlr_output_state_set_adaptive_sync_enabled(&state, false);
+		}
 	}
 	wlr_output_commit_state(wlr_output, &state);
 	wlr_output_state_finish(&state);

@@ -12,6 +12,9 @@ Singleton {
     property bool systemMenu: false
     property bool launchpad: false
     property bool doNotDisturb: false
+    property bool glassesConnected: false
+    property bool stereo: false          // glasses showing side-by-side 3D: overlays draw once per eye
+    property var glasses3dApps: []       // apps set to 3D in Settings > Glasses (Launchpad's 3D shelf)
     property real intro: 1 // 0 -> 1 as the desktop arrives (Dock rises, widgets fade in); see ModeTransition.qml
     property string dockPopup: "" // "downloads" (the stack fan) or "trash" (its menu)
     // App menu (right-click / hold on an app in the Dock or Launchpad) and App Info

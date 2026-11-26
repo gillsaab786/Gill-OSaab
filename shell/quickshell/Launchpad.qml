@@ -22,8 +22,11 @@ PanelWindow {
     property bool showHidden: false // "Hidden apps" view: only the apps you hid, to unhide them
     readonly property int hiddenCount: DesktopEntries.applications.values.filter(e => !Theme.helperApp(e) && Theme.isHidden(e.id)).length
     onHiddenCountChanged: if (hiddenCount === 0) showHidden = false
+    // 3D shelf: games and emulators set to 3D in Settings > Glasses
+    property bool show3d: false
     readonly property var apps: DesktopEntries.applications.values
         .filter(e => !Theme.helperApp(e) && Theme.isHidden(e.id) === showHidden
+                 && (!show3d || ShellState.glasses3dApps.indexOf(e.id.toLowerCase()) >= 0)
                  && (query === "" || e.name.toLowerCase().includes(query)
                  || e.keywords.some(k => k.toLowerCase().includes(query))))
         .sort((a, b) => a.name.localeCompare(b.name))
@@ -47,7 +50,7 @@ PanelWindow {
 
     Connections {
         target: ShellState
-        function onLaunchpadChanged() { if (ShellState.launchpad) { search.text = ""; pad.page = 0; pad.showHidden = false; search.forceActiveFocus() } }
+        function onLaunchpadChanged() { if (ShellState.launchpad) { search.text = ""; pad.page = 0; pad.showHidden = false; pad.show3d = ShellState.glassesConnected && ShellState.stereo; search.forceActiveFocus() } }
     }
 
     Rectangle {
@@ -88,6 +91,18 @@ PanelWindow {
             }
         }
 
+        Rectangle { // "3D Games": the 3D shelf (opens by itself when the glasses are in 3D)
+            visible: ShellState.glasses3dApps.length > 0
+            anchors { right: searchBox.left; rightMargin: 12; verticalCenter: searchBox.verticalCenter }
+            width: shelfLabel.implicitWidth + 24; height: 32; radius: 16
+            color: pad.show3d ? Theme.accent : shelfMouse.containsMouse ? Qt.rgba(1, 1, 1, 0.22) : Qt.rgba(1, 1, 1, 0.12)
+            border { color: Qt.rgba(1, 1, 1, 0.12); width: 1 }
+            Behavior on color { ColorAnimation { duration: Theme.fast } }
+            Text { id: shelfLabel; anchors.centerIn: parent; color: "white"; font { family: Theme.font; pixelSize: 13; weight: Font.Medium }
+                text: pad.show3d ? "All apps" : "3D Games" }
+            MouseArea { id: shelfMouse; anchors.fill: parent; hoverEnabled: true
+                onClicked: { pad.show3d = !pad.show3d; pad.showHidden = false; pad.page = 0; ShellState.haptic("tick") } }
+        }
         Rectangle { // "Hidden apps (n)": see and unhide the apps you hid
             visible: pad.hiddenCount > 0
             anchors { left: searchBox.right; leftMargin: 12; verticalCenter: searchBox.verticalCenter }

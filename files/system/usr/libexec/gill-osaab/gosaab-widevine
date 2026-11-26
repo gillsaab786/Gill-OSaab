@@ -1,0 +1,54 @@
+#!/usr/bin/python3
+"""Protected streaming (Widevine) in Brave, so Netflix, Disney+, Prime Video and Spotify play.
+
+  gosaab-widevine ensure   at sign-in: switch it on once (if you later turn it off in Brave, it stays off)
+  gosaab-widevine on|off|status
+
+Brave then downloads Google's Widevine module itself (it can't be shipped with Gill(OS)). Streaming
+sites limit Linux browsers to HD (720p-1080p depending on the site).
+"""
+import json
+import os
+import sys
+from pathlib import Path
+
+STATE = Path.home() / ".config/BraveSoftware/Brave-Browser/Local State"
+KEY = "widevine_opted_in"
+
+
+def load():
+    try:
+        data = json.loads(STATE.read_text())
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save(data):
+    STATE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = STATE.with_name("Local State.gosaab")
+    tmp.write_text(json.dumps(data))
+    os.replace(tmp, STATE)
+
+
+def main(argv):
+    cmd = argv[0] if argv else "status"
+    data = load()
+    brave = data.setdefault("brave", {})
+    if cmd == "status":
+        print("on" if brave.get(KEY) else "off")
+        return 0
+    if cmd == "ensure":
+        if KEY in brave:
+            return 0
+        cmd = "on"
+    if cmd in ("on", "off"):
+        brave[KEY] = cmd == "on"
+        save(data)
+        return 0
+    print(__doc__.strip(), file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

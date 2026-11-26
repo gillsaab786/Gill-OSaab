@@ -1,10 +1,10 @@
 [Unit]
-Description=Daily Gill(OS) update check
+Description=Gill(OS) update check (hourly; the update schedule in Settings decides when updates run)
 
 [Timer]
 OnBootSec=15min
-OnUnitActiveSec=1d
-RandomizedDelaySec=30min
+OnUnitActiveSec=1h
+RandomizedDelaySec=10min
 Persistent=true
 
 [Install]

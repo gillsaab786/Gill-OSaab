@@ -75,8 +75,48 @@ def plan_updates(conf, which=shutil.which, users=None):
     return steps
 
 
+def on_ac(root=Path("/sys/class/power_supply")):
+    """Plugged in (or a PC without a battery)."""
+    supplies = list(root.glob("*"))
+    if not any((p / "type").read_text().strip() == "Battery" for p in supplies if (p / "type").exists()):
+        return True
+    return any((p / "online").exists() and (p / "online").read_text().strip() == "1"
+               and (p / "type").read_text().strip() in ("Mains", "USB", "USB_C", "USB_PD") for p in supplies)
+
+
+def metered():
+    """Is the internet connection a metered one (phone hotspot, mobile data)? NetworkManager: 1/3 = yes."""
+    try:
+        out = subprocess.run(["busctl", "get-property", "org.freedesktop.NetworkManager",
+                              "/org/freedesktop/NetworkManager", "org.freedesktop.NetworkManager", "Metered"],
+                             capture_output=True, text=True, timeout=5, check=False).stdout
+        return out.strip() in ("u 1", "u 3")
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def power_mode():
+    try:
+        import json
+        return json.loads(Path("/run/gill-osaab/power.json").read_text()).get("mode", "")
+    except (OSError, ValueError):
+        return ""
+
+
+def smart_ok(mode, ac, is_metered, hour):
+    """Smart updates: only plugged in, not on mobile data, never while gaming, and when you've stepped
+    away (idle) or at night (1-6 am)."""
+    return ac and not is_metered and mode != "game" and (mode == "idle" or 1 <= hour < 6)
+
+
 def main(argv=()):
     conf = read_conf(ETC / "updates.conf")
+    features = read_conf(ETC / "features.conf")
+    if "--force" not in argv and features.get("smart_updates", "off").lower() in ("on", "true", "1", "yes") \
+            and not smart_ok(power_mode(), on_ac(), metered(), time.localtime().tm_hour):
+        log("updates", "smart updates: waiting for a good time (plugged in, idle or night, not gaming)")
+        print("Waiting for a good time (Smart updates).")
+        return 0
     if "--force" not in argv and not is_due(conf, last_run(), time.time()):
         msg = f"not due yet (frequency={conf.get('frequency', 'daily')})"
         log("updates", msg)

@@ -363,6 +363,11 @@ if command -v qs >/dev/null; then
   check "light mode saved for Settings to see" "grep -q '\"mode\": \"light\"' $HOME/.config/gill-osaab/appearance.json"
   qs -p "$SHELLDIR" ipc call shell appearance menuBar glass; sleep 0.8; shot 23g-light-glass-menubar
   qs -p "$SHELLDIR" ipc call shell appearance mode dark; qs -p "$SHELLDIR" ipc call shell appearance menuBar transparent; sleep 1.5
+  # AMOLED black: true-black wallpaper and black glass panels
+  qs -p "$SHELLDIR" ipc call shell amoled true; sleep 1.5; shot 23h-amoled-black
+  check "AMOLED black turns on" "[ \"\$(qs -p $SHELLDIR ipc call shell isAmoled)\" = true ]"
+  qs -p "$SHELLDIR" ipc call controlcenter toggle; sleep 1; shot 23i-amoled-control-centre
+  qs -p "$SHELLDIR" ipc call controlcenter toggle; qs -p "$SHELLDIR" ipc call shell amoled false; sleep 1.5
   check "icon style setting reaches the shell" "qs -p $SHELLDIR ipc call shell appearance iconStyle tinted && [ \"\$(qs -p $SHELLDIR ipc call shell iconStyle)\" = tinted ]"
   qs -p "$SHELLDIR" ipc call shell appearance iconStyle default; sleep 0.5
   # on-screen keyboard (Control Centre > Keyboard)
@@ -428,6 +433,12 @@ import sys
 from PIL import Image, ImageChops, ImageStat
 out = sys.argv[1]
 L = lambda n: Image.open(f"{out}/{n}.png").convert("RGB")
+def black_share(name):
+    im = L(name).resize((480, 270))
+    px = list(im.getdata())
+    return sum(1 for p in px if max(p) <= 3) / len(px)
+
+
 def changed(a, b, box=None):
     A, B = L(a), L(b)
     if box: A, B = A.crop(box), B.crop(box)
@@ -451,6 +462,7 @@ checks = [
   ("switching to Game Mode covers the desktop", changed("29-after-launchpad", "29d-to-game-mode", (0, 0, W, H)) > 0.5),
   ("the desktop comes back after Game Mode", changed("29-after-launchpad", "29f-arrived", (0, 30, W, H - 140)) < 0.02),
   ("Downloads stack fans out above the Dock", changed("23c-volume-bezel", "23d-dock-downloads-stack", (W // 2, H // 2, W, H - 110)) > 0.01),
+  ("AMOLED black: most of the screen is truly black (pixels off)", black_share("23h-amoled-black") > 0.5),
   ("light mode switches to the light wallpaper", changed("23e-trash-full-menu", "23f-light-mode", (0, H // 3, W, 2 * H // 3)) > 0.3),
 ]
 bad = 0

@@ -20,7 +20,7 @@ import gosaab_gpu  # noqa: E402
 import gosaab_hw  # noqa: E402
 import gosaab_power as pw  # noqa: E402
 import gosaab_profiles as gp  # noqa: E402
-from gosaab_common import ETC, is_on, read_conf  # noqa: E402
+from gosaab_common import ETC, is_on, log, read_conf, write_conf_value  # noqa: E402
 
 STATUS = Path("/run/gill-osaab/power.json")
 
@@ -146,6 +146,52 @@ def set_gpu_mode(mode, pair, removed):
     return removed, ""
 
 
+UV_TRIAL = Path("/var/lib/gill-osaab/undervolt-trial.json")
+UV_STABLE_AFTER = 15 * 60  # an undervolt that survives 15 minutes counts as stable
+
+
+def boot_id():
+    try:
+        return Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+    except OSError:
+        return ""
+
+
+def undervolt_safety():
+    """If the PC restarted (crash or freeze) while trying a new undervolt, switch undervolting off."""
+    try:
+        trial = json.loads(UV_TRIAL.read_text())
+    except (OSError, ValueError):
+        return False
+    if trial.get("boot") != boot_id() and not trial.get("stable"):
+        write_conf_value(ETC / "features.conf", "undervolt", "off")
+        UV_TRIAL.unlink(missing_ok=True)
+        log("undervolt", f"switched off: the PC restarted while trying level {trial.get('level')}")
+        return True
+    return False
+
+
+def apply_undervolt(level, applied, last_tick, now):
+    """Apply (again after sleep: the chip forgets it) and track the stability trial. Returns new applied."""
+    resumed = now - last_tick > TICK * 5
+    if level == applied and not resumed:
+        if level and now - UV_START[0] > UV_STABLE_AFTER and not UV_START[1]:
+            UV_START[1] = True
+            save_json(UV_TRIAL, {"level": level, "boot": boot_id(), "stable": True})
+        return applied
+    if not shutil.which("ryzenadj"):
+        return applied
+    rc = subprocess.run(pw.undervolt_cmd(level), capture_output=True, timeout=10, check=False).returncode
+    if rc == 0 and level != applied:
+        UV_START[0], UV_START[1] = now, False
+        save_json(UV_TRIAL, {"level": level, "boot": boot_id(), "stable": False}) if level else UV_TRIAL.unlink(missing_ok=True)
+        log("undervolt", f"level {level}")
+    return level if rc == 0 else applied
+
+
+UV_START = [0.0, False]
+
+
 def main():
     hw = gosaab_hw.summary()
     has_battery = any(gosaab_hw.read(p / "type") == "Battery" for p in Path("/sys/class/power_supply").glob("*"))
@@ -156,10 +202,17 @@ def main():
     mode, changed_at, removed, gpu_msg, applied = "desktop", time.monotonic(), False, "", None
     last_gpu_mode = None
     avg_watts = None  # smoothed battery draw (about a minute)
+    undervolt_safety()
+    uv_ok = pw.undervolt_supported(Path("/proc/cpuinfo").read_text(errors="replace"), bool(shutil.which("ryzenadj")))
+    uv_applied, last_tick = 0, time.time()
 
     while True:
         conf = read_conf(ETC / "features.conf")
         smart = is_on(conf, "smart_tdp", default=True)
+        # undervolting (Settings > Optional Features; off unless turned on)
+        uv_level = int(conf.get("undervolt_level", "10") or 10) if uv_ok and is_on(conf, "undervolt", default=False) else 0
+        uv_applied = apply_undervolt(uv_level, uv_applied, last_tick, time.time())
+        last_tick = time.time()
         uid = active_user()
         act = activity(uid)
         cmds = cmdlines()

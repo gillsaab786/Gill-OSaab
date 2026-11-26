@@ -16,6 +16,15 @@ Qt Quick via Quickshell. Runs on the Gill(OS) Core image (minimal Fedora bootc).
   workspace, so use the ci-shots branch.
 
 ## Next up (asked by Jas, do these first)
+Done 2026-11-27: Optional Features made real, all off by default: phone link (kde-connect, firewall via
+gosaab-features-apply), shared game library (gosaab-library: Steam shortcuts.vdf, tagged Gill(OS)), VRR
+(gamescope --adaptive-sync / GOSAAB_VRR in gosaab-wm), suspend-then-hibernate (swap file + sleep.conf,
+not with Secure Boot), undervolting (AMD ryzenadj --set-coall, auto-off after a crash in the first 15 min),
+smart updates (hourly timer; AC, not metered, not gaming, idle or night). Glasses: gosaab-3d (Azahar/
+Dolphin/RPCS3/Virtual Boy SBS 3D + per-emulator depth, 3DS separate windows, Cemu GamePad window),
+gosaab-wm puts emulator second screens full-screen on the built-in touchscreen, refresh rate per app
+(hz.<app>), Launchpad 3D Games shelf, OSD + banners drawn once per eye in SBS. Widevine opt-in for Brave
+(gosaab-widevine). AMOLED black (shell, Settings, Tide Black wallpaper). Still to do: ARM edition.
 Done 2026-11-26 (final): compressed memory (zram-generator, zstd, swappiness 180); Settings > Device >
 Memory (gosaab-memory: PSS per app, zram savings, Force Close, Free up RAM via gosaab-memory-root);
 per-game profiles (gosaab_profiles: Steam AppId/.exe/emulator; TDP, graphics chip, FPS cap via gamescope

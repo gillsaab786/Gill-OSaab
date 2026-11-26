@@ -224,3 +224,15 @@ def format_minutes(m):
         return ""
     h, mm = divmod(int(m), 60)
     return f"{h} h {mm:02d} min" if h else f"{mm} min"
+
+
+def undervolt_cmd(level):
+    """AMD Curve Optimizer for every core: level 0..30 = that many steps lower voltage (0 = stock)."""
+    level = max(0, min(30, int(level)))
+    return ["ryzenadj", f"--set-coall={(0x100000 - level) if level else 0}"]
+
+
+def undervolt_supported(cpuinfo, have_ryzenadj):
+    """Undervolting works on AMD Ryzen (Zen 3 and newer mobile chips, e.g. ROG Ally's Z1, GPD's 7840U);
+    Intel has locked it on recent processors."""
+    return "AuthenticAMD" in cpuinfo and have_ryzenadj

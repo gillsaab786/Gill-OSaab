@@ -5,6 +5,7 @@
 #   gosaab-glasses only          picture only in the glasses (built-in screen off, saves battery)
 #   gosaab-glasses 3d | 2d       side-by-side 3D (3840x1080) or normal 2D (1920x1080)
 #   gosaab-glasses off           glasses screen off, built-in screen on
+#   gosaab-glasses hz N          refresh rate (60/72/90/120), matched to the game in front
 # Per-app modes (e.g. 3D for the 3DS emulator) live in ~/.config/gill-osaab/glasses.conf:
 #   app-id=3d|2d|only|extend    -- the shell applies them when that app is in front.
 set -e
@@ -20,5 +21,8 @@ case "${1:-status}" in
           echo "3D on. If the picture doesn't split into two, hold the glasses' brightness-up button for 3 seconds." ;;
   2d)     wlr-randr --output "$glasses" --mode 1920x1080 ;;
   off)    wlr-randr --output "$glasses" --off ${internal:+--output "$internal" --on} ;;
-  *) echo "usage: gosaab-glasses status|extend|only|3d|2d|off" >&2; exit 2 ;;
+  hz)     case "$2" in 60|72|90|120) ;; *) echo "hz: 60, 72, 90 or 120" >&2; exit 2 ;; esac
+          size=$(printf '%s\n' "$info" | sed -n "/^$glasses/,/^[^ ]/p" | awk '/current/{print $1; exit}')
+          wlr-randr --output "$glasses" --mode "${size:-1920x1080}@$2" 2>/dev/null || true ;;
+  *) echo "usage: gosaab-glasses status|extend|only|3d|2d|off|hz N" >&2; exit 2 ;;
 esac

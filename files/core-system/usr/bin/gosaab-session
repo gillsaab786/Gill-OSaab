@@ -12,4 +12,6 @@ export SDL_VIDEODRIVER="wayland,x11"
 export XCURSOR_THEME="${XCURSOR_THEME:-Adwaita}"
 export XCURSOR_SIZE="${XCURSOR_SIZE:-24}"
 export GOSAAB_TERMINAL="${GOSAAB_TERMINAL:-foot}"
+# VRR / FreeSync on the desktop (Settings > Optional Features; off unless turned on)
+grep -qE '^vrr[[:space:]]*=[[:space:]]*(on|true|1|yes)' /etc/gill-osaab/features.conf 2>/dev/null && export GOSAAB_VRR=1
 exec gosaab-wm -s /usr/libexec/gill-osaab/gosaab-session-start

@@ -279,11 +279,19 @@ class SettingsApp(unittest.TestCase):
         sw.setChecked(False)
         self.assertTrue(sw.isChecked(), "switch flips back when saving fails")
 
-    def test_optional_features_are_off_and_locked(self):
-        w = self.gs.Settings(FakeBackend())
+    def test_optional_features_are_off_by_default(self):
+        b = FakeBackend()
+        w = self.gs.Settings(b)
+        for key in ("phone_link", "shared_game_library", "vrr", "suspend_then_hibernate", "smart_updates", "undervolt"):
+            sw = w.switches[("features.conf", key)][0]
+            self.assertFalse(sw.isChecked(), key)
         sw = w.switches[("features.conf", "phone_link")][0]
-        self.assertFalse(sw.isChecked())
-        self.assertFalse(sw.isEnabled())
+        self.assertTrue(sw.isEnabled())
+        sw.setChecked(True)
+        self.assertIn(("set", "features.conf", "phone_link", "on"), b.calls)
+        w.uv_level.setValue(14)
+        w.uv_level.sliderReleased.emit()
+        self.assertIn(("set", "features.conf", "undervolt_level", "14"), b.calls)
         for key in ("vpn", "cloud_drives"):  # real switches now, but off by default
             sw = w.switches[("features.conf", key)][0]
             self.assertFalse(sw.isChecked())

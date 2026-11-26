@@ -62,15 +62,18 @@ Singleton {
     // Liquid Glass: clear, lightly tinted glass; the blur behind does the work.
     // "Tinted" glass is frostier, for people who find clear glass hard to read.
     readonly property real glassBoost: tintedGlass ? 0.25 : 0
-    readonly property color bar: clearMenuBar ? "transparent"
+    // AMOLED black (Settings > Appearance, with Dark): black glass. Panels are near-opaque black so
+    // those pixels stay off; edges keep their bright Liquid Glass rim, and the wallpaper is Tide Black.
+    readonly property bool amoled: dark && setting("amoled", false) === true
+    readonly property color bar: amoled ? (clearMenuBar ? "transparent" : "black") : clearMenuBar ? "transparent"
         : mix(Qt.rgba(1, 1, 1, 0.30 + glassBoost), Qt.rgba(0.06, 0.06, 0.08, 0.30 + glassBoost))
-    readonly property color panel: mix(Qt.rgba(1, 1, 1, 0.45 + glassBoost), Qt.rgba(0.10, 0.10, 0.13, 0.42 + glassBoost))
+    readonly property color panel: amoled ? Qt.rgba(0, 0, 0, 0.86 + glassBoost * 0.4) : mix(Qt.rgba(1, 1, 1, 0.45 + glassBoost), Qt.rgba(0.10, 0.10, 0.13, 0.42 + glassBoost))
     readonly property color panelBorder: "transparent" // the GlassRim draws the edge
-    readonly property color tile: mix(Qt.rgba(1, 1, 1, 0.35), Qt.rgba(1, 1, 1, 0.10))
-    readonly property color tileHover: mix(Qt.rgba(1, 1, 1, 0.55), Qt.rgba(1, 1, 1, 0.18))
+    readonly property color tile: amoled ? Qt.rgba(1, 1, 1, 0.08) : mix(Qt.rgba(1, 1, 1, 0.35), Qt.rgba(1, 1, 1, 0.10))
+    readonly property color tileHover: amoled ? Qt.rgba(1, 1, 1, 0.15) : mix(Qt.rgba(1, 1, 1, 0.55), Qt.rgba(1, 1, 1, 0.18))
     readonly property color text: mix("#1c1c1e", "#f2f2f7")
     readonly property color subtext: mix(Qt.rgba(0.1, 0.1, 0.12, 0.60), Qt.rgba(0.92, 0.92, 0.96, 0.60))
-    readonly property color dock: mix(Qt.rgba(1, 1, 1, 0.22 + glassBoost), Qt.rgba(0.14, 0.14, 0.18, 0.18 + glassBoost))
+    readonly property color dock: amoled ? Qt.rgba(0, 0, 0, 0.70 + glassBoost * 0.4) : mix(Qt.rgba(1, 1, 1, 0.22 + glassBoost), Qt.rgba(0.14, 0.14, 0.18, 0.18 + glassBoost))
 
     // Wallpaper: "tide" follows Light/Dark (cross-fading), the others are fixed pictures
     readonly property string wallpaperDir: {
@@ -83,9 +86,11 @@ Singleton {
         if (w.startsWith("/")) return w
         const dir = w.startsWith("classic") ? wallpaperDir + "-Classic" : wallpaperDir
         const d = w.endsWith("-light") ? false : w.endsWith("-dark") ? true : isDark
-        return dir + "/contents/" + (d ? "images_dark" : "images") + "/3840x2160.png"
+        // AMOLED: Tide's dark picture becomes Tide Black (true black with glowing edges)
+        const black = w.endsWith("-black") || (d && amoled && !w.startsWith("classic"))
+        return dir + "/contents/" + (black ? "images_black" : d ? "images_dark" : "images") + "/3840x2160.png"
     }
-    readonly property bool dynamicWallpaper: !wallpaperChoice.startsWith("/") && !/-(light|dark)$/.test(wallpaperChoice)
+    readonly property bool dynamicWallpaper: !wallpaperChoice.startsWith("/") && !/-(light|dark|black)$/.test(wallpaperChoice)
     readonly property string wallpaper: wallpaperFor(dark)
 
     readonly property int radius: 22

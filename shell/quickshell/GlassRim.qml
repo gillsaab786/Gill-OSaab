@@ -6,6 +6,9 @@ Canvas {
     id: rim
     property real radius: 18
     property real strength: 1.0
+    // AMOLED black: almost no gloss fill (those pixels stay off), only the bright edge
+    readonly property real glossK: Theme.amoled ? 0.25 : 1.0
+    onGlossKChanged: requestPaint()
     anchors.fill: parent
     antialiasing: true
     onRadiusChanged: requestPaint()
@@ -23,7 +26,7 @@ Canvas {
         }
         // gloss: light falling on the top of the glass
         const gloss = c.createLinearGradient(0, 0, 0, Math.min(h, 60))
-        gloss.addColorStop(0, Qt.rgba(1, 1, 1, 0.10 * strength))
+        gloss.addColorStop(0, Qt.rgba(1, 1, 1, 0.10 * strength * glossK))
         gloss.addColorStop(1, Qt.rgba(1, 1, 1, 0))
         path(1); c.fillStyle = gloss; c.fill()
         // rim

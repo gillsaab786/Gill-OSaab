@@ -44,6 +44,7 @@ ALLOWED = {
         "lights_brightness": "int:0:100",
         "lights_vividness": "int:0:100",
         "lights_effect": ("solid", "breathing", "rainbow"),
+        "undervolt_level": "int:0:30",
         **{k: ONOFF for k in OPTIONAL},
     },
 }
@@ -107,7 +108,14 @@ def main(argv):
         print("Needs admin rights (run through pkexec).", file=sys.stderr)
         return 1
     write_conf_value(ETC / filename, key, value)
+    if filename == "features.conf" and key in APPLY and not os.environ.get("GOSAAB_ETC"):
+        import subprocess
+        return subprocess.run([APPLY_TOOL, key], check=False).returncode  # firewall ports, hibernation file
     return 0
+
+
+APPLY = ("phone_link", "suspend_then_hibernate")
+APPLY_TOOL = "/usr/libexec/gill-osaab/gosaab-features-apply"
 
 
 if __name__ == "__main__":

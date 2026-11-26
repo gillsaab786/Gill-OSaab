@@ -282,11 +282,26 @@ class Backend:
         except OSError:
             return {}
 
+    GLASSES_MODES_SET = ("3d", "2d", "only", "extend")
+
     def set_glasses_profiles(self, profiles):
-        self.GLASSES_CONF.parent.mkdir(parents=True, exist_ok=True)
-        self.GLASSES_CONF.write_text("# app-id=3d|2d|only|extend (applied when the app is in front)\n" +
-                                     "".join(f"{k}={v}\n" for k, v in profiles.items()))
+        """Save per-app modes; keeps the other glasses settings (hz.*, depth.*, auto3d)."""
+        keep = {k: v for k, v in self.glasses_profiles().items() if v not in self.GLASSES_MODES_SET}
+        self.write_glasses({**keep, **profiles})
         return 0
+
+    def set_glasses_key(self, key, value):
+        conf = self.glasses_profiles()
+        if value in ("", None):
+            conf.pop(key, None)
+        else:
+            conf[key] = str(value)
+        self.write_glasses(conf)
+
+    def write_glasses(self, conf):
+        self.GLASSES_CONF.parent.mkdir(parents=True, exist_ok=True)
+        self.GLASSES_CONF.write_text("# app-id=3d|2d|only|extend  hz.<app>=60..120  depth.<3ds|dolphin|rpcs3|vb>=0..100"
+                                     "  auto3d=on|off\n" + "".join(f"{k}={v}\n" for k, v in sorted(conf.items())))
 
     APP_FOLDERS = Path.home() / ".config/gill-osaab/app-folders"
 
@@ -2032,11 +2047,21 @@ class Settings(QMainWindow):
                 self.apply_scheme("GillOSaabDark" if mode == "dark" else "GillOSaabLight")
         self.mode_picker = picker([(m, PreviewTile(m.capitalize(), paint_mode(light, dark, m)))
                                    for m in ("auto", "light", "dark")], ap.get("mode", "dark"), set_mode, 14)
+        self.amoled_switch = Switch()
+        self.amoled_switch.set_quiet(ap.get("amoled") is True)
+
+        def set_amoled(on):
+            haptic("toggle")
+            self.backend.set_appearance("amoled", on)
+            apply_accent(ACCENT.name(), on)
+        self.amoled_switch.toggled.connect(set_amoled)
         self.accent_picker = picker([(c, ColorDot(c, n)) for c, n in ACCENTS], ap.get("accent", DEFAULT_ACCENT),
                                     lambda c: (self.backend.set_appearance("accent", c), apply_accent(c)), 4)
         p.section("Appearance", [
             Row("", "", self.mode_picker),
             Row("Accent colour", "Buttons, switches and selections.", self.accent_picker),
+            Row("AMOLED black", "With Dark: true black backgrounds, black glass panels and the Tide Black "
+                "wallpaper. On OLED screens black pixels are off, which saves battery.", self.amoled_switch),
         ], "Auto is light in the day and dark from 7 pm; the Tide wallpaper changes with it.")
 
         self.icon_picker = picker([(st, PreviewTile(st.capitalize(), paint_icon_style(st), 104, 66))
@@ -2063,6 +2088,8 @@ class Settings(QMainWindow):
                   "Dock, Hide and App Info.")
 
         walls = [("tide", "Tide", [light, dark]), ("tide-light", "Tide Light", [light]), ("tide-dark", "Tide Dark", [dark]),
+                 ("tide-black", "Tide Black", [th("GillOSaab", True).replace("thumb-dark", "thumb-black")
+                                               .replace("images_dark", "images_black")]),
                  ("classic", "Aurora", [th("GillOSaab-Classic", True)])]
         self.wall_picker = picker([(v, PreviewTile(n, paint_picture(paths), 104, 60)) for v, n, paths in walls],
                                   ap.get("wallpaper", "tide"), lambda v: self.backend.set_appearance("wallpaper", v), 8)
@@ -2328,25 +2355,53 @@ class Settings(QMainWindow):
         p.section("XREAL and other glasses", [Row("Status", "", self.glasses_label), Row("Mode", "", modes)],
                   "Plug the glasses into USB-C. 3D shows games side by side (3840x1080); Glasses only turns "
                   "the built-in screen off to save battery.")
-        depth = QSlider(Qt.Horizontal)
-        depth.setRange(0, 100)
-        depth.setValue(b.depth_3d())
-        depth.setMinimumWidth(220)
-        depth.valueChanged.connect(lambda v: b.set_depth_3d(v))
-        p.section("3D depth", [Row("Depth", "How deep 3DS games look in 3D (applies to Azahar/Citra/Lime3DS "
-                                   "next time a game starts).", depth)])
+        conf = b.glasses_profiles()
+        self.auto3d = Switch()
+        self.auto3d.set_quiet(conf.get("auto3d", "on") != "off")
+        self.auto3d.toggled.connect(lambda on: (haptic("toggle"), b.set_glasses_key("auto3d", "on" if on else "off")))
+        rows3d = [Row("3D games by themselves", "When the glasses are plugged in, 3DS, GameCube/Wii, PS3 and Virtual "
+                      "Boy emulators switch to side-by-side 3D. The 3DS bottom screen and Wii U GamePad open on the "
+                      "built-in touchscreen.", self.auto3d)]
+        self.depth_sliders = {}
+        for emu, label in (("3ds", "3DS (Azahar, Citra, Lime3DS)"), ("dolphin", "GameCube and Wii (Dolphin)"),
+                           ("rpcs3", "PS3 (RPCS3)"), ("vb", "Virtual Boy")):
+            sl = QSlider(Qt.Horizontal)
+            sl.setRange(0, 100)
+            sl.setValue(int(conf.get(f"depth.{emu}", "50") or 50) if str(conf.get(f"depth.{emu}", "50")).isdigit() else 50)
+            sl.setMinimumWidth(200)
+            sl.sliderReleased.connect(lambda e=emu, x=sl: (haptic("tick"), b.set_glasses_key(f"depth.{e}", x.value()),
+                                                           b.run(["gosaab-3d", "on"], wait=False)
+                                                           if "Glasses:" in b.glasses_status() else None))
+            self.depth_sliders[emu] = sl
+            rows3d.append(Row(f"Depth: {label}", "", sl))
+        p.section("3D", rows3d, "Depth is how far the picture reaches into the screen; it applies the next time a "
+                  "game starts. Set other games (e.g. Windows games with 3D) to 3D below to see them on the "
+                  "3D Games shelf in Launchpad.")
         rows = []
         self.glasses_combo = {}
-        profiles = {**b.glasses_profiles()}
+        self.glasses_hz = {}
+        profiles = {k: v for k, v in conf.items() if v in self.backend.GLASSES_MODES_SET}
         for app in sorted(set(profiles) | set(self.EMULATOR_3D)):
             combo = QComboBox()
             combo.addItems(["Off", "2d", "3d", "only", "extend"])
             combo.setCurrentText(profiles.get(app, "Off"))
             combo.currentTextChanged.connect(self.save_glasses_profiles)
             self.glasses_combo[app] = combo
-            rows.append(Row(app, "", combo))
-        p.section("Per-app modes", rows, "When one of these apps is in front, the glasses switch to its mode. "
-                  "Set 3D for 3DS, Wii/GameCube and PS3 emulators to have 3D come on by itself.")
+            hz = QComboBox()
+            hz.addItem("Any Hz", "")
+            for r in ("60", "72", "90", "120"):
+                hz.addItem(f"{r} Hz", r)
+            hz.setCurrentIndex(max(0, hz.findData(conf.get(f"hz.{app}", ""))))
+            hz.currentIndexChanged.connect(lambda _i, a=app, c=hz: b.set_glasses_key(f"hz.{a}", c.currentData()))
+            self.glasses_hz[app] = hz
+            both = QWidget()
+            bl = QHBoxLayout(both)
+            bl.setContentsMargins(0, 0, 0, 0)
+            bl.addWidget(combo)
+            bl.addWidget(hz)
+            rows.append(Row(app, "", both))
+        p.section("Per-app modes", rows, "When one of these apps is in front, the glasses switch to its mode and "
+                  "refresh rate (match the game: 60 Hz for most emulators, so motion is smooth).")
         p.finish()
         return p
 
@@ -2578,15 +2633,54 @@ class Settings(QMainWindow):
 
     def page_optional(self):
         p = Page("Optional Features")
-        rows = []
-        for key, title in [("phone_link", "Phone link"), ("shared_game_library", "Shared game library"),
-                           ("vrr", "VRR (FreeSync)"),
-                           ("suspend_then_hibernate", "Suspend, then hibernate"), ("undervolt", "Undervolting"),
-                           ("smart_updates", "Smart updates"),
-                           ("pause_downloads_while_gaming", "Pause downloads while gaming")]:
-            rows.append(Row(title, "Coming in a later update. Off by default.",
-                            self.switch("features.conf", key, default=False, enabled=False)))
-        p.section("Off by default", rows)
+        p.keywords += ["phone", "kde connect", "library", "vrr", "freesync", "hibernate", "undervolt", "smart updates"]
+        b = self.backend
+        rows = [
+            Row("Phone link", "Your phone's notifications on this PC, send files and links both ways, shared "
+                "clipboard, phone as a touchpad. Install KDE Connect on the phone (Play Store / F-Droid; iPhone: "
+                "App Store), same Wi-Fi.", self.switch("features.conf", "phone_link", default=False)),
+            Row("Shared game library", "Windows, Android and Linux games and emulators show up in Steam's "
+                "library in Game Mode, next to your Steam games.", self.switch("features.conf", "shared_game_library",
+                                                                              default=False)),
+            Row("VRR (FreeSync)", "Smoother games on screens that support variable refresh. Applies the next "
+                "time you sign in or start Game Mode.", self.switch("features.conf", "vrr", default=False)),
+            Row("Suspend, then hibernate", "After 2 hours asleep the PC saves everything to disk and turns off, so "
+                "the battery doesn't drain. Needs free disk space the size of your memory. Doesn't work while "
+                "Secure Boot is on.", self.switch("features.conf", "suspend_then_hibernate", default=False)),
+            Row("Smart updates", "Updates run only when plugged in, not on mobile data, never while you play, and "
+                "when you've stepped away or at night.", self.switch("features.conf", "smart_updates", default=False)),
+        ]
+        uv_ok = "AuthenticAMD" in (Path("/proc/cpuinfo").read_text(errors="replace")
+                                   if Path("/proc/cpuinfo").exists() else "")
+        self.uv_level = QSlider(Qt.Horizontal)
+        self.uv_level.setRange(0, 30)
+        self.uv_level.setValue(int(b.features().get("undervolt_level", "10") or 10))
+        self.uv_level.setFixedWidth(200)
+        self.uv_label = QLabel(f"-{self.uv_level.value()}")
+        self.uv_level.valueChanged.connect(lambda v: self.uv_label.setText(f"-{v}"))
+        self.uv_level.sliderReleased.connect(lambda: (haptic("tick"), b.set_value("features.conf", "undervolt_level",
+                                                                                 str(self.uv_level.value()))))
+        uv_box = QWidget()
+        ul = QHBoxLayout(uv_box)
+        ul.setContentsMargins(0, 0, 0, 0)
+        ul.addWidget(self.uv_level)
+        ul.addWidget(self.uv_label)
+        uv_switch = self.switch("features.conf", "undervolt", default=False, enabled=uv_ok)
+        rows += [Row("Undervolting", "Same speed at lower voltage: cooler, quieter, longer battery (AMD Ryzen, e.g. "
+                     "ROG Ally, GPD Win Max 2). If the PC freezes or restarts within 15 minutes of a new level, "
+                     "undervolting turns itself off." if uv_ok else "Only on AMD Ryzen processors (Intel has locked "
+                     "it).", uv_switch),
+                 Row("Undervolt level", "Steps lower (Curve Optimizer). 10 is safe on most chips; go up a few at a "
+                     "time.", uv_box)]
+        p.section("Off unless you turn them on", rows)
+        sync = QPushButton("Add my games to Steam now")
+        sync.setObjectName("pill")
+        sync.clicked.connect(lambda: b.run(["/usr/libexec/gill-osaab/gosaab-library", "sync"], wait=False))
+        pair = QPushButton("Pair a phone")
+        pair.setObjectName("pill")
+        pair.clicked.connect(lambda: b.run(["kdeconnect-app"], wait=False))
+        p.section("", [Row("Shared game library", "Also happens each time Game Mode starts. Close Steam first.", sync),
+                       Row("Phone link", "Opens KDE Connect to pair your phone.", pair)])
         p.finish()
         return p
 
@@ -2698,18 +2792,38 @@ QScrollBar:horizontal { height: 0; background: transparent; }
 """
 
 
-def accent_style(color):
-    """The Settings style sheet in an accent colour (buttons, switches, links, sliders, selections)."""
+# AMOLED black: window and sidebar pure black (pixels off), cards a hair above black with a fine
+# edge so the layout still reads, controls dark grey
+AMOLED_COLOURS = {"#1c1c1f": "#000000", "#161618": "#000000", "#26262a": "#0c0c0e", "#2e2e33": "#16161a",
+                  "#2c2c31": "#18181c", "#222226": "#101013", "#34343a": "#1b1b1f", "#2f2f34": "#17171a",
+                  "#3a3a40": "#232328", "#3d3d44": "#26262b", "#2c2c30": "#101013", "#44444a": "#2a2a2f"}
+AMOLED_EXTRA = """
+#card { border: 1px solid #1d1d21; }
+#side { border-right: 1px solid #141417; }
+"""
+AMOLED = False
+
+
+def accent_style(color, amoled=None):
+    """The Settings style sheet in an accent colour (buttons, switches, links, sliders, selections),
+    in AMOLED black when that is on."""
     c = QColor(color) if isinstance(color, str) and QColor.isValidColorName(color) else QColor(DEFAULT_ACCENT)
-    return (STYLE.replace("#1fb6c9", c.name()).replace("#27c7db", c.lighter(115).name())
+    style = STYLE
+    if AMOLED if amoled is None else amoled:
+        for old, new in AMOLED_COLOURS.items():
+            style = style.replace(old, new)
+        style += AMOLED_EXTRA
+    return (style.replace("#1fb6c9", c.name()).replace("#27c7db", c.lighter(115).name())
             .replace("#5ad2e2", c.lighter(140).name() if c.lightness() < 150 else c.name()))
 
 
-def apply_accent(color):
-    """Use an accent colour now: Settings and everything it draws follow at once (the desktop
-    follows through appearance.json)."""
-    global ACCENT
+def apply_accent(color, amoled=None):
+    """Use an accent colour (and AMOLED black) now: Settings and everything it draws follow at once
+    (the desktop follows through appearance.json)."""
+    global ACCENT, AMOLED
     ACCENT = QColor(color) if isinstance(color, str) and QColor.isValidColorName(color) else QColor(DEFAULT_ACCENT)
+    if amoled is not None:
+        AMOLED = bool(amoled)
     app = QApplication.instance()
     if app:
         app.setStyleSheet(accent_style(ACCENT.name()))
@@ -2721,8 +2835,9 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("Gill(OS) Settings")
     app.setDesktopFileName("gosaab-settings")
-    # the accent colour picked in Appearance tints Settings too
-    apply_accent(Backend().appearance().get("accent", DEFAULT_ACCENT))
+    # the accent colour (and AMOLED black) picked in Appearance apply to Settings too
+    ap = Backend().appearance()
+    apply_accent(ap.get("accent", DEFAULT_ACCENT), ap.get("amoled") is True and ap.get("mode", "dark") != "light")
     w = Settings()
     # open a page directly: gosaab-settings vpn | about | game | folders | glasses ...
     want = (sys.argv[1] if len(sys.argv) > 1 else "").lower()

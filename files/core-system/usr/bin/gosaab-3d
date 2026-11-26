@@ -1,0 +1,132 @@
+#!/usr/bin/python3
+"""3D for games on XREAL (and other side-by-side) glasses, set up inside each emulator.
+
+  gosaab-3d on      glasses plugged in: side-by-side 3D in Azahar/Citra/Lime3DS (3DS), Dolphin
+                    (GameCube/Wii), RPCS3 (PS3) and Virtual Boy (RetroArch Beetle VB, Mednafen), each
+                    at its own depth; the 3DS bottom screen and Wii U GamePad get their own window,
+                    which Gill(OS) puts on the built-in touchscreen
+  gosaab-3d off     glasses unplugged: everything back to normal 2D, one window
+  gosaab-3d status  JSON: which emulators were found
+
+Depth per emulator lives in ~/.config/gill-osaab/glasses.conf as  depth.<emulator>=0..100
+(emulator ids: 3ds, dolphin, rpcs3, vb). Emulators read these when a game starts.
+"""
+import json
+import re
+import sys
+from pathlib import Path
+
+HOME = Path.home()
+CONF = HOME / ".config/gill-osaab/glasses.conf"
+VAR = HOME / ".var/app"
+FILES = {
+    "3ds": [HOME / ".config/azahar-emu/qt-config.ini", HOME / ".config/citra-emu/qt-config.ini",
+            HOME / ".config/lime3ds-emu/qt-config.ini", VAR / "org.azahar_emu.Azahar/config/azahar-emu/qt-config.ini",
+            VAR / "io.github.lime3ds.Lime3DS/config/lime3ds-emu/qt-config.ini"],
+    "dolphin": [HOME / ".config/dolphin-emu/GFX.ini", VAR / "org.DolphinEmu.dolphin-emu/config/dolphin-emu/GFX.ini"],
+    "rpcs3": [HOME / ".config/rpcs3/config.yml", VAR / "net.rpcs3.RPCS3/config/rpcs3/config.yml"],
+    "vb": [HOME / ".config/retroarch/retroarch-core-options.cfg",
+           VAR / "org.libretro.RetroArch/config/retroarch/retroarch-core-options.cfg", HOME / ".mednafen/mednafen.cfg"],
+    "cemu": [HOME / ".config/Cemu/settings.xml", VAR / "info.cemu.Cemu/config/Cemu/settings.xml"],
+}
+DEFAULT_DEPTH = 50
+
+
+def depths(conf=None):
+    out = {}
+    try:
+        for line in (conf or CONF).read_text().splitlines():
+            m = re.fullmatch(r"\s*depth\.(\w+)\s*=\s*(\d{1,3})\s*", line)
+            if m:
+                out[m.group(1)] = max(0, min(100, int(m.group(2))))
+    except OSError:
+        pass
+    return out
+
+
+def ini_set(text, section, key, value):
+    """Set key=value inside [section] of a Qt/INI file (adds the section or key when missing)."""
+    lines = text.splitlines()
+    out, in_sec, done, seen = [], False, False, False
+    for line in lines:
+        if line.startswith("["):
+            if in_sec and not done:
+                out.append(f"{key}={value}")
+                done = True
+            in_sec = line.strip() == f"[{section}]"
+            seen = seen or in_sec
+        elif in_sec and re.match(rf"\s*{re.escape(key)}\s*=", line):
+            out.append(f"{key}={value}" if "=" in line and " = " not in line else f"{key} = {value}")
+            done = True
+            continue
+        out.append(line)
+    if in_sec and not done:
+        out.append(f"{key}={value}")
+        done = True
+    if not seen:
+        out += ["", f"[{section}]", f"{key}={value}"]
+    return "\n".join(out) + "\n"
+
+
+def edit(path, fn):
+    try:
+        text = path.read_text()
+    except OSError:
+        return False
+    new = fn(text)
+    if new != text:
+        path.write_text(new)
+    return True
+
+
+def apply(on, conf=None):
+    d = depths(conf)
+    found = {}
+    for path in FILES["3ds"]:
+        def f3ds(t, dep=d.get("3ds", DEFAULT_DEPTH)):
+            t = ini_set(t, "Renderer", "render_3d", "1" if on else "0")  # 1 = side by side
+            t = ini_set(t, "Renderer", "render_3d\\default", "false")
+            t = ini_set(t, "Renderer", "factor_3d", str(dep))
+            t = ini_set(t, "Renderer", "factor_3d\\default", "false")
+            # Separate Windows: the bottom screen opens as its own window (it goes to the touchscreen)
+            t = ini_set(t, "Layout", "layout_option", "4" if on else "0")
+            return ini_set(t, "Layout", "layout_option\\default", "false" if on else "true")
+        found["3ds"] = edit(path, f3ds) or found.get("3ds", False)
+    for path in FILES["dolphin"]:
+        def fdol(t, dep=d.get("dolphin", DEFAULT_DEPTH)):
+            t = ini_set(t, "Stereoscopy", "StereoMode", "1" if on else "0")  # 1 = side by side
+            return ini_set(t, "Stereoscopy", "StereoDepth", str(dep))
+        found["dolphin"] = edit(path, fdol) or found.get("dolphin", False)
+    for path in FILES["rpcs3"]:
+        found["rpcs3"] = edit(path, lambda t: re.sub(r"(?m)^(\s+3D Display Mode:).*$",
+                                                     r"\1 " + ("Side-by-Side" if on else "Disabled"), t)) \
+            or found.get("rpcs3", False)
+    for path in FILES["vb"]:
+        if path.name == "mednafen.cfg":
+            fn = (lambda t: re.sub(r"(?m)^vb\.3dmode .*$", "vb.3dmode " + ("sidebyside" if on else "anaglyph"), t))
+        else:
+            def fn(t):
+                line = f'vb_3dmode = "{"side-by-side" if on else "anaglyph"}"'
+                return re.sub(r"(?m)^vb_3dmode = .*$", line, t) if "vb_3dmode" in t else t + line + "\n"
+        found["vb"] = edit(path, fn) or found.get("vb", False)
+    for path in FILES["cemu"]:  # Wii U GamePad in its own window (goes to the touchscreen)
+        found["cemu"] = edit(path, lambda t: re.sub(r"<open_pad>\w+</open_pad>",
+                                                    f"<open_pad>{'true' if on else 'false'}</open_pad>", t)) \
+            or found.get("cemu", False)
+    return found
+
+
+def main(argv):
+    cmd = argv[0] if argv else "status"
+    if cmd in ("on", "off"):
+        print(json.dumps(apply(cmd == "on")))
+        return 0
+    if cmd == "status":
+        print(json.dumps({k: any(p.exists() for p in v) for k, v in FILES.items()}))
+        return 0
+    print(__doc__.strip(), file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

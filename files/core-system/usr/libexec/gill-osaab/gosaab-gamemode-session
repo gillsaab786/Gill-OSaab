@@ -23,4 +23,12 @@ if [ -f "$ours" ] && { [ ! -e "$movies/deck_startup.webm" ] || [ -e "$movies/.gi
 fi
 # the switch chime, as the screen changes over
 command -v pw-play >/dev/null && pw-play /usr/share/gill-osaab/media/mode-switch.wav >/dev/null 2>&1 &
-exec gamescope -e -f --adaptive-sync --mangoapp -- steam -gamepadui -steamos3 -steampal -steamdeck
+# Settings > Optional Features (all off unless you turn them on)
+feature() { grep -qE "^$1[[:space:]]*=[[:space:]]*(on|true|1|yes)" /etc/gill-osaab/features.conf 2>/dev/null; }
+# shared game library: Windows, Android and Linux games + emulators in Steam (Steam isn't running yet)
+feature shared_game_library && /usr/libexec/gill-osaab/gosaab-library sync >/dev/null 2>&1
+# phone link: your phone's notifications, files and clipboard
+feature phone_link && [ -x /usr/libexec/kdeconnectd ] && /usr/libexec/kdeconnectd >/dev/null 2>&1 &
+vrr=""
+feature vrr && vrr="--adaptive-sync"   # FreeSync / VRR on screens that support it
+exec gamescope -e -f $vrr --mangoapp -- steam -gamepadui -steamos3 -steampal -steamdeck

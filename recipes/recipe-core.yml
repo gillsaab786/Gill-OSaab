@@ -144,6 +144,8 @@ modules:
         - zram-generator
         # per-game FPS cap in Game Mode (sets gamescope's frame limiter)
         - xprop
+        # Phone link (off until switched on in Settings > Optional Features)
+        - kde-connect
         # on-screen keyboard for touch screens
         - wvkbd
 

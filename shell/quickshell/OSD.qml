@@ -16,7 +16,9 @@ PanelWindow {
 
     anchors { top: true; right: true }
     margins { top: 6; right: 10 }
-    implicitWidth: 330
+    // 3D glasses (side by side): the pill shows once for each eye, so it reads as one in 3D
+    readonly property real eyeShift: ShellState.stereo && screen ? screen.width / 2 : 0
+    implicitWidth: 330 + eyeShift
     implicitHeight: 96
     color: "transparent"
     exclusionMode: ExclusionMode.Ignore
@@ -84,7 +86,7 @@ PanelWindow {
 
     Rectangle {
         id: box
-        anchors { right: parent.right; top: parent.top }
+        anchors { left: parent.left; top: parent.top; leftMargin: osd.width - 330 - osd.eyeShift + 10 }
         width: 320; height: 84; radius: 26
         color: Theme.panel
         opacity: osd.shown ? 1 : 0
@@ -131,5 +133,13 @@ PanelWindow {
                 onReleased: ShellState.haptic("tick")
             }
         }
+    }
+    ShaderEffectSource { // the second eye's copy
+        visible: osd.eyeShift > 0
+        sourceItem: osd.eyeShift > 0 ? box : null
+        x: box.x + osd.eyeShift; y: box.y
+        width: box.width; height: box.height
+        opacity: box.opacity
+        live: true
     }
 }
