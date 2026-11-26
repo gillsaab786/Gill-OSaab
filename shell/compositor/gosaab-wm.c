@@ -4358,7 +4358,7 @@ int main(int argc, char *argv[]) {
 	wl_list_init(&server.text_inputs);
 	server.text_input_mgr = wlr_text_input_manager_v3_create(server.display);
 	server.new_text_input.notify = handle_new_text_input;
-	wl_signal_add(&server.text_input_mgr->events.text_input, &server.new_text_input);
+	wl_signal_add(&server.text_input_mgr->events.new_text_input, &server.new_text_input);
 	server.touch_down.notify = touch_down;
 	wl_signal_add(&server.cursor->events.touch_down, &server.touch_down);
 	server.touch_up.notify = touch_up;

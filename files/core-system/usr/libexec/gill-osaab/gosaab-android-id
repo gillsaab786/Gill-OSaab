@@ -1,0 +1,49 @@
+#!/usr/bin/python3 -I
+"""Print this PC's Google Services Framework (GSF) Android ID, which Google needs once to let
+Play Store sign in on Waydroid (google.com/android/uncertified). Runs as root through pkexec
+(polkit org.gillosaab.android-id) because Android's data folder belongs to Android's users.
+Reads only the calling user's own Waydroid data, and prints only the ID (digits)."""
+import os
+import pwd
+import shutil
+import sqlite3
+import sys
+import tempfile
+
+DB = ".local/share/waydroid/data/data/com.google.android.gsf/databases/gservices.db"
+
+
+def main():
+    uid = os.environ.get("PKEXEC_UID", str(os.getuid()))
+    if not uid.isdigit():
+        return 2
+    try:
+        home = pwd.getpwuid(int(uid)).pw_dir
+    except KeyError:
+        return 2
+    base = os.path.realpath(os.path.join(home, ".local/share/waydroid/data"))
+    path = os.path.realpath(os.path.join(home, DB))
+    # never follow a link out of the user's own Android data (this runs as root)
+    if not path.startswith(base + os.sep) or not os.path.isfile(path):
+        print("not-ready")
+        return 1
+    with tempfile.TemporaryDirectory() as tmp:
+        for suffix in ("", "-wal", "-shm"):
+            if os.path.isfile(path + suffix) and not os.path.islink(path + suffix):
+                shutil.copyfile(path + suffix, os.path.join(tmp, "g.db" + suffix))
+        try:
+            con = sqlite3.connect(os.path.join(tmp, "g.db"))
+            row = con.execute("select value from main where name = 'android_id'").fetchone()
+            con.close()
+        except sqlite3.Error:
+            row = None
+    value = str(row[0]) if row and row[0] is not None else ""
+    if not value.isdigit():
+        print("not-ready")
+        return 1
+    print(value)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

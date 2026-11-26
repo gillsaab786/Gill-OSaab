@@ -14,6 +14,17 @@
     </defaults>
     <annotate key="org.freedesktop.policykit.exec.path">/usr/bin/gosaab-config</annotate>
   </action>
+  <action id="org.gillosaab.android-id">
+    <description>Read this PC's Android ID for Google Play</description>
+    <message>Gill(OS) needs permission to read Android's device ID</message>
+    <icon_name>gill-osaab</icon_name>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/libexec/gill-osaab/gosaab-android-id</annotate>
+  </action>
   <action id="org.gillosaab.memory">
     <description>Hand back cached memory</description>
     <message>Gill(OS) needs permission to free up memory</message>

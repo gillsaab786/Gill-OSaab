@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Register with Google Play
+Comment=One-time registration so Play Store can sign in on this PC
+Exec=gosaab-android-register
+Icon=waydroid
+Type=Application
+Categories=System;
+Keywords=android;play store;google;certified;uncertified;sign in;

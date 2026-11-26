@@ -1889,9 +1889,13 @@ class Settings(QMainWindow):
         ])
         android = self.switch("features.conf", "android", default=True)
         android.toggled.connect(self.android_toggled)
+        register = QPushButton("Register…")
+        register.clicked.connect(lambda: self.backend.run(["gosaab-android-register"], wait=False))
         p.section("Android apps", [
             Row("Android (with Google Play)", "On: Android is installed and Android apps run in their own windows. "
                 "Off: Android and all Android apps and their data are removed (about 3 GB freed).", android),
+            Row("Google Play sign-in", "One time: registers this PC with Google so Play Store can sign in. "
+                "Copies the ID and opens Google's page for you.", register),
         ])
         self.security_section(p)
         win = QPushButton("Get Windows apps (Bottles)…")

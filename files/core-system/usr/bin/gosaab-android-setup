@@ -2,7 +2,8 @@
 # One-time Android (Waydroid) setup for Gill(OS) Core: Android with Google Play, each app in
 # its own resizable window, and ARM translation so phone-only (ARM) apps run on AMD/Intel.
 if [ "$(id -u)" != 0 ]; then
-  exec foot -T "Set up Android apps" -e sh -c 'pkexec /usr/bin/gosaab-android-setup; echo; read -p "Press Enter to close." x'
+  # after setup, the Google Play registration window opens by itself (step 2 is automatic)
+  exec foot -T "Set up Android apps" -e sh -c 'pkexec /usr/bin/gosaab-android-setup && { (gosaab-android-register >/dev/null 2>&1 &); echo "Next: the Google Play window opens. Follow its 3 steps."; }; echo; read -p "Press Enter to close." x'
 fi
 # gosaab-android-setup --remove : uninstall Android and all Android apps and their data
 if [ "${1:-}" = "--remove" ]; then
@@ -42,4 +43,4 @@ rm -rf "$tmp"
 systemctl restart gosaab-android-folders.service || true
 echo "4/4 Done. Android files: the Android folder in your home."
 echo "Done. Open an .apk to install it, or open Play Store from Launchpad."
-echo "Google Play needs a one-time device registration: https://www.google.com/android/uncertified"
+echo "Google Play needs a one-time registration: the 'Register with Google Play' window does it for you."
