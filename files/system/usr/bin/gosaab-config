@@ -2,6 +2,8 @@
 """Change a Gill(OS) system setting (used by Gill(OS) Settings).
 
   gosaab-config set <updates.conf|features.conf> <key> <value>
+  gosaab-config profile set <game> '<json>'     save a per-game profile (see gosaab_profiles.py)
+  gosaab-config profile remove <game>
 
 Only known keys and values are accepted.
 """
@@ -60,7 +62,40 @@ def validate(filename, key, value):
     return value in rule
 
 
+def profile(argv):
+    import json
+    import gosaab_profiles as gp
+    if os.geteuid() != 0 and not os.environ.get("GOSAAB_ETC"):
+        print("Needs admin rights (run through pkexec).", file=sys.stderr)
+        return 1
+    if len(argv) >= 2 and argv[0] == "remove" and gp.valid_key(argv[1]):
+        data = gp.load()
+        data.pop(argv[1], None)
+        gp.save(data)
+        return 0
+    if len(argv) == 3 and argv[0] == "set" and gp.valid_key(argv[1]):
+        try:
+            given = json.loads(argv[2])
+        except ValueError:
+            given = None
+        cleaned = gp.clean(given) if isinstance(given, dict) else {}
+        if not cleaned or len(cleaned) != len(given):
+            print("Not allowed: profile values", file=sys.stderr)
+            return 2
+        data = gp.load()
+        if len(data) >= 500 and argv[1] not in data:
+            print("Too many profiles", file=sys.stderr)
+            return 2
+        data[argv[1]] = cleaned
+        gp.save(data)
+        return 0
+    print(__doc__.strip(), file=sys.stderr)
+    return 2
+
+
 def main(argv):
+    if argv[:1] == ["profile"]:
+        return profile(argv[1:])
     if len(argv) != 4 or argv[0] != "set":
         print(__doc__.strip(), file=sys.stderr)
         return 2

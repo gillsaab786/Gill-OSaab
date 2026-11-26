@@ -26,10 +26,13 @@ STATUS = Path("/run/gill-osaab/lights.json")
 
 
 def gaming():
+    """(playing?, this game's own light colour from its profile or "")"""
     try:
-        return json.loads(POWER.read_text()).get("mode") == "game"
+        status = json.loads(POWER.read_text())
     except (OSError, ValueError):
-        return False
+        return False, ""
+    profile = ((status.get("game") or {}).get("profile") or {})
+    return status.get("mode") == "game", profile.get("lights", "") if isinstance(profile, dict) else ""
 
 
 def hhd_running():
@@ -72,7 +75,10 @@ def main(argv):
     last, stamp = None, 0.0
     while True:
         settings = {**gl.DEFAULTS, **read_conf(ETC / "features.conf")}
-        want = gl.wanted(settings, gaming())
+        playing, game_colour = gaming()
+        if playing and game_colour and settings.get("lights_mode") != "off":
+            settings = dict(settings, lights_mode="gaming", lights_game_color=game_colour)  # per-game colour
+        want = gl.wanted(settings, playing)
         info = status()
         if info["backend"] and ((want, info["device"]) != last or time.monotonic() - stamp > 30):
             # also every 30 s: the controller forgets its colour after sleep, and hhd may set its own

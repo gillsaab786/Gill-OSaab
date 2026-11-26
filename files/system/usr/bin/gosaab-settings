@@ -14,7 +14,7 @@ from gosaab_common import ETC, is_on, read_conf  # noqa: E402
 from PySide6.QtCore import (QEasingCurve, QProcess, QPropertyAnimation, QRectF, QSize, Qt,  # noqa: E402
                             Property, Signal)
 from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPainterPath, QPixmap  # noqa: E402
-from PySide6.QtWidgets import (QAbstractButton, QApplication, QButtonGroup, QComboBox, QFrame, QSlider,  # noqa: E402
+from PySide6.QtWidgets import (QAbstractButton, QProgressBar, QApplication, QButtonGroup, QComboBox, QFrame, QSlider,  # noqa: E402
                                QGraphicsOpacityEffect, QHBoxLayout, QLabel, QLineEdit, QListWidget,
                                QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QScrollArea, QSpinBox,
                                QStackedWidget, QVBoxLayout, QWidget)
@@ -47,6 +47,56 @@ class Backend:
         if os.geteuid() != 0 and shutil.which("pkexec"):
             cmd = ["pkexec", "/usr/bin/gosaab-config", "set", filename, key, value]
         return subprocess.run(cmd, check=False).returncode == 0
+
+    # ---- memory (Settings > Device)
+    MEMORY = "/usr/libexec/gill-osaab/gosaab-memory"
+
+    def memory(self):
+        try:
+            out = subprocess.run([self.MEMORY, "list"], capture_output=True, text=True, timeout=10, check=False)
+            return json.loads(out.stdout)
+        except (OSError, ValueError, subprocess.SubprocessError):
+            return {}
+
+    def memory_close(self, key):
+        return subprocess.run([self.MEMORY, "close", key], capture_output=True, timeout=30,
+                              check=False).returncode == 0
+
+    def memory_free(self):
+        try:
+            out = subprocess.run([self.MEMORY, "free"], capture_output=True, text=True, timeout=60, check=False)
+            return json.loads(out.stdout).get("freed", 0)
+        except (OSError, ValueError, subprocess.SubprocessError):
+            return 0
+
+    # ---- per-game profiles (Settings > Game Mode)
+    def game_profiles(self):
+        import gosaab_profiles
+        return gosaab_profiles.load()
+
+    def set_profile(self, key, profile):
+        cmd = ["gosaab-config", "profile", "set", key, json.dumps(profile)]
+        if os.geteuid() != 0 and shutil.which("pkexec"):
+            cmd = ["pkexec", "/usr/bin/gosaab-config"] + cmd[1:]
+        return subprocess.run(cmd, check=False).returncode == 0
+
+    def remove_profile(self, key):
+        cmd = ["gosaab-config", "profile", "remove", key]
+        if os.geteuid() != 0 and shutil.which("pkexec"):
+            cmd = ["pkexec", "/usr/bin/gosaab-config"] + cmd[1:]
+        return subprocess.run(cmd, check=False).returncode == 0
+
+    def known_games(self):
+        """Installed Steam games, plus the game running now (from Smart TDP's status)."""
+        import gosaab_profiles
+        games = gosaab_profiles.steam_games(Path.home())
+        try:
+            g = json.loads(Path("/run/gill-osaab/power.json").read_text()).get("game") or {}
+            if g.get("key") and all(k != g["key"] for k, _ in games):
+                games.insert(0, (g["key"], g.get("name") or g["key"].split(":", 1)[1]))
+        except (OSError, ValueError, AttributeError):
+            pass
+        return games
 
     def run(self, cmd, wait=True):
         if wait:
@@ -1600,6 +1650,12 @@ class Settings(QMainWindow):
         for n in hw.get("network", []):
             info.append(Row(n.get("kind", "Network"), f"{n['vendor']} {n['device']}", self.driver_label(n)))
         p.section("This device", info)
+        self.memory_holder = QWidget()
+        self.memory_lay = QVBoxLayout(self.memory_holder)
+        self.memory_lay.setContentsMargins(0, 0, 0, 0)
+        p.lay.addWidget(self.memory_holder)
+        p.keywords += ["memory", "ram", "free up ram", "zram", "compressed memory", "force close"]
+        self.fill_memory()
         parts = [Row(d["kind"], f"{d['vendor']} {d['device']}", self.driver_label(d)) for d in hw.get("parts", [])]
         parts += [Row("USB", name, QLabel("●  Connected")) for name in hw.get("usb", [])]
         if parts:
@@ -1624,6 +1680,66 @@ class Settings(QMainWindow):
                                   "(handhelds and laptops that support it).", limit)])
         p.finish()
         return p
+
+    def fill_memory(self, note=""):
+        while self.memory_lay.count():
+            w = self.memory_lay.takeAt(0).widget()
+            if w:
+                w.deleteLater()
+        m = self.backend.memory()
+        if not m.get("total"):
+            return
+        gb = lambda b: f"{b / 1024 ** 3:.1f} GB"  # noqa: E731
+        bar = QProgressBar()
+        bar.setRange(0, 1000)
+        bar.setValue(int(m["used"] / m["total"] * 1000))
+        bar.setTextVisible(False)
+        bar.setFixedWidth(220)
+        free_btn = QPushButton("Free up RAM")
+        free_btn.setObjectName("pill")
+        free_btn.clicked.connect(self.free_memory)
+        rows = [Row("Memory in use", f"{gb(m['used'])} of {gb(m['total'])} · {gb(m['available'])} free", bar)]
+        z = m.get("zram")
+        if z:
+            rows.append(Row("Compressed memory", f"{gb(z['stored'])} of idle memory kept in {gb(z['ram'])} – "
+                            f"saves {gb(z['saved'])}", QLabel("●  On")))
+        else:
+            rows.append(Row("Compressed memory", "Starts working after the next restart."))
+        rows.append(Row("Hand back cached memory", note or "Memory the system kept as cache for speed goes back "
+                        "to free memory.", free_btn))
+        p_rows = []
+        for a in m.get("apps", [])[:10]:
+            if a.get("canClose"):
+                b = QPushButton("Force Close")
+                b.setObjectName("pill")
+                b.clicked.connect(lambda _=False, k=a["key"], n=a["name"]: self.close_app_memory(k, n))
+            else:
+                b = QLabel("System")
+                b.setObjectName("note")
+            p_rows.append(Row(a["name"], f"{gb(a['bytes'])} · {a['kind']}", b))
+        box = QWidget()
+        bl = QVBoxLayout(box)
+        bl.setContentsMargins(0, 0, 0, 0)
+        for title, rws in (("MEMORY", rows), ("USING THE MOST MEMORY", p_rows)):
+            if not rws:
+                continue
+            lab = QLabel(title)
+            lab.setObjectName("sectionLabel")
+            bl.addWidget(lab)
+            bl.addWidget(Card(rws))
+        self.memory_lay.addWidget(box)
+
+    def free_memory(self):
+        freed = self.backend.memory_free()
+        haptic("success")
+        self.fill_memory(f"Freed {freed / 1024 ** 3:.1f} GB." if freed > 50 * 1024 ** 2 else "Nothing more to free.")
+
+    def close_app_memory(self, key, name):
+        if QMessageBox.question(self, "Force Close", f"Close {name} now? Unsaved work in it will be lost.") \
+                != QMessageBox.Yes:
+            return
+        self.backend.memory_close(key)
+        self.fill_memory()
 
     def driver_search_section(self, p):
         box = QWidget()
@@ -2343,6 +2459,7 @@ class Settings(QMainWindow):
                 + ("" if fg_ready else "  (Not installed on this system.)"), self.fg),
         ])
         self.smart_power_section(p)
+        self.profiles_section(p)
         self.fps_section(p)
         decky = p.button("Install Decky Loader (Game Mode plugins, notifications)")
         decky.clicked.connect(lambda: b.run(["foot", "-e", "sh", "-c",
@@ -2352,6 +2469,112 @@ class Settings(QMainWindow):
         switch.clicked.connect(lambda: b.run(["gosaab-game-mode"], wait=False))
         p.finish()
         return p
+
+    FPS_CHOICES = [(0, "No cap"), (30, "30 FPS"), (40, "40 FPS"), (45, "45 FPS"), (60, "60 FPS"), (90, "90 FPS"),
+                   (120, "120 FPS")]
+    GPU_CHOICES = [("auto", "Automatic"), ("dedicated", "Dedicated graphics"), ("integrated", "Integrated (saves battery)")]
+
+    def profiles_section(self, p):
+        """Per-game profiles: TDP, graphics chip, FPS cap and stick-light colour for each game."""
+        p.keywords += ["per-game", "game profile", "profiles", "fps cap", "frame limit", "per game tdp"]
+        self.profiles_holder = QWidget()
+        self.profiles_lay = QVBoxLayout(self.profiles_holder)
+        self.profiles_lay.setContentsMargins(0, 0, 0, 0)
+        p.lay.addWidget(self.profiles_holder)
+        self.fill_profiles()
+
+    def fill_profiles(self):
+        while self.profiles_lay.count():
+            w = self.profiles_lay.takeAt(0).widget()
+            if w:
+                w.deleteLater()
+        profiles = self.backend.game_profiles()
+        fps_name = dict(self.FPS_CHOICES)
+        gpu_name = dict(self.GPU_CHOICES)
+        rows = []
+        for key, prof in sorted(profiles.items(), key=lambda kv: kv[1].get("name", kv[0]).lower()):
+            parts = [f"{prof['tdp']} W" if prof.get("tdp") else "Smart TDP", fps_name.get(prof.get("fps", 0), ""),
+                     gpu_name.get(prof.get("gpu", "auto"), "")]
+            if prof.get("lights"):
+                parts.append("lights #" + prof["lights"])
+            btns = QWidget()
+            bl = QHBoxLayout(btns)
+            bl.setContentsMargins(0, 0, 0, 0)
+            edit = QPushButton("Edit")
+            edit.setObjectName("pill")
+            edit.clicked.connect(lambda _=False, k=key: self.edit_profile(k))
+            rm = QPushButton("Remove")
+            rm.setObjectName("pill")
+            rm.clicked.connect(lambda _=False, k=key: (self.backend.remove_profile(k), self.fill_profiles()))
+            bl.addWidget(edit)
+            bl.addWidget(rm)
+            rows.append(Row(prof.get("name", key), " · ".join(x for x in parts if x), btns))
+        if not rows:
+            rows = [Row("No game profiles yet", "Add one below: it applies by itself whenever that game runs.")]
+        # editor
+        self.profile_game = QComboBox()
+        for key, name in self.backend.known_games():
+            self.profile_game.addItem(name, key)
+        if self.profile_game.count() == 0:
+            self.profile_game.addItem("Start a game, then come back here", "")
+        self.profile_tdp = QSpinBox()
+        self.profile_tdp.setRange(0, 120)
+        self.profile_tdp.setSuffix(" W")
+        self.profile_tdp.setSpecialValueText("Smart TDP")
+        self.profile_gpu = QComboBox()
+        for v, label in self.GPU_CHOICES:
+            self.profile_gpu.addItem(label, v)
+        self.profile_fps = QComboBox()
+        for v, label in self.FPS_CHOICES:
+            self.profile_fps.addItem(label, v)
+        self.profile_lights = QComboBox()
+        self.profile_lights.addItem("Same as Controller Lights", "")
+        for c, n in LIGHT_COLORS:
+            self.profile_lights.addItem(n, c)
+        save = QPushButton("Save profile")
+        save.setObjectName("primary")
+        save.clicked.connect(self.save_profile)
+        editor = [Row("Game", "Installed Steam games and the game running now.", self.profile_game),
+                  Row("Power (TDP)", "Smart TDP picks by itself; or set the watts for this game.", self.profile_tdp),
+                  Row("Graphics", "Which graphics chip this game uses (PCs with two).", self.profile_gpu),
+                  Row("FPS cap", "Steadier frames and longer battery (Game Mode).", self.profile_fps)]
+        if self.backend.lights_status().get("ally"):
+            editor.append(Row("Stick lights", "This game's colour (ROG Ally).", self.profile_lights))
+        editor.append(Row("", "", save))
+        box = QWidget()
+        bl = QVBoxLayout(box)
+        bl.setContentsMargins(0, 0, 0, 0)
+        for title, rws in (("PER-GAME PROFILES", rows), ("ADD OR CHANGE A PROFILE", editor)):
+            lab = QLabel(title)
+            lab.setObjectName("sectionLabel")
+            bl.addWidget(lab)
+            bl.addWidget(Card(rws))
+        self.profiles_lay.addWidget(box)
+
+    def edit_profile(self, key):
+        prof = self.backend.game_profiles().get(key, {})
+        i = self.profile_game.findData(key)
+        if i < 0:
+            self.profile_game.insertItem(0, prof.get("name", key), key)
+            i = 0
+        self.profile_game.setCurrentIndex(i)
+        self.profile_tdp.setValue(prof.get("tdp", 0))
+        self.profile_gpu.setCurrentIndex(max(0, self.profile_gpu.findData(prof.get("gpu", "auto"))))
+        self.profile_fps.setCurrentIndex(max(0, self.profile_fps.findData(prof.get("fps", 0))))
+        self.profile_lights.setCurrentIndex(max(0, self.profile_lights.findData(prof.get("lights", ""))))
+
+    def save_profile(self):
+        key = self.profile_game.currentData()
+        if not key:
+            return
+        prof = {"name": self.profile_game.currentText()[:80], "tdp": self.profile_tdp.value(),
+                "gpu": self.profile_gpu.currentData(), "fps": self.profile_fps.currentData(),
+                "lights": self.profile_lights.currentData() or ""}
+        if self.backend.set_profile(key, prof):
+            haptic("success")
+            self.fill_profiles()
+        else:
+            QMessageBox.warning(self, "Game profile", "Couldn't save the profile.")
 
     def page_optional(self):
         p = Page("Optional Features")
@@ -2462,6 +2685,9 @@ QComboBox { background: #34343a; color: #f2f2f7; border: none; border-radius: 9p
 QComboBox::drop-down { border: none; width: 24px; }
 QComboBox QAbstractItemView { background: #2c2c30; color: #f2f2f7; border: 1px solid #3a3a40; border-radius: 8px;
     selection-background-color: #1fb6c9; padding: 4px; }
+QProgressBar { background: #3a3a40; border: none; border-radius: 4px; max-height: 8px; }
+QProgressBar::chunk { background: #1fb6c9; border-radius: 4px; }
+QSpinBox { background: #34343a; color: #f2f2f7; border: none; border-radius: 9px; padding: 5px 8px; }
 QSlider::groove:horizontal { height: 6px; background: #3a3a40; border-radius: 3px; }
 QSlider::sub-page:horizontal { background: #1fb6c9; border-radius: 3px; }
 QSlider::handle:horizontal { background: #ffffff; width: 22px; height: 22px; margin: -8px 0; border-radius: 11px; }

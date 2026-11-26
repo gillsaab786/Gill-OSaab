@@ -16,6 +16,11 @@ Qt Quick via Quickshell. Runs on the Gill(OS) Core image (minimal Fedora bootc).
   workspace, so use the ci-shots branch.
 
 ## Next up (asked by Jas, do these first)
+Done 2026-11-26 (final): compressed memory (zram-generator, zstd, swappiness 180); Settings > Device >
+Memory (gosaab-memory: PSS per app, zram savings, Force Close, Free up RAM via gosaab-memory-root);
+per-game profiles (gosaab_profiles: Steam AppId/.exe/emulator; TDP, graphics chip, FPS cap via gamescope
+atom, Ally light colour; gosaab-config profile set/remove). Not chosen: oomd, Game Boost, backup, signed
+updates, Find My, battery history.
 Done 2026-11-26: renamed Gill(OS) (display only; ids/paths/XDG_CURRENT_DESKTOP keep gill-osaab; os-release
 NAME/PRETTY_NAME); app menu (right-click/hold in Dock + Launchpad: Open/Quit/Keep in Dock/Hide/App Info);
 App Info (gosaab-appinfo: Android/Windows/Linux, version, force close, clear cache/data, uninstall; deletes only

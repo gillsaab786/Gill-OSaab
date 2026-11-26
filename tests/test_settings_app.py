@@ -147,6 +147,35 @@ class FakeBackend:
     def lights_status(self):
         return getattr(self, "lights", {"ally": False})
 
+    def memory(self):
+        g = 1024 ** 3
+        return {"total": 16 * g, "available": 9 * g, "used": 7 * g, "cached": 3 * g,
+                "zram": {"stored": 3 * g, "compressed": g, "ram": g, "saved": 2 * g},
+                "apps": [{"key": "exe:brave", "name": "Brave", "kind": "Linux", "bytes": 2 * g, "canClose": True},
+                         {"key": "desktop", "name": "Gill(OS) desktop", "kind": "System", "bytes": g // 2,
+                          "canClose": False}]}
+
+    def memory_close(self, key):
+        self.calls.append(("close", key))
+        return True
+
+    def memory_free(self):
+        return 600 * 1024 ** 2
+
+    def game_profiles(self):
+        return dict(getattr(self, "profiles", {}))
+
+    def set_profile(self, key, prof):
+        self.profiles = {**getattr(self, "profiles", {}), key: prof}
+        return True
+
+    def remove_profile(self, key):
+        self.profiles = {k: v for k, v in getattr(self, "profiles", {}).items() if k != key}
+        return True
+
+    def known_games(self):
+        return [("steam:1245620", "ELDEN RING"), ("steam:1091500", "Cyberpunk 2077")]
+
     def drivers(self, check=False):
         return {"parts": [{"category": "Graphics", "name": "AMD Phoenix3", "driver": "amdgpu"},
                           {"category": "Wi-Fi", "name": "MEDIATEK MT7922", "driver": "mt7921e"},
@@ -685,3 +714,46 @@ class GillOSRound(unittest.TestCase):
         w.go_to("Drivers Update")
         self.assertIn("drivers", w.update_buttons)
         self.assertIn("firmware", w.update_buttons)
+
+
+@unittest.skipUnless(HAVE_QT, "PySide6 not installed")
+class FinalVersion(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        from PySide6.QtWidgets import QApplication
+        cls.gs = load("usr/bin/gosaab-settings")
+        cls.app = QApplication.instance() or QApplication([])
+
+    def test_memory_view_and_force_close(self):
+        from unittest import mock
+        b = FakeBackend()
+        w = self.gs.Settings(b)
+        texts = [l.text() for l in w.memory_holder.findChildren(self.gs.QLabel)]
+        self.assertTrue(any("7.0 GB of 16.0 GB" in t for t in texts))
+        self.assertTrue(any("saves 2.0 GB" in t for t in texts))
+        closes = [x for x in w.memory_holder.findChildren(self.gs.QPushButton) if x.text() == "Force Close"]
+        self.assertEqual(len(closes), 1)  # the desktop itself can't be closed
+        with mock.patch.object(self.gs.QMessageBox, "question", return_value=self.gs.QMessageBox.Yes):
+            closes[0].click()
+        self.assertIn(("close", "exe:brave"), b.calls)
+        w.free_memory()
+        texts = [l.text() for l in w.memory_holder.findChildren(self.gs.QLabel)]
+        self.assertTrue(any("Freed 0.6 GB" in t for t in texts))
+
+    def test_per_game_profile_saved_edited_removed(self):
+        b = FakeBackend()
+        b.lights = {"ally": True}
+        w = self.gs.Settings(b)
+        w.profile_game.setCurrentIndex(w.profile_game.findData("steam:1245620"))
+        w.profile_tdp.setValue(15)
+        w.profile_fps.setCurrentIndex(w.profile_fps.findData(40))
+        w.profile_gpu.setCurrentIndex(w.profile_gpu.findData("dedicated"))
+        w.profile_lights.setCurrentIndex(w.profile_lights.findData("ff2d55"))
+        w.save_profile()
+        self.assertEqual(b.profiles["steam:1245620"], {"name": "ELDEN RING", "tdp": 15, "gpu": "dedicated",
+                                                       "fps": 40, "lights": "ff2d55"})
+        w.edit_profile("steam:1245620")
+        self.assertEqual(w.profile_tdp.value(), 15)
+        b.remove_profile("steam:1245620")
+        w.fill_profiles()
+        self.assertEqual(b.profiles, {})

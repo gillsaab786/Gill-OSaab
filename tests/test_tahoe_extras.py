@@ -144,3 +144,65 @@ class GroupShortcut(unittest.TestCase):
     def test_translation_layers_update_together(self):
         uc = load("usr/bin/gosaab-update-component")
         self.assertEqual(uc.GROUPS["translation"], ["android", "proton", "wine", "containers"])
+
+
+class GameProfiles(unittest.TestCase):
+    def test_which_game_is_running(self):
+        import gosaab_profiles as gp
+        self.assertEqual(gp.current_game(["steam -gamepadui", "reaper SteamLaunch AppId=1245620 -- x"])[0], "steam:1245620")
+        self.assertEqual(gp.current_game(["wine64-preloader C:\\Games\\HK\\hollow_knight.exe"])[0], "exe:hollow_knight.exe")
+        self.assertEqual(gp.current_game(["C:\\windows\\system32\\explorer.exe /desktop"])[0], "")
+        self.assertEqual(gp.current_game(["/app/bin/retroarch -L core.so"])[0], "app:retroarch")
+
+    def test_profiles_validated_on_save(self):
+        import gosaab_profiles as gp
+        path = Path(tempfile.mkdtemp()) / "game-profiles.json"
+        self.assertEqual(gp.clean({"tdp": 15, "fps": 40, "gpu": "dedicated", "lights": "ff2d55", "evil": 1}),
+                         {"tdp": 15, "fps": 40, "gpu": "dedicated", "lights": "ff2d55"})
+        self.assertEqual(gp.clean({"tdp": 999, "fps": 7, "gpu": "x", "lights": "#ff"}), {})
+        gp.save({"steam:1": {"name": "A", "tdp": 10}}, path)
+        path.write_text(path.read_text().replace("}}", '}, "../etc/passwd": {"tdp": 5}}'))
+        self.assertEqual(gp.load(path), {"steam:1": {"name": "A", "tdp": 10}})
+        self.assertFalse(gp.valid_key("steam:abc"))
+
+    def test_config_tool_profile_command(self):
+        cfg = load("usr/bin/gosaab-config")
+        import gosaab_profiles as gp
+        d = Path(tempfile.mkdtemp())
+        with mock.patch.object(gp, "PATH", d / "p.json"), mock.patch.dict(os.environ, {"GOSAAB_ETC": str(d)}):
+            self.assertEqual(cfg.main(["profile", "set", "steam:42", '{"name": "Game", "tdp": 12, "fps": 60}']), 0)
+            self.assertEqual(gp.load(d / "p.json")["steam:42"]["tdp"], 12)
+            self.assertEqual(cfg.main(["profile", "set", "steam:42", '{"tdp": 500}']), 2)
+            self.assertEqual(cfg.main(["profile", "set", "steam:42", '{"tdp": 10, "shell": "rm"}']), 2)
+            self.assertEqual(cfg.main(["profile", "remove", "steam:42"]), 0)
+            self.assertEqual(gp.load(d / "p.json"), {})
+
+    def test_steam_library_scan(self):
+        import gosaab_profiles as gp
+        home = Path(tempfile.mkdtemp())
+        apps = home / ".local/share/Steam/steamapps"
+        apps.mkdir(parents=True)
+        (apps / "appmanifest_1245620.acf").write_text('"AppState"\n{\n "appid" "1245620"\n "name" "ELDEN RING"\n}')
+        (apps / "appmanifest_1493710.acf").write_text('"AppState"\n{\n "appid" "1493710"\n "name" "Proton Experimental"\n}')
+        self.assertEqual(gp.steam_games(home), [("steam:1245620", "ELDEN RING")])
+
+
+class Memory(unittest.TestCase):
+    def test_memory_listing(self):
+        mem = load("usr/libexec/gill-osaab/gosaab-memory")
+        d = Path(tempfile.mkdtemp())
+        (d / "meminfo").write_text("MemTotal: 16000000 kB\nMemAvailable: 9000000 kB\nCached: 2000000 kB\n")
+        self.assertEqual(mem.meminfo(d / "meminfo")["MemTotal"], 16000000 * 1024)
+        (d / "zram0").mkdir()
+        (d / "zram0/mm_stat").write_text("3000 1000 1100 0 1100 0 0 0 0\n")
+        self.assertEqual(mem.zram(d), {"stored": 3000, "compressed": 1000, "ram": 1100, "saved": 1900})
+        data = mem.listing()  # this machine: real numbers, this test's own process listed under some app
+        self.assertGreater(data["total"], 0)
+        self.assertTrue(all("canClose" in a for a in data["apps"]))
+        self.assertFalse(mem.close("desktop")["ok"])
+
+    def test_zram_and_memory_settings_shipped(self):
+        from helpers import ROOT
+        conf = (ROOT / "files/system/usr/lib/systemd/zram-generator.conf").read_text()
+        self.assertIn("compression-algorithm = zstd", conf)
+        self.assertIn("vm.swappiness = 180", (ROOT / "files/system/usr/lib/sysctl.d/60-gill-osaab.conf").read_text())

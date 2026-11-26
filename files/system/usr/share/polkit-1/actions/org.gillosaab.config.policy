@@ -14,6 +14,17 @@
     </defaults>
     <annotate key="org.freedesktop.policykit.exec.path">/usr/bin/gosaab-config</annotate>
   </action>
+  <action id="org.gillosaab.memory">
+    <description>Hand back cached memory</description>
+    <message>Gill(OS) needs permission to free up memory</message>
+    <icon_name>gill-osaab</icon_name>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/libexec/gill-osaab/gosaab-memory-root</annotate>
+  </action>
   <action id="org.gillosaab.updates-now">
     <description>Run Gill(OS) updates now</description>
     <message>Gill(OS) needs permission to run updates</message>

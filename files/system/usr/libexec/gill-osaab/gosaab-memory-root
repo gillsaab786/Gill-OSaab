@@ -1,0 +1,7 @@
+#!/bin/sh
+# (admin, via pkexec from Settings > Device > Memory) hand back cached memory now:
+# write out pending data, drop clean file caches and tidy memory into large free blocks.
+sync
+echo 1 > /proc/sys/vm/drop_caches
+[ -w /proc/sys/vm/compact_memory ] && echo 1 > /proc/sys/vm/compact_memory
+exit 0

@@ -56,8 +56,20 @@ def gpu_change_message(was_active, now_active, dgpu, igpu, users):
     return None
 
 
+def set_fps_cap(fps):
+    """Game Mode: the per-game FPS cap, through gamescope's frame limiter (what Steam's own slider uses)."""
+    if not shutil.which("xprop"):
+        return False
+    cmd = ["xprop", "-root", "-display", os.environ.get("DISPLAY", ":0")]
+    cmd += ["-f", "GAMESCOPE_FPS_LIMIT", "32c", "-set", "GAMESCOPE_FPS_LIMIT", str(fps)] if fps else \
+        ["-remove", "GAMESCOPE_FPS_LIMIT"]
+    return subprocess.run(cmd, capture_output=True, timeout=5, check=False).returncode == 0
+
+
 def watch():
     was = None
+    fps_applied = 0
+    in_game_mode = bool(os.environ.get("GAMESCOPE_WAYLAND_DISPLAY")) or os.environ.get("XDG_CURRENT_DESKTOP") == "gamescope"
     while True:
         data = load()
         data["video"] = video_playing()
@@ -66,6 +78,11 @@ def watch():
             st = json.loads(POWER.read_text())
         except (OSError, ValueError):
             st = {}
+        if in_game_mode:
+            prof = ((st.get("game") or {}).get("profile") or {})
+            fps = prof.get("fps", 0) if isinstance(prof, dict) and st.get("mode") == "game" else 0
+            if fps != fps_applied and set_fps_cap(fps):
+                fps_applied = fps
         hyb = st.get("hybrid")
         if hyb:
             now = bool(st.get("dgpu_active"))

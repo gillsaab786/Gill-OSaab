@@ -1,0 +1,187 @@
+#!/usr/bin/python3
+"""Memory (RAM) for Settings > Device: what is using it, and closing apps.
+
+  gosaab-memory list           JSON: totals, compressed memory (zram) and apps by memory used
+  gosaab-memory close NAME     close one app from the list (asks first, then forces after 3 s)
+  gosaab-memory free           close nothing; ask the system to hand back cached memory now
+
+Memory per app is PSS (shared memory split fairly between the apps sharing it). Only your own
+apps can be closed; the desktop itself never is.
+"""
+import json
+import os
+import re
+import signal
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+PROC = Path("/proc")
+CGROUP = Path("/sys/fs/cgroup")
+DESKTOP = {"gosaab-wm", "qs", "quickshell", "pipewire", "pipewire-pulse", "wireplumber", "Xwayland",
+           "xwayland-satellite", "dbus-daemon", "dbus-broker", "dbus-broker-launch", "systemd", "swaybg",
+           "swayidle", "xdg-desktop-portal", "xdg-desktop-portal-wlr", "xdg-desktop-portal-gtk",
+           "xdg-document-portal", "xdg-permission-store", "gnome-keyring-daemon", "at-spi-bus-launcher",
+           "at-spi2-registryd", "gvfsd", "gvfsd-fuse", "gosaab-hotkeyd", "lxqt-policykit-agent", "wvkbd-mobintl",
+           "python3", "sh", "bash", "sleep", "wl-paste", "gamescope", "gamescope-wl", "mangoapp", "sddm",
+           "gosaab-session", "systemd-run"}
+LABELS = {"brave": "Brave", "firefox": "Firefox", "chrome": "Chrome", "steam": "Steam", "steamwebhelper": "Steam",
+          "nautilus": "Files", "vlc": "VLC", "foot": "Terminal", "gosaab-settings": "Settings"}
+
+
+def meminfo(path=PROC / "meminfo"):
+    out = {}
+    for line in path.read_text().splitlines():
+        m = re.match(r"(\w+):\s+(\d+)", line)
+        if m:
+            out[m.group(1)] = int(m.group(2)) * 1024
+    return out
+
+
+def zram(root=Path("/sys/block")):
+    """Compressed memory: how much was put in, how small it got, RAM it really uses."""
+    orig = compr = used = 0
+    for d in root.glob("zram*"):
+        try:
+            nums = [int(x) for x in (d / "mm_stat").read_text().split()[:3]]
+        except (OSError, ValueError):
+            continue
+        orig, compr, used = orig + nums[0], compr + nums[1], used + nums[2]
+    return {"stored": orig, "compressed": compr, "ram": used, "saved": max(0, orig - used)} if orig else None
+
+
+def pss(pid_dir):
+    try:
+        m = re.search(r"^Pss:\s+(\d+)", (pid_dir / "smaps_rollup").read_text(), re.M)
+        return int(m.group(1)) * 1024 if m else 0
+    except OSError:
+        return 0
+
+
+def app_of(pid_dir):
+    """(group key, display name, kind) for one process."""
+    try:
+        cg = (pid_dir / "cgroup").read_text()
+    except OSError:
+        cg = ""
+    m = re.search(r"app-flatpak-([\w.\-]+?)-\d+\.scope", cg)
+    if m:
+        return f"flatpak:{m.group(1)}", m.group(1).split(".")[-1].replace("_", " ").title(), "Linux"
+    try:
+        env = (pid_dir / "environ").read_bytes().split(b"\0")
+        prefix = next((e[11:].decode(errors="replace") for e in env if e.startswith(b"WINEPREFIX=")), "")
+    except OSError:
+        prefix = ""
+    if prefix:
+        return f"wine:{prefix}", Path(prefix).name.replace("-", " ").title(), "Windows"
+    try:
+        exe = Path(os.readlink(pid_dir / "exe")).name
+    except OSError:
+        exe = ""
+    try:
+        comm = (pid_dir / "comm").read_text().strip()
+    except OSError:
+        comm = ""
+    name = exe or comm
+    if not name or name in DESKTOP or comm in DESKTOP:
+        return "desktop", "Gill(OS) desktop", "System"
+    base = re.sub(r"[-_](bin|browser|stable)$", "", name.lower())
+    return f"exe:{base}", LABELS.get(base, LABELS.get(comm.lower(), name)), "Linux"
+
+
+def android_ram():
+    """The Android system (Waydroid) runs as its own container; read its memory from its cgroup."""
+    for d in CGROUP.glob("lxc.payload.waydroid*"):
+        try:
+            return int((d / "memory.current").read_text())
+        except (OSError, ValueError):
+            continue
+    return 0
+
+
+def apps():
+    uid = os.getuid()
+    groups = {}
+    for d in PROC.iterdir():
+        if not d.name.isdigit() or int(d.name) == os.getpid():
+            continue
+        try:
+            if d.stat().st_uid != uid:
+                continue
+        except OSError:
+            continue
+        size = pss(d)
+        if not size:
+            continue
+        key, name, kind = app_of(d)
+        g = groups.setdefault(key, {"key": key, "name": name, "kind": kind, "bytes": 0, "pids": []})
+        g["bytes"] += size
+        g["pids"].append(int(d.name))
+    android = android_ram()
+    if android:
+        groups["android"] = {"key": "android", "name": "Android (all Android apps)", "kind": "Android",
+                             "bytes": android, "pids": []}
+    out = sorted(groups.values(), key=lambda g: -g["bytes"])
+    for g in out:
+        g["canClose"] = g["key"] != "desktop"
+    return out
+
+
+def listing():
+    mi = meminfo()
+    total, avail = mi.get("MemTotal", 0), mi.get("MemAvailable", 0)
+    return {"total": total, "available": avail, "used": total - avail,
+            "cached": mi.get("Cached", 0) + mi.get("Buffers", 0),
+            "swapTotal": mi.get("SwapTotal", 0), "swapFree": mi.get("SwapFree", 0),
+            "zram": zram(), "apps": apps()[:20]}
+
+
+def close(key):
+    if key == "desktop":
+        return {"ok": False, "message": "The desktop can't be closed."}
+    if key == "android":
+        rc = subprocess.run(["waydroid", "session", "stop"], capture_output=True, timeout=60, check=False).returncode
+        return {"ok": rc == 0, "message": "" if rc == 0 else "Couldn't stop Android."}
+    group = next((g for g in apps() if g["key"] == key), None)
+    if not group:
+        return {"ok": False, "message": "It isn't running."}
+    for sig, wait in ((signal.SIGTERM, 3.0), (signal.SIGKILL, 0.5)):
+        for pid in group["pids"]:
+            try:
+                os.kill(pid, sig)
+            except OSError:
+                pass
+        end = time.monotonic() + wait
+        while time.monotonic() < end and any(Path(f"/proc/{p}").exists() for p in group["pids"]):
+            time.sleep(0.1)
+        if not any(Path(f"/proc/{p}").exists() for p in group["pids"]):
+            break
+    return {"ok": True, "message": ""}
+
+
+def free():
+    before = meminfo().get("MemAvailable", 0)
+    subprocess.run(["pkexec", "/usr/libexec/gill-osaab/gosaab-memory-root"], capture_output=True, timeout=60,
+                   check=False)
+    after = meminfo().get("MemAvailable", 0)
+    return {"ok": True, "freed": max(0, after - before)}
+
+
+def main(argv):
+    if argv == ["list"]:
+        print(json.dumps(listing()))
+        return 0
+    if len(argv) == 2 and argv[0] == "close" and re.fullmatch(r"[\w:.\-/ ]{1,300}", argv[1]):
+        r = close(argv[1])
+        print(json.dumps(r))
+        return 0 if r["ok"] else 1
+    if argv == ["free"]:
+        print(json.dumps(free()))
+        return 0
+    print(__doc__.strip(), file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

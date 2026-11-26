@@ -140,6 +140,10 @@ modules:
         - vulkan-tools
         - gamemode
         - mokutil
+        # memory: compressed swap in RAM (zram)
+        - zram-generator
+        # per-game FPS cap in Game Mode (sets gamescope's frame limiter)
+        - xprop
         # on-screen keyboard for touch screens
         - wvkbd
 
