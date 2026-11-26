@@ -36,6 +36,7 @@ jobs:
               sleep 10
               W=$(xdotool search --onlyvisible --name "Torrent Search Engine" | head -1)
               [ -n "$W" ] && xdotool windowmove $W 0 0 windowsize $W ${1%x*} ${1#*x}
+              [ -n "$W" ] && xdotool windowfocus $W
               sleep 3; import -window root shots/$2-1-start.png
               xdotool key ctrl+f; sleep 0.6; xdotool type --delay 50 "ubuntu 24.04"; xdotool key Return
               sleep 25; import -window root shots/$2-2-results.png

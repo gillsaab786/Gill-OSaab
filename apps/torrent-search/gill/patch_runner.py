@@ -53,7 +53,26 @@ if "#include <string.h>" not in s:
 
 m = re.search(r"GtkWindow\* window =\s*GTK_WINDOW\(gtk_application_window_new\(GTK_APPLICATION\(application\)\)\);", s)
 assert m, "window creation not found"
-s = s[:m.end()] + "\n  gtk_window_set_decorated(window, FALSE);  // Gill(OS) buttons are drawn by the app" + s[m.end():]
+s = s[:m.end()] + """
+  gtk_window_set_decorated(window, FALSE);  // Gill(OS) buttons are drawn by the app
+  {  // see-through window: Gill(OS) frosts the desktop behind it (Liquid Glass)
+    GdkVisual* rgba = gdk_screen_get_rgba_visual(gtk_window_get_screen(window));
+    if (rgba != nullptr) gtk_widget_set_visual(GTK_WIDGET(window), rgba);
+    gtk_widget_set_app_paintable(GTK_WIDGET(window), TRUE);
+  }""" + s[m.end():]
+
+# Flutter draws on a clear background (if this Flutter has the call)
+import glob, os
+heads = glob.glob(os.path.join(os.environ.get("FLUTTER_ROOT", "/opt/flutter"),
+                               "bin/cache/artifacts/engine/linux-x64*/flutter_linux/fl_view.h"))
+has_bg = any("fl_view_set_background_color" in open(h).read() for h in heads)
+vm = re.search(r"FlView\* (\w+) = fl_view_new\(\w+\);", s)
+if has_bg and vm:
+    s = s[:vm.end()] + f"""
+  {{ GdkRGBA clear = {{0, 0, 0, 0}}; fl_view_set_background_color({vm.group(1)}, &clear); }}""" + s[vm.end():]
+    print("transparent background on")
+else:
+    print("no fl_view_set_background_color: opaque background", heads)
 
 s = s.replace("gboolean use_header_bar = TRUE;", "gboolean use_header_bar = FALSE;")
 s = re.sub(r"gtk_window_set_default_size\(window, \d+, \d+\);",

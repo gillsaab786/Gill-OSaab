@@ -126,10 +126,49 @@ class _DesktopShellState extends State<DesktopShell> {
   /// Fingers on the screen in the last 10 minutes: bigger window buttons (like the rest of Gill(OS)).
   bool get _touchMode => DateTime.now().difference(_lastTouch) < const Duration(minutes: 10);
 
+  @override
+  void initState() {
+    super.initState();
+    HardwareKeyboard.instance.addHandler(_onKey);
+  }
+
+  @override
+  void dispose() {
+    HardwareKeyboard.instance.removeHandler(_onKey);
+    super.dispose();
+  }
+
+  bool get _typing => FocusManager.instance.primaryFocus?.context?.widget is EditableText;
+
+  /// Keyboard shortcuts, wherever the focus is: Ctrl+F or / search, Ctrl+1/2/3 switch, Ctrl+Q quit.
+  bool _onKey(KeyEvent e) {
+    if (e is! KeyDownEvent) return false;
+    final ctrl = HardwareKeyboard.instance.isControlPressed;
+    final k = e.logicalKey;
+    if (ctrl && k == LogicalKeyboardKey.keyF) {
+      _focusSearch();
+    } else if (ctrl && k == LogicalKeyboardKey.digit1) {
+      _select(0);
+    } else if (ctrl && k == LogicalKeyboardKey.digit2) {
+      _select(1);
+    } else if (ctrl && k == LogicalKeyboardKey.digit3) {
+      _select(2);
+    } else if (ctrl && k == LogicalKeyboardKey.keyQ) {
+      GillWindow.call('close');
+    } else if (!ctrl && k == LogicalKeyboardKey.slash && !_typing) {
+      _focusSearch();
+    } else if (k == LogicalKeyboardKey.escape && _typing) {
+      FocusManager.instance.primaryFocus?.unfocus();
+    } else {
+      return false;
+    }
+    return true;
+  }
+
   void _select(int i) {
     if (i == _tab) return;
     HapticFeedback.selectionClick();
-    FocusManager.instance.primaryFocus?.unfocus();
+    if (_typing) FocusManager.instance.primaryFocus?.unfocus();
     setState(() => _tab = i);
   }
 
@@ -142,27 +181,7 @@ class _DesktopShellState extends State<DesktopShell> {
   Widget build(BuildContext context) {
     final sys = GillSystem.instance;
     final accent = sys.accent;
-    return CallbackShortcuts(
-      bindings: {
-        const SingleActivator(LogicalKeyboardKey.keyF, control: true): _focusSearch,
-        const SingleActivator(LogicalKeyboardKey.digit1, control: true): () => _select(0),
-        const SingleActivator(LogicalKeyboardKey.digit2, control: true): () => _select(1),
-        const SingleActivator(LogicalKeyboardKey.digit3, control: true): () => _select(2),
-        const SingleActivator(LogicalKeyboardKey.keyQ, control: true): () => GillWindow.call('close'),
-        const SingleActivator(LogicalKeyboardKey.escape): () => FocusManager.instance.primaryFocus?.unfocus(),
-      },
-      child: Focus(
-        autofocus: true,
-        onKeyEvent: (node, e) {
-          // "/" starts a search, unless typing in a field already
-          if (e is KeyDownEvent && e.logicalKey == LogicalKeyboardKey.slash &&
-              FocusManager.instance.primaryFocus == node) {
-            _focusSearch();
-            return KeyEventResult.handled;
-          }
-          return KeyEventResult.ignored;
-        },
-        child: Listener(
+    return Listener(
           onPointerDown: (e) {
             if (e.kind == PointerDeviceKind.touch && !_touchMode) {
               setState(() => _lastTouch = DateTime.now());
@@ -216,8 +235,6 @@ class _DesktopShellState extends State<DesktopShell> {
               ]);
             }),
           ),
-        ),
-      ),
     );
   }
 }
@@ -231,38 +248,31 @@ class _Backdrop extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (amoled) return const ColoredBox(color: Colors.black);
+    // The window is see-through: the desktop shows through it, frosted by Gill(OS). These tints
+    // keep it dark enough to read, with a soft glow of the accent colour in one corner.
     return DecoratedBox(
       decoration: const BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [Color(0xFF10131F), Color(0xFF07080D)],
+          colors: [Color(0x9910131F), Color(0xB307080D)],
         ),
       ),
-      child: Stack(children: [
-        Positioned.fill(
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: RadialGradient(
-                center: const Alignment(-0.85, -0.9),
-                radius: 1.1,
-                colors: [accent.withValues(alpha: 0.30), accent.withValues(alpha: 0.0)],
-              ),
-            ),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: RadialGradient(
+            center: const Alignment(-1.1, -1.2),
+            radius: 1.6,
+            colors: [
+              accent.withValues(alpha: 0.26),
+              accent.withValues(alpha: 0.12),
+              accent.withValues(alpha: 0.04),
+              accent.withValues(alpha: 0.0),
+            ],
+            stops: const [0.0, 0.3, 0.6, 1.0],
           ),
         ),
-        const Positioned.fill(
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: RadialGradient(
-                center: Alignment(1.0, 1.0),
-                radius: 1.2,
-                colors: [Color(0x553A2C8C), Color(0x003A2C8C)],
-              ),
-            ),
-          ),
-        ),
-      ]),
+      ),
     );
   }
 }
@@ -279,7 +289,7 @@ class _Glass extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(radius),
-        color: amoled ? Colors.black : const Color(0xB3101014),
+        color: amoled ? Colors.black : const Color(0x8C14141A),
         border: Border.all(color: Colors.white.withValues(alpha: amoled ? 0.10 : 0.08), width: 1),
         boxShadow: const [BoxShadow(color: Color(0x66000000), blurRadius: 30, offset: Offset(0, 12))],
       ),

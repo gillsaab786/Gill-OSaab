@@ -18,6 +18,8 @@ export FLUTTER_SUPPRESS_ANALYTICS=true PUB_CACHE=${PUB_CACHE:-/tmp/pub-cache}
 flutter config --no-analytics --enable-linux-desktop >/dev/null 2>&1 || true
 flutter --version | head -1
 cd "$APP"
+flutter precache --linux >/dev/null 2>&1 || true
+export FLUTTER_ROOT=$(dirname "$(dirname "$(command -v flutter)")")
 if [ ! -d linux ]; then
   flutter create --platforms=linux --project-name seedfinder --org org.gillosaab . >/dev/null
   # flutter create adds a sample test for a counter app we don't have
