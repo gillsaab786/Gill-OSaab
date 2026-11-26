@@ -58,7 +58,7 @@ Item {
         interval: live.onBattery ? 66 : 33
         running: live.moving
         repeat: true
-        onTriggered: live.t += interval / 1000
+        onTriggered: { live.t += interval / 1000; ShellState.liveTime = live.t }
     }
     Timer { // the real-world parts change slowly: once a minute is plenty
         interval: 60000

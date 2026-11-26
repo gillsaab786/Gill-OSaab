@@ -438,7 +438,9 @@ if command -v qs >/dev/null; then
   qs -p "$SHELLDIR" ipc call shell appearance iconStyle default; sleep 0.5
   # live wallpapers: the shader draws and moves; Earth looks different from Flow
   qs -p "$SHELLDIR" ipc call shell appearance wallpaper live:flow; sleep 2.5; shot 23j-live-flow-a
+  echo "live wallpaper clock: $(qs -p "$SHELLDIR" ipc call shell liveTime)"
   sleep 1.5; shot 23k-live-flow-b
+  echo "live wallpaper clock: $(qs -p "$SHELLDIR" ipc call shell liveTime)"
   qs -p "$SHELLDIR" ipc call shell appearance wallpaper live:earth; sleep 2.5; shot 23l-live-earth
   qs -p "$SHELLDIR" ipc call shell appearance wallpaper tide; sleep 1.5
   # on-screen keyboard (Control Centre > Keyboard)

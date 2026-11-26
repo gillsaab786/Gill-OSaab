@@ -62,6 +62,7 @@ ShellRoot {
         function hideApp(id: string, hide: bool): void { Theme.setHidden(id, hide) }
         function amoled(on: bool): void { Theme.set("amoled", on) }
         function isAmoled(): bool { return Theme.amoled }
+        function liveTime(): real { return ShellState.liveTime }
         function dockApps(): string { return Theme.dockApps.join(",") }
     }
 }
