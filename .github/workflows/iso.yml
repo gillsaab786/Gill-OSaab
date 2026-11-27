@@ -14,8 +14,28 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  iso:
+  # Nightly rebuilds of the same commit must not replace the published parts: anyone mid-download
+  # would end up with parts from two builds that don't join into a valid image.
+  check:
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    outputs:
+      publish: ${{ steps.c.outputs.publish }}
+    steps:
+      - id: c
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha="${{ github.event.workflow_run.head_sha || github.sha }}"
+          old=$(gh api "repos/${{ github.repository }}/git/ref/tags/core-usb" -q .object.sha 2>/dev/null || true)
+          if [ "${{ github.event_name }}" = workflow_run ] && [ "$old" = "$sha" ]; then
+            echo "USB for $sha is already published; keeping it"; echo publish=no >> "$GITHUB_OUTPUT"
+          else
+            echo publish=yes >> "$GITHUB_OUTPUT"
+          fi
+  iso:
+    needs: check
+    if: ${{ needs.check.outputs.publish == 'yes' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -68,5 +88,6 @@ jobs:
         run: |
           gh release delete core-usb --yes --cleanup-tag -R "${{ github.repository }}" || true
           gh release create core-usb release/* -R "${{ github.repository }}" --prerelease \
+            --target "${{ github.event.workflow_run.head_sha || github.sha }}" \
             --title "Gill(OS) Core bootable USB (test build)" \
             --notes "Bootable USB image of Gill(OS) Core (AMD/Intel; the installer picks the Nvidia edition by itself on RTX/GTX 16 PCs). Windows: download Get-GillOSaab-USB.ps1, right-click > Run with PowerShell: it downloads or joins the parts, checks the SHA-256 and opens balenaEtcher. Linux/macOS: cat gill-osaab-core-usb.img.xz.part-* > gill-osaab-core-usb.img.xz, check SHA256SUMS, flash with balenaEtcher. Use a 32 GB+ USB stick. Boot from it (ROG Ally/GPD: hold Volume Down + Power), sign in as gill / gill, then open Install Gill(OS) in Launchpad to install on the PC, encrypted."
