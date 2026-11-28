@@ -4,10 +4,14 @@ import json
 import os
 import subprocess
 import sys
+import time
 
-from PySide6.QtCore import QProcess, Qt
+from PySide6.QtCore import QProcess, QRectF, Qt, QTimer, QVariantAnimation
+from PySide6.QtGui import QColor, QConicalGradient, QFont, QPainter, QPen
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
                                QProgressBar, QPlainTextEdit, QPushButton, QStackedWidget, QVBoxLayout, QWidget)
+
+STAGES = ["Downloading Gill(OS)", "Writing to the drive", "Setting up your account"]
 
 STYLE = """
 QWidget { background: #1c1c1e; color: #f2f2f7; font-family: Inter; font-size: 15px; }
@@ -22,7 +26,61 @@ QLineEdit { background: #2c2c2e; border-radius: 12px; padding: 14px; font-size: 
 QProgressBar { background: #2c2c2e; border-radius: 8px; height: 16px; text-align: center; }
 QProgressBar::chunk { background: #30d158; border-radius: 8px; }
 QPlainTextEdit { background: #000; color: #8e8e93; border-radius: 10px; font-family: monospace; font-size: 12px; }
+QLabel#stage { font-size: 20px; font-weight: 600; }
+QLabel#step { color: #636366; font-size: 15px; }
+QLabel#step[state="now"] { color: #f2f2f7; font-weight: 600; }
+QLabel#step[state="done"] { color: #70e3aa; }
+QPushButton#link { background: transparent; color: #0a84ff; padding: 6px; }
 """
+
+
+class Ring(QWidget):
+    """The big progress ring: a mint-to-blue arc that glides to each new value, the percentage inside."""
+
+    def __init__(self):
+        super().__init__()
+        self.setMinimumSize(240, 240)
+        self.value = 0.0
+        self.anim = QVariantAnimation(self)
+        self.anim.setDuration(700)
+        self.anim.valueChanged.connect(self._step)
+        self.spin = 0
+        self.timer = QTimer(self)  # slow shimmer so it never looks frozen on a slow USB stick
+        self.timer.timeout.connect(self._tick)
+        self.timer.start(40)
+
+    def set(self, pct):
+        self.anim.stop()
+        self.anim.setStartValue(float(self.value))
+        self.anim.setEndValue(float(pct))
+        self.anim.start()
+
+    def _step(self, v):
+        self.value = float(v)
+        self.update()
+
+    def _tick(self):
+        self.spin = (self.spin + 3) % 360
+        self.update()
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        side = min(self.width(), self.height()) - 24
+        r = QRectF((self.width() - side) / 2, (self.height() - side) / 2, side, side)
+        p.setPen(QPen(QColor("#2c2c2e"), 16, Qt.SolidLine, Qt.RoundCap))
+        p.drawEllipse(r)
+        g = QConicalGradient(r.center(), 90 - self.spin)
+        g.setColorAt(0.0, QColor("#70e3aa"))
+        g.setColorAt(0.5, QColor("#0a84ff"))
+        g.setColorAt(1.0, QColor("#70e3aa"))
+        p.setPen(QPen(g, 16, Qt.SolidLine, Qt.RoundCap))
+        p.drawArc(r, 90 * 16, -int(self.value / 100 * 360 * 16))
+        p.setPen(QColor("#f2f2f7"))
+        p.setFont(QFont("Inter", int(side / 4.6), QFont.Bold))
+        p.drawText(r, Qt.AlignCenter, f"{int(round(self.value))}%")
+        p.end()
+
 
 
 def run_json(cmd, default):
@@ -38,7 +96,7 @@ class Page(QWidget):
         self.lay = QVBoxLayout(self)
         self.lay.setContentsMargins(60, 50, 60, 40)
         self.lay.setSpacing(16)
-        t = QLabel(title)
+        t = self.heading = QLabel(title)
         t.setObjectName("title")
         t.setWordWrap(True)
         self.lay.addWidget(t)
@@ -67,6 +125,7 @@ class Installer(QStackedWidget):
         self.disk = ""
         self.encrypt = True
         self.proc = None
+        self.pct, self.buf, self.t0 = 0, "", time.monotonic()
         for page in (self.welcome(), self.choose_disk(), self.choose_encryption(), self.choose_password(),
                      self.confirm(), self.progress_page(), self.done_page()):
             self.addWidget(page)
@@ -172,14 +231,88 @@ class Installer(QStackedWidget):
         return p
 
     def progress_page(self):
-        p = Page("Installing…", "Downloading Gill(OS) and writing it to the drive. Keep the PC plugged in.")
-        self.bar = QProgressBar()
-        self.bar.setRange(0, 0)  # busy until done
+        p = Page("Installing Gill(OS)", "Keep the PC plugged in. You can leave it — this can take a while "
+                                        "from a USB 2.0 port.")
+        self.title = p.heading
+        row = QHBoxLayout()
+        row.setSpacing(36)
+        self.ring = Ring()
+        row.addWidget(self.ring, 1)
+        side = QVBoxLayout()
+        side.setSpacing(10)
+        self.stage = QLabel("Getting ready…")
+        self.stage.setObjectName("stage")
+        self.stage.setWordWrap(True)
+        side.addWidget(self.stage)
+        self.steps = []
+        for name in STAGES:
+            lab = QLabel("○  " + name)
+            lab.setObjectName("step")
+            side.addWidget(lab)
+            self.steps.append(lab)
+        self.eta = QLabel("")
+        self.eta.setObjectName("note")
+        side.addSpacing(8)
+        side.addWidget(self.eta)
+        side.addStretch(1)
+        row.addLayout(side, 1)
+        p.lay.addLayout(row, 1)
+        self.bar = QProgressBar()  # thin bar kept for the failed state and old callers
+        self.bar.setRange(0, 100)
+        self.bar.setTextVisible(False)
+        self.bar.setMaximumHeight(6)
+        self.bar.hide()
         p.lay.addWidget(self.bar)
+        self.details = QPushButton("Show details")
+        self.details.setObjectName("link")
+        self.details.setCursor(Qt.PointingHandCursor)
+        self.details.clicked.connect(lambda: self.show_log(not self.log.isVisible()))
+        p.lay.addWidget(self.details, 0, Qt.AlignLeft)
         self.log = QPlainTextEdit()
         self.log.setReadOnly(True)
+        self.log.hide()
         p.lay.addWidget(self.log, 1)
         return p
+
+    def show_log(self, on):
+        self.log.setVisible(on)
+        self.ring.setMinimumSize(*((130, 130) if on else (240, 240)))  # small ring beside the log
+        self.ring.setMaximumSize(*((130, 130) if on else (16777215, 16777215)))
+        self.details.setText("Hide details" if on else "Show details")
+
+    def on_output(self, text):
+        self.buf += text
+        lines = self.buf.split("\n")
+        self.buf = lines.pop()
+        for line in lines:
+            if line.startswith("@@progress "):
+                parts = line.split(" ", 2)
+                try:
+                    self.set_progress(int(parts[1]), parts[2] if len(parts) > 2 else "")
+                except ValueError:
+                    pass
+            elif line.strip():
+                self.log.appendPlainText(line.rstrip())
+
+    def set_progress(self, pct, text):
+        if pct < self.pct:
+            return
+        self.pct = pct
+        self.ring.set(pct)
+        self.bar.setValue(pct)
+        if text:
+            self.stage.setText(text + ("…" if pct < 100 else ""))
+        now = next((i for i, n in enumerate(STAGES) if text.startswith(n.split()[0])), -1)
+        for i, lab in enumerate(self.steps):
+            state = "done" if (i < now or pct >= 100) else ("now" if i == now else "")
+            lab.setText(("✓  " if state == "done" else "●  " if state == "now" else "○  ") + STAGES[i])
+            lab.setProperty("state", state)
+            lab.style().unpolish(lab)
+            lab.style().polish(lab)
+        elapsed = time.monotonic() - self.t0
+        if 3 <= pct < 100 and elapsed > 20:
+            left = elapsed * (100 - pct) / pct
+            self.eta.setText(f"About {max(1, round(left / 60))} min left" if left >= 60 else "Less than a minute left")
 
     def done_page(self):
         p = Page("Done!", "Remove the USB stick and restart. After you sign in, Settings opens to add your "
@@ -197,12 +330,15 @@ class Installer(QStackedWidget):
 
     def start(self):
         self.setCurrentIndex(5)
+        self.pct, self.buf, self.t0 = 0, "", time.monotonic()
         self.proc = QProcess(self)
         self.proc.setProcessChannelMode(QProcess.MergedChannels)
         self.proc.readyReadStandardOutput.connect(
-            lambda: self.log.appendPlainText(bytes(self.proc.readAllStandardOutput()).decode(errors="replace").rstrip()))
+            lambda: self.on_output(bytes(self.proc.readAllStandardOutput()).decode(errors="replace")))
         self.proc.finished.connect(self.finished)
-        cmd = self.command()
+        # no sleeping or lid-close suspend halfway through writing the drive
+        cmd = ["systemd-inhibit", "--what=sleep:idle:handle-lid-switch", "--who=Install Gill(OS)",
+               "--why=Writing Gill(OS) to the drive"] + self.command()
         self.proc.start(cmd[0], cmd[1:])
         self.proc.write((self.pw1.text() + "\n").encode())
         self.proc.closeWriteChannel()
@@ -210,12 +346,23 @@ class Installer(QStackedWidget):
         self.pw2.clear()
 
     def finished(self, code, _status=None):
+        self.on_output("\n")
         if code == 0:
-            self.setCurrentIndex(6)
+            self.set_progress(100, "Done")
+            QTimer.singleShot(900, lambda: self.setCurrentIndex(6))
             return
-        self.bar.setRange(0, 1)
+        self.title.setText("Install stopped")
+        self.stage.setText("It didn't finish. Nothing on your USB stick changed.")
+        self.eta.setText("The full log is kept in Settings > Problems > Install summary.")
+        self.show_log(True)
         QMessageBox.warning(self, "Install stopped", "The install didn't finish (see the details). Nothing on your "
                                                      "USB stick changed. Check the internet and try again.")
+
+    def closeEvent(self, e):
+        if self.proc and self.proc.state() != QProcess.NotRunning:
+            e.ignore()  # closing now would leave a half-written drive
+            return
+        super().closeEvent(e)
 
     def toggle_keyboard(self):
         subprocess.Popen(["qs", "-c", "gill-osaab", "ipc", "call", "shell", "keyboard"])

@@ -6,6 +6,7 @@
   gosaab-diagnose --report               a report to copy and paste when asking for a fix
                                          (names, addresses and serial numbers are removed)
   gosaab-diagnose --clear                forget the recorded problems
+  gosaab-diagnose --install              how installing Gill(OS) went (JSON: summary + end of the log)
 """
 import json
 import os
@@ -23,6 +24,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..
 from gosaab_common import STATE, notify  # noqa: E402
 
 PROBLEMS = STATE / "problems.json"
+INSTALL_DIR = Path("/var/log/gill-osaab")  # written by gosaab-install, kept by gosaab-firstboot-user
 KEEP_DAYS = 30
 MAX_ITEMS = 300
 
@@ -35,7 +37,7 @@ NOISE = [
     r"wireplumber.*(SPA|spa)\.bluez5", r"Failed to start .*rtkit", r"sddm-helper.*pam_kwallet",
 ]
 NOISE_RE = re.compile("|".join(NOISE), re.I)
-SEVERITY = {"security": 3, "crash": 3, "missing-driver": 3, "failed-service": 2, "missing-firmware": 2, "update-failed": 2,
+SEVERITY = {"security": 3, "crash": 3, "missing-driver": 3, "failed-service": 2, "missing-firmware": 2, "update-failed": 2, "install-failed": 3,
             "limited-driver": 1, "error": 1, "app-error": 1}
 
 
@@ -254,6 +256,7 @@ def collect():
     found += failed_units(run(["systemctl", "--user", "--failed", "--plain", "--no-legend"]), "user")
     found += driver_problems(drivers_state())
     found += app_log_problems(STATE)
+    found += install_problems(install_summary())
     try:
         found += security_problems(json.loads(Path("/run/gill-osaab/security.json").read_text()))
     except (OSError, ValueError):
@@ -262,6 +265,47 @@ def collect():
     new = merge(recorded, found)
     save(recorded)
     return recorded, new
+
+
+def install_summary(folder=INSTALL_DIR, tail=60):
+    """{"summary": {...}, "log": "last lines"} or None when this system wasn't put on by gosaab-install."""
+    try:
+        summary = json.loads((Path(folder) / "install.json").read_text())
+    except (OSError, ValueError):
+        return None
+    try:
+        log = (Path(folder) / "install.log").read_text(errors="replace").splitlines()[-tail:]
+    except OSError:
+        log = []
+    return {"summary": summary, "log": "\n".join(log)}
+
+
+def install_problems(info):
+    s = (info or {}).get("summary") or {}
+    if s.get("result") != "failed":
+        return []
+    failed = next((st["name"] for st in s.get("steps", []) if st.get("ok") is False), "")
+    return [{"kind": "install-failed", "title": "Installing Gill(OS) didn't finish",
+             "detail": (s.get("error") or "") + (f" (step: {failed})" if failed else ""),
+             "source": "install", "time": int(s.get("finished") or time.time())}]
+
+
+def install_lines(info):
+    s = (info or {}).get("summary") or {}
+    if not s:
+        return []
+    when = time.strftime("%Y-%m-%d %H:%M", time.localtime(s.get("started", 0)))
+    mins = round((s.get("seconds") or 0) / 60)
+    out = ["Install summary", "-" * 15,
+           f"{'Finished' if s.get('result') == 'ok' else 'FAILED'} · {when} · {mins} min · "
+           f"{s.get('model') or s.get('disk', '')} · {'encrypted' if s.get('encrypted') else 'not encrypted'}"
+           + (f" · Gill(OS) {s['version']}" if s.get("version") else "")]
+    for st in s.get("steps", []):
+        mark = "✓" if st.get("ok") else "✗" if st.get("ok") is False else "…"
+        out.append(f"  {mark} {st.get('name', '')} ({st.get('seconds', 0)} s)")
+    if s.get("result") != "ok" and info.get("log"):
+        out += ["", "End of the install log:", info["log"]]
+    return out + [""]
 
 
 def system_info():
@@ -288,7 +332,7 @@ def system_info():
 
 def report(recorded):
     problems = sorted_problems(recorded)
-    out = ["Gill(OS) problem report", "=" * 25, *system_info(), ""]
+    out = ["Gill(OS) problem report", "=" * 25, *system_info(), "", *install_lines(install_summary())]
     if not problems:
         out.append("No problems recorded.")
     for i, p in enumerate(problems, 1):
@@ -317,6 +361,12 @@ def main(argv):
         return 0
     if argv[0] == "--report":
         print(report(load()))
+        return 0
+    if argv[0] == "--install":
+        info = install_summary()
+        if info:
+            info["log"] = redact(info["log"])
+        print(json.dumps(info))
         return 0
     if argv[0] == "--clear":
         save({})

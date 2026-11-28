@@ -20,16 +20,157 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 
 MIN_BYTES = 30 * 10 ** 9
 USER_FILE = "gill-osaab-user.json"  # read once on the first start, then deleted
+LOG_DIR = "/var/log/gill-osaab"
+LOG_NAME = "install.log"            # every command and its output
+SUMMARY_NAME = "install.json"       # result, steps and times (Settings > Problems > Install summary)
+DOWNLOAD_GUESS = 5.5e9              # compressed image, when the registry can't be asked
+WRITE_GUESS = 13e9                  # installed size, when podman can't say
 
 
-def sh(cmd, dry=False, **kw):
-    print("+ " + " ".join(cmd), flush=True)
+class Recorder:
+    """Shows progress (\"@@progress PCT TEXT\" lines for the graphical installer, a bar in a terminal)
+    and keeps the install log and summary so they can be read later in Settings > Problems."""
+
+    def __init__(self, log_dir=LOG_DIR, dry=False):
+        self.dry, self.started, self.steps, self.pct = dry, time.time(), [], -1
+        self.summary = {"result": "running", "started": int(self.started)}
+        self.log_dir = log_dir
+        self.log = None
+        try:
+            os.makedirs(log_dir, exist_ok=True)
+            self.log = open(os.path.join(log_dir, LOG_NAME), "w", buffering=1)
+        except OSError:
+            pass
+        self.tty = sys.stdout.isatty()
+
+    def line(self, text):
+        if self.log:
+            self.log.write(time.strftime("%H:%M:%S ") + text + "\n")
+        if not self.tty:
+            print(text, flush=True)
+
+    def progress(self, pct, text):
+        pct = max(0, min(100, int(pct)))
+        if pct == self.pct and not text:
+            return
+        self.pct = pct
+        if self.tty:
+            bar = "█" * (pct // 4) + "░" * (25 - pct // 4)
+            print(f"\r  {bar} {pct:3d}%  {text[:40]:<40}", end="", flush=True)
+        else:
+            print(f"@@progress {pct} {text}", flush=True)
+
+    def step(self, name):
+        self.end_step(True)
+        self.steps.append({"name": name, "ok": None, "start": time.time()})
+        self.line(f"== {name}")
+
+    def end_step(self, ok):
+        if self.steps and self.steps[-1]["ok"] is None:
+            st = self.steps[-1]
+            st["ok"], st["seconds"] = ok, round(time.time() - st.pop("start"))
+
+    def finish(self, ok, error=""):
+        self.end_step(ok)
+        self.summary.update(result="ok" if ok else "failed", error=error, finished=int(time.time()),
+                            seconds=round(time.time() - self.started),
+                            steps=[{k: v for k, v in s.items() if k != "start"} for s in self.steps])
+        self.save()
+        if self.tty:
+            print()
+
+    def save(self, folder=None):
+        try:
+            with open(os.path.join(folder or self.log_dir, SUMMARY_NAME), "w") as fh:
+                json.dump(self.summary, fh, indent=1)
+        except OSError:
+            pass
+
+
+REC = None  # the current Recorder (set in main)
+
+
+def say(text):
+    if REC:
+        REC.line(text)
+    else:
+        print(text, flush=True)
+
+
+def sh(cmd, dry=False, watch=None, **kw):
+    """Run cmd, keep its output in the log; watch=(measure, total, start%, end%, text) moves the bar."""
+    say("+ " + " ".join(cmd))
     if dry:
+        if watch:
+            REC.progress(watch[3], watch[4])
         return 0
-    return subprocess.run(cmd, check=False, **kw).returncode
+    if REC is None:
+        return subprocess.run(cmd, check=False, **kw).returncode
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace")
+    reader = threading.Thread(target=lambda: [say(l.rstrip("\r\n").split("\r")[-1]) for l in proc.stdout],
+                              daemon=True)
+    reader.start()
+    if watch:
+        measure, total, lo, hi, text = watch
+        base = measure()
+        while proc.poll() is None:
+            done = max(0, measure() - base)
+            REC.progress(lo + (hi - lo) * min(done / max(total, 1), 0.98), text)
+            time.sleep(1)
+    rc = proc.wait()
+    reader.join(5)
+    say(f"(exit {rc})")
+    return rc
+
+
+# ------------------------------------------------------------------ measuring progress
+def os_version():
+    try:
+        rel = dict(l.split("=", 1) for l in open("/usr/lib/os-release").read().splitlines() if "=" in l)
+    except OSError:
+        return ""
+    return (rel.get("IMAGE_VERSION") or rel.get("VERSION") or "").strip('"')
+
+
+def net_received():
+    total = 0
+    for nic in os.listdir("/sys/class/net") if os.path.isdir("/sys/class/net") else []:
+        if nic == "lo":
+            continue
+        try:
+            total += int(open(f"/sys/class/net/{nic}/statistics/rx_bytes").read())
+        except (OSError, ValueError):
+            pass
+    return total
+
+
+def disk_written(disk):
+    """Bytes written to DISK since boot (/sys/block/NAME/stat, field 7 is sectors written)."""
+    try:
+        name = os.path.basename(os.path.realpath(disk))
+        return int(open(f"/sys/block/{name}/stat").read().split()[6]) * 512
+    except (OSError, ValueError, IndexError):
+        return 0
+
+
+def download_size(image):
+    try:
+        info = json.loads(out(["skopeo", "inspect", f"docker://{image}"]))
+        return sum(l.get("Size") or 0 for l in info.get("LayersData") or []) or DOWNLOAD_GUESS
+    except ValueError:
+        return DOWNLOAD_GUESS
+
+
+def image_size(image):
+    try:
+        return int(out(["podman", "image", "inspect", "--format", "{{.Size}}", image])) or WRITE_GUESS
+    except ValueError:
+        return WRITE_GUESS
 
 
 def out(cmd):
@@ -125,7 +266,7 @@ def nvidia_variant(ref):
 
 
 def install_command(image, disk, encrypt):
-    cmd = ["podman", "run", "--rm", "--privileged", "--pid=host", "-v", "/dev:/dev",
+    cmd = ["podman", "run", "--rm", "--pull=never", "--privileged", "--pid=host", "-v", "/dev:/dev",
            "-v", "/var/lib/containers:/var/lib/containers", "--security-opt", "label=type:unconfined_t",
            image, "bootc", "install", "to-disk", "--wipe", "--filesystem", "btrfs"]
     if encrypt:
@@ -134,9 +275,10 @@ def install_command(image, disk, encrypt):
 
 
 def write_account(disk, record, dry=False):
-    """Put the account where the new system finds it on its first start (the unencrypted /boot, briefly)."""
+    """Put the account where the new system finds it on its first start (the unencrypted /boot, briefly),
+    with the install log and summary (moved to /var/log/gill-osaab on that start)."""
     if dry:
-        print(f"+ write /boot/{USER_FILE} on {disk} for {record['name']}")
+        say(f"+ write /boot/{USER_FILE} on {disk} for {record['name']}")
         return 0
     sh(["udevadm", "settle"])
     parts = out(["lsblk", "-lno", "PATH,LABEL", disk]).splitlines()
@@ -152,6 +294,15 @@ def write_account(disk, record, dry=False):
             fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
             with os.fdopen(fd, "w") as fh:
                 json.dump(record, fh)
+            if REC:
+                REC.finish(True)
+                REC.save(mnt)
+                if REC.log:
+                    REC.log.flush()
+                    with open(os.path.join(REC.log_dir, LOG_NAME), "rb") as src, \
+                            open(os.path.join(mnt, "gill-osaab-" + LOG_NAME), "wb") as dst:
+                        dst.write(src.read())
+                os.rename(os.path.join(mnt, SUMMARY_NAME), os.path.join(mnt, "gill-osaab-" + SUMMARY_NAME))
         finally:
             sh(["umount", mnt])
     return 0
@@ -224,12 +375,43 @@ def main(argv):
     else:
         password = "dry-run" if dry else ask_password(user)
     record = account_record(user, "$y$dry$run" if dry else hash_password(password))
-    rc = sh(install_command(image_ref(), disk, encrypt), dry)
-    if rc != 0:
-        print("\nThe install failed; nothing else was changed. See Settings > Problems.")
+    # a dry run never touches the real install log (Settings > Problems shows that one)
+    return install(disk, encrypt, record, dry, tempfile.mkdtemp(prefix="gosaab-install-") if dry else LOG_DIR)
+
+
+def install(disk, encrypt, record, dry=False, log_dir=LOG_DIR):
+    global REC
+    REC = Recorder(log_dir, dry)
+    image = image_ref()
+    model = next((d["model"] for d in list_disks() if d["path"] == disk), "")
+    REC.summary.update(image=image, disk=disk, model=model, size=out(["lsblk", "-dnbo", "SIZE", disk]),
+                       encrypted=encrypt, version=os_version())
+    REC.save()
+
+    def fail(msg):
+        REC.finish(False, msg)
+        say(msg)
+        print(f"\n{msg} Nothing else was changed. See Settings > Problems > Install summary.", flush=True)
         return 1
+
+    REC.step("Getting ready")
+    REC.progress(1, "Getting ready")
+    REC.step("Downloading Gill(OS)")
+    total = 1 if dry else download_size(image)
+    if sh(["podman", "pull", image], dry, watch=(net_received, total, 2, 40, "Downloading Gill(OS)")) != 0:
+        return fail("Couldn't download Gill(OS) (check the internet).")
+    REC.step("Encrypting the drive and writing Gill(OS)" if encrypt else "Writing Gill(OS) to the drive")
+    total = 1 if dry else image_size(image)
+    text = "Writing to the drive" + (" (encrypted)" if encrypt else "")
+    if sh(install_command(image, disk, encrypt), dry, watch=(lambda: disk_written(disk), total, 40, 96, text)) != 0:
+        return fail("Writing Gill(OS) to the drive failed.")
+    REC.step("Setting up your account")
+    REC.progress(97, "Setting up your account")
     if write_account(disk, record, dry) != 0:
-        return 1
+        return fail("Couldn't set up your account on the new drive.")
+    if dry:
+        REC.finish(True)
+    REC.progress(100, "Done")
     print("\nDone. Remove the USB stick and restart. After signing in, open Settings > Apps & Security and "
           "add a start-up PIN and a recovery key.")
     return 0

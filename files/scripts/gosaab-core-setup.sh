@@ -53,6 +53,8 @@ systemctl enable gosaab-hotkeyd.service || log "warning: shortcut service not en
 systemctl enable thermald.service 2>/dev/null || true  # Intel only (see its drop-in)
 # After "Install on this PC (encrypted)": your account is created on the first start
 systemctl enable gosaab-firstboot-user.service || log "warning: first-boot account service not enabled"
+# The USB image is published small (fast to flash); on a stick it grows to fill it on the first start
+systemctl enable gosaab-grow-usb.service || log "warning: USB grow service not enabled"
 
 # Firewall: nothing on this PC is reachable from the network unless allowed. Allowed: finding printers
 # and other devices (mDNS), Steam Remote Play/LAN game downloads; Android (Waydroid) gets its own

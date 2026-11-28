@@ -5,6 +5,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, "/usr/libexec/gill-osaab")
@@ -369,6 +370,9 @@ class Backend:
 
     def problems(self):
         return self._json(["gosaab-diagnose", "--json"], [])
+
+    def install_summary(self):
+        return self._json(["gosaab-diagnose", "--install"], None)
 
     def problem_report(self):
         out = subprocess.run(["gosaab-diagnose", "--report"], capture_output=True, text=True, check=False) \
@@ -1428,8 +1432,53 @@ class Settings(QMainWindow):
         self.problems_lay.setContentsMargins(0, 0, 0, 0)
         p.lay.addWidget(self.problems_holder)
         self.fill_problems()
+        info = self.backend.install_summary() if hasattr(self.backend, "install_summary") else None
+        if info and info.get("summary"):
+            p.lay.addWidget(self.install_card(info))
         p.finish()
         return p
+
+    def install_card(self, info):
+        """Install summary: how putting Gill(OS) on this drive went, step by step, with the full log."""
+        s = info["summary"]
+        ok = s.get("result") == "ok"
+        when = time.strftime("%-d %b %Y, %H:%M", time.localtime(s.get("started", 0)))
+        state = QLabel("●  Installed" if ok else ("●  Didn't finish" if s.get("result") == "failed" else "●  Running"))
+        state.setObjectName("ok" if ok else "bad")
+        head = Row("Install summary", f"{when} · {round((s.get('seconds') or 0) / 60)} min · "
+                                      f"{s.get('model') or s.get('disk', '')} · "
+                                      f"{'encrypted' if s.get('encrypted') else 'not encrypted'}", state)
+        rows = [head]
+        for st in s.get("steps", []):
+            mark = QLabel("✓" if st.get("ok") else ("✗" if st.get("ok") is False else "…"))
+            mark.setObjectName("ok" if st.get("ok") else "bad")
+            rows.append(Row(st.get("name", ""), f"{st.get('seconds', 0)} s", mark))
+        if s.get("error"):
+            rows.append(Row("What went wrong", s["error"]))
+        view = QPushButton("View log")
+        view.setCursor(Qt.PointingHandCursor)
+        view.clicked.connect(lambda: self.show_install_log(info.get("log", "")))
+        rows.append(Row("Every command and its output", "Kept in /var/log/gill-osaab/install.log", view))
+        card = Card(rows)
+        card.setObjectName("card")
+        self.install_card_widget = card
+        return card
+
+    def show_install_log(self, text):
+        from PySide6.QtWidgets import QDialog, QPlainTextEdit
+        d = QDialog(self)
+        d.setWindowTitle("Install log")
+        d.resize(820, 560)
+        lay = QVBoxLayout(d)
+        view = QPlainTextEdit(text or "The log is empty.")
+        view.setReadOnly(True)
+        view.setStyleSheet("font-family: monospace; font-size: 12px;")
+        lay.addWidget(view)
+        copy = QPushButton("Copy")
+        copy.clicked.connect(lambda: (QApplication.clipboard().setText(text), copy.setText("Copied ✓")))
+        lay.addWidget(copy, 0, Qt.AlignRight)
+        d.show()
+        return d
 
     def fill_problems(self):
         while self.problems_lay.count():
@@ -1444,7 +1493,7 @@ class Settings(QMainWindow):
             return
         names = {"security": "Security", "crash": "Crash", "missing-driver": "Missing driver",
                  "missing-firmware": "Missing firmware", "failed-service": "Failed service",
-                 "update-failed": "Update failed", "limited-driver": "Limited driver", "error": "Error",
+                 "update-failed": "Update failed", "install-failed": "Install failed", "limited-driver": "Limited driver", "error": "Error",
                  "app-error": "App error"}
         rows = []
         for it in items[:80]:

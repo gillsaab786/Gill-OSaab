@@ -1,15 +1,30 @@
 #!/usr/bin/python3 -I
-"""(first start after gosaab-install) Create the account carried over from the USB, then forget it."""
+"""(first start after gosaab-install) Create the account carried over from the USB, then forget it;
+keep the install log and summary in /var/log/gill-osaab (Settings > Problems > Install summary)."""
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 
 PATH = "/boot/gill-osaab-user.json"
+LOGS = {"/boot/gill-osaab-install.log": "install.log", "/boot/gill-osaab-install.json": "install.json"}
+LOG_DIR = "/var/log/gill-osaab"
+
+
+def keep_install_log(boot_files=LOGS, log_dir=LOG_DIR):
+    for src, name in boot_files.items():
+        if os.path.exists(src):
+            try:
+                os.makedirs(log_dir, exist_ok=True)
+                shutil.move(src, os.path.join(log_dir, name))
+            except OSError:
+                pass
 
 
 def main():
+    keep_install_log()
     try:
         with open(PATH) as fh:
             rec = json.load(fh)

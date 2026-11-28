@@ -1,0 +1,3 @@
+# Boot to the Gill(OS) logo, not scrolling kernel text; messages are still in the journal
+# (Settings > Problems reads them from there).
+kargs = ["rhgb", "quiet", "loglevel=3", "rd.udev.log_level=3", "vt.global_cursor_default=0"]

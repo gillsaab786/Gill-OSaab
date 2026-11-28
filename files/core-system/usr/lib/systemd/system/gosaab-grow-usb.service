@@ -1,0 +1,12 @@
+[Unit]
+Description=Gill(OS): use the whole USB stick (the image is published small so it flashes faster)
+After=local-fs.target
+ConditionPathExists=!/var/lib/gill-osaab/usb-grown
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/gill-osaab/gosaab-grow-usb
+ExecStartPost=/usr/bin/sh -c 'mkdir -p /var/lib/gill-osaab && touch /var/lib/gill-osaab/usb-grown'
+
+[Install]
+WantedBy=multi-user.target

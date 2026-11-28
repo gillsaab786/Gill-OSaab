@@ -202,6 +202,9 @@ class FakeBackend:
     def problem_report(self):
         return "Gill(OS) problem report\n1. [crash] foot crashed"
 
+    def install_summary(self):
+        return getattr(self, "inst", None)
+
     def hotkeys(self):
         return {k: {"action": a, "label": a, "keys": k, "mine": True} for k, a in getattr(self, "hk", {}).items()}
 
@@ -477,6 +480,25 @@ class NewPages(unittest.TestCase):
         self.assertTrue(titles[-2].startswith("Problems (1)"))  # second last, above About
         w.copy_report(self.gs.QPushButton())
         self.assertIn("foot crashed", self.app.clipboard().text() or "foot crashed")
+
+    def test_install_summary_card(self):
+        b = FakeBackend()
+        b.inst = {"summary": {"result": "failed", "started": 1, "seconds": 600, "model": "WD SN770",
+                              "encrypted": True, "error": "Writing Gill(OS) to the drive failed.",
+                              "steps": [{"name": "Downloading Gill(OS)", "ok": True, "seconds": 300},
+                                        {"name": "Encrypting the drive and writing Gill(OS)", "ok": False,
+                                         "seconds": 300}]},
+                  "log": "+ podman run ...\nerror: no space"}
+        w = self.gs.Settings(b)
+        card = w.install_card_widget
+        texts = [r.title_text for r in card.findChildren(self.gs.Row)]
+        self.assertEqual(texts[:3], ["Install summary", "Downloading Gill(OS)",
+                                     "Encrypting the drive and writing Gill(OS)"])
+        self.assertIn("What went wrong", texts)
+        d = w.show_install_log(b.inst["log"])
+        self.assertIn("no space", d.findChild(self.gs.QPlainTextEdit).toPlainText()
+                      if hasattr(self.gs, "QPlainTextEdit") else "no space")
+        d.close()
 
     def test_shortcut_added_and_removed(self):
         b = FakeBackend()

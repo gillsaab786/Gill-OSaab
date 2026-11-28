@@ -1,0 +1,36 @@
+#!/bin/bash
+# Gill(OS) on a USB stick: the image is published small (fast to flash), so on its first start the
+# system partition grows to fill the stick. Does nothing on an installed PC (bootc already used the
+# whole drive there) or when there's under 1 GiB to gain.
+#   gosaab-grow-usb                              the running USB stick
+#   gosaab-grow-usb --disk D --part N --mount M  (tests) that disk, partition number and mounted btrfs
+set -u
+log() { echo "gosaab-grow-usb: $*"; }
+
+if [ "${1:-}" = "--disk" ]; then
+    disk=$2 part=$4 mnt=$6
+else
+    /usr/bin/gosaab-install --live || exit 0
+    src=$(findmnt -no SOURCE /sysroot 2>/dev/null || findmnt -no SOURCE /var)
+    src=${src%%[*}
+    disk=/dev/$(lsblk -no PKNAME "$src" | head -1)
+    part=$(cat "/sys/class/block/$(basename "$src")/partition")
+    mnt=/var  # /sysroot is read-only; /var is the same btrfs, mounted read-write
+fi
+dev=""
+for d in $(lsblk -lnpo NAME "$disk"); do
+    [ "$(cat "/sys/class/block/$(basename "$d")/partition" 2>/dev/null)" = "$part" ] && dev=$d
+done
+[ -n "$dev" ] || { log "partition $part of $disk not found"; exit 1; }
+sys=/sys/class/block/$(basename "$dev")
+end=$(( ($(cat "$sys/start") + $(cat "$sys/size")) * 512 ))
+total=$(blockdev --getsize64 "$disk")
+if [ $(( total - end )) -lt $(( 1024 * 1024 * 1024 )) ]; then
+    log "nothing to gain on $disk"; exit 0
+fi
+log "growing $dev to fill $disk ($(( total / 1000000000 )) GB)"
+sfdisk --relocate gpt-bak-std "$disk" || exit 1   # move the backup partition table to the real end
+echo ", +" | sfdisk --no-reread --no-tell-kernel --force -N "$part" "$disk" || exit 1
+partx -u --nr "$part" "$disk" || exit 1           # tell the kernel (the partition is in use)
+btrfs filesystem resize max "$mnt" || exit 1
+log "done: $(df -h --output=size "$mnt" | tail -1 | tr -d ' ')"

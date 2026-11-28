@@ -32,6 +32,7 @@ Live wallpapers 2 (original designs inspired by the Pixel 2018 set, no Google as
 Lake, Shore, Bubbles, Shapes. Sun position from location: gosaab-location (nmcli Wi-Fi -> BeaconDB,
 else weather city via Open-Meteo geocoding) -> ~/.cache/gill-osaab/location.json, every 3 h.
 Bug sweep (Nov 27): apps with no icon showed a blank tile; IconTile now draws a lettered accent squircle.
+Installer (Nov 28): progress ring with %, stages and time left (download = network bytes vs layer sizes, write = bytes written to the drive vs image size); log hidden behind "Show details"; sleep inhibited. Every command + output kept in /var/log/gill-osaab/install.log + install.json, carried to the installed system at first start; Settings > Problems > Install summary (and in the copied report; a failed install is a problem). Quiet boot kargs + kernel.printk 3 so kernel text never prints over the screen. USB image shrunk in CI to used + 2 GiB (tools/shrink-usb-image.sh), gosaab-grow-usb grows it to fill the stick on first start (tested in iso.yml on a loop image). Not yet seen on real hardware.
 SoundViz (audio-reactive) not done. Torrent Search Cloudflare on Linux: lib/desktop/linux_browser.dart
 (Brave --app window for Verify, headless --dump-dom with a cookie copy for searches).
 Torrent Search Engine (apps/torrent-search, copy of gillsaab786/torrent-search-engine-ipa at fe86afa):

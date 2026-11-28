@@ -119,6 +119,26 @@ class Problems(unittest.TestCase):
             self.assertNotIn(secret, out)
         self.assertIn("~/x", out)
 
+    def test_install_summary_in_problems_and_report(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.assertIsNone(diag.install_summary(d))
+            Path(d, "install.json").write_text(json.dumps(
+                {"result": "failed", "started": 1, "finished": 9, "seconds": 120, "error": "Writing failed.",
+                 "steps": [{"name": "Downloading Gill(OS)", "ok": True, "seconds": 60},
+                           {"name": "Writing Gill(OS) to the drive", "ok": False, "seconds": 60}]}))
+            Path(d, "install.log").write_text("+ podman pull x\nerror: disk full\n")
+            info = diag.install_summary(d)
+            probs = diag.install_problems(info)
+            self.assertEqual(probs[0]["kind"], "install-failed")
+            self.assertIn("Writing Gill(OS) to the drive", probs[0]["detail"])
+            lines = "\n".join(diag.install_lines(info))
+            self.assertIn("FAILED", lines)
+            self.assertIn("✗ Writing Gill(OS) to the drive", lines)
+            self.assertIn("error: disk full", lines)
+            info["summary"]["result"] = "ok"
+            self.assertEqual(diag.install_problems(info), [])
+            self.assertNotIn("disk full", "\n".join(diag.install_lines(info)))
+
     def test_journal_entries_and_noise(self):
         lines = "\n".join(json.dumps(e) for e in [
             {"MESSAGE": "ACPI BIOS Error (bug): Could not resolve symbol", "SYSLOG_IDENTIFIER": "kernel",
@@ -293,6 +313,28 @@ class Installer(unittest.TestCase):
          "rm": "0", "type": "disk"},
         {"name": "zram0", "path": "/dev/zram0", "size": 8 * 10 ** 9, "type": "disk"},
         {"name": "sdb", "path": "/dev/sdb", "size": 16 * 10 ** 9, "model": "Small", "rm": "1", "type": "disk"}]})
+
+    def test_dry_run_reports_progress_and_keeps_a_summary(self):
+        import contextlib
+        import io
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = self.inst.install("/dev/nvme0n1", True, {"name": "gill", "hash": "$y$x", "full_name": "g"},
+                                       dry=True, log_dir=d)
+            self.assertEqual(rc, 0)
+            pcts = [int(l.split()[1]) for l in buf.getvalue().splitlines() if l.startswith("@@progress ")]
+            self.assertEqual(pcts, sorted(pcts))
+            self.assertEqual(pcts[-1], 100)
+            summary = json.load(open(os.path.join(d, "install.json")))
+            self.assertEqual(summary["result"], "ok")
+            self.assertEqual([s["name"] for s in summary["steps"]][1:3],
+                             ["Downloading Gill(OS)", "Encrypting the drive and writing Gill(OS)"])
+            self.assertTrue(all(s["ok"] for s in summary["steps"]))
+            log = open(os.path.join(d, "install.log")).read()
+            self.assertIn("podman pull", log)
+            self.assertNotIn("$y$x", log)  # the password hash never goes in the log
 
     def test_never_offers_the_running_drive(self):
         disks = self.inst.candidate_disks(self.LSBLK, "/dev/sda")
