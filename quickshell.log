@@ -1,0 +1,18 @@
+[32m  INFO[0m: Launching config: "/src/shell/quickshell/shell.qml"
+[32m  INFO[0m: Shell ID: "1f22027d889f1524d29e16ed6857ade5" Path ID "1f22027d889f1524d29e16ed6857ade5"
+[32m  INFO[0m: Saving logs to "/tmp/gosaab-xdg/quickshell/by-id/s31c3n7pt/log.qslog"
+[33m  WARN[97m quickshell.bluetooth[0m: Could not connect to DBus. Bluetooth integration is not available.
+[33m  WARN[97m quickshell.io.socket[0m: Socket error for Socket(0x7ca747d0c940) QLocalSocket::ServerNotFoundError
+[31m ERROR[97m quickshell.service.pipewire.loop[0m: Failed to connect pipewire context. Errno: 112
+[33m  WARN[97m quickshell.service.upower[0m: Could not connect to DBus. UPower service will not work.
+[32m  INFO[0m: Configuration Loaded
+[33m  WARN[97m scene[0m: QML FileView at @ControlCenter.qml[94:5]: Read of /run/gill-osaab/power.json failed: File does not exist.
+[33m  WARN[97m scene[0m: QML FileView at @LockScreen.qml[19:5]: Read of /etc/gill-osaab/face.conf failed: File does not exist.
+[33m  WARN[97m scene[0m: QML FileView at @LockScreen.qml[30:5]: Read of /etc/gill-osaab/fingerprint.conf failed: File does not exist.
+[33m  WARN[97m scene[0m: QML FileView at @ControlCenter.qml[94:5]: Read of /run/gill-osaab/power.json failed: File does not exist.
+[33m  WARN[97m scene[0m: QML FileView at @ControlCenter.qml[94:5]: Read of /run/gill-osaab/power.json failed: File does not exist.
+[33m  WARN[97m scene[0m: QML FileView at @LiveWallpaper.qml[21:5]: Read of /root/.cache/gill-osaab/location.json failed: File does not exist.
+quickshell.service.pam.subprocess: Waiting for parent confirmation...
+quickshell.service.pam.subprocess: Starting pam session for user "root" with config "gill-osaab-lock" in dir "/etc/pam.d"
+quickshell.service.pam.subprocess: Relaying pam message: "Password: " echo: 0 error: 0 responseRequired: 1
+quickshell.service.pam.subprocess: Got response for request.quickshell.service.pam.subprocess: Failed to authenticate.
